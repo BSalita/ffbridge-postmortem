@@ -2,6 +2,7 @@
 streamlit
 streamlit-extras
 streamlit-chat
+stqdm
 openai
 pandas
 polars
