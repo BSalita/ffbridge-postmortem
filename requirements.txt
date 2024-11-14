@@ -1,0 +1,6 @@
+selenium
+beautifulsoup4
+webdriver_manager
+beautifulsoup4
+pandas
+pyppeteer
