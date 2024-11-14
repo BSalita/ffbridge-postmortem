@@ -32,9 +32,9 @@ from endplay.types import Deal, Contract, Denom, Player, Penalty, Vul
 from endplay.dds import par, calc_all_tables
 from endplay.dealer import generate_deals
 
-sys.path.append(str(pathlib.Path.cwd().parent.parent.joinpath('streamlitlib')))  # global
-sys.path.append(str(pathlib.Path.cwd().parent.parent.joinpath('mlBridgeLib')))  # global
-sys.path.append(str(pathlib.Path.cwd().parent.parent.joinpath('ffbridgelib')))  # global
+sys.path.append(str(pathlib.Path.cwd().joinpath('streamlitlib')))  # global
+sys.path.append(str(pathlib.Path.cwd().joinpath('mlBridgeLib')))  # global
+sys.path.append(str(pathlib.Path.cwd().joinpath('ffbridgelib')))  # global
 
 import ffbridgelib
 import streamlitlib
