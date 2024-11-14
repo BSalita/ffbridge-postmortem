@@ -3,12 +3,10 @@
 # Invoke from system prompt using: streamlit run ffbridge_streamlit.py
 
 # todo showstoppers:
-# implement reading of url->json->df
-# create github project
-# clone github to server
 # implment missing and wrong columns
 
 # todo lower priority:
+# do something with packages/version/authors stuff at top of page.
 # only allow pair games
 # make player_id string? what about others?
 # don't destroy container? append new dataframes to bottom.
@@ -224,6 +222,7 @@ def create_dataframe(data: List[Dict[str, Any]]) -> pl.DataFrame:
         print(f"First record: {json.dumps(data[0], indent=2) if data else 'Empty'}")
         raise
 
+# obsolete?
 def get_scores_data(scores_json, group_id, session_id, team_id):
     # get scores data
     print(f"creating dataframe from scores_json")
@@ -233,7 +232,7 @@ def get_scores_data(scores_json, group_id, session_id, team_id):
     if df is None:
         print(f"Couldn't make dataframe from scores_json for {team_id=} {session_id=}")
         return None
-    ShowDataFrameTable(df, key='create_dataframe_df')
+    #ShowDataFrameTable(df, key='create_dataframe_df')
     #if 'board_id' not in df.columns: # todo: find out why 'board_id' doesn't exist
     #    print(f"No board_id in scores_json for {team_id=} {session_id=}")
     #    return None
@@ -251,73 +250,61 @@ def get_team_and_scores_from_url():
     try:
 
         st.session_state.game_url = st.sidebar.text_input('Enter ffbridge results url',value='https://ffbridge.fr/competitions/results/groups/7878/sessions/107118/pairs/3976783',key='ffbridge_url')
-        print(f"st.session_state.game_url:{st.session_state.game_url}")
+        #print(f"st.session_state.game_url:{st.session_state.game_url}")
         st.sidebar.link_button('Open results page',url=st.session_state.game_url)
 
         parsed_url = urlparse(st.session_state.game_url)
-        print(f"parsed_url:{parsed_url}")
+        #print(f"parsed_url:{parsed_url}")
         path_parts = parsed_url.path.split('/')
-        print(f"path_parts:{path_parts}")
+        #print(f"path_parts:{path_parts}")
 
         # Find indices by keywords instead of fixed positions
         group_index = path_parts.index('groups') + 1
         session_index = path_parts.index('sessions') + 1
         pair_index = path_parts.index('pairs') + 1
-        print(f"group_index:{group_index} session_index:{session_index} pair_index:{pair_index}")
+        #print(f"group_index:{group_index} session_index:{session_index} pair_index:{pair_index}")
         
         extracted_group_id = int(path_parts[group_index])
         extracted_session_id = int(path_parts[session_index])
         extracted_pair_id = int(path_parts[pair_index])
-        print(f"extracted_group_id:{extracted_group_id} extracted_session_id:{extracted_session_id} extracted_pair_id:{extracted_pair_id}")
+        #print(f"extracted_group_id:{extracted_group_id} extracted_session_id:{extracted_session_id} extracted_pair_id:{extracted_pair_id}")
         
         # get team data
         api_team_url = f'https://api-lancelot.ffbridge.fr/results/teams/{extracted_pair_id}'
-        print(f"api_team_url:{api_team_url}")
+        #print(f"api_team_url:{api_team_url}")
         request = requests.get(api_team_url)
-        print(f"request:{request}")
+        #print(f"request:{request}")
         request.raise_for_status()
         team_json = request.json()
-        print(f"got team_json")
+        #print(f"got team_json")
         team_df = create_dataframe(team_json)
-        print(f"team_df")
-        ShowDataFrameTable(team_df, key='team_df')
-        print(f"showedteam_df")
+        #print(f"team_df")
+        #ShowDataFrameTable(team_df, key='team_df')
+        #print(f"showedteam_df")
         player1_id = team_json['player1']['id']
         player2_id = team_json['player2']['id']
         pair_direction = team_json['orientation']
         opponent_pair_direction = 'NS' if pair_direction == 'EW' else 'EW'
-        print(f"player1_id:{player1_id} player2_id:{player2_id} pair_direction:{pair_direction} opponent_pair_direction:{opponent_pair_direction}")
+        #print(f"player1_id:{player1_id} player2_id:{player2_id} pair_direction:{pair_direction} opponent_pair_direction:{opponent_pair_direction}")
 
         api_scores_url = f'https://api-lancelot.ffbridge.fr/results/teams/{extracted_pair_id}/session/{extracted_session_id}/scores'
-        print(f"api_scores_url:{api_scores_url}")
+        #print(f"api_scores_url:{api_scores_url}")
         request = requests.get(api_scores_url)
-        print(f"request:{request}")
+        #print(f"request:{request}")
         request.raise_for_status()
         scores_json = request.json() # todo: extract data and use instead of historical data.
-        print(f"got scores_json")
-
-        print(f"getting scores data")
+ 
         df = get_scores_data(scores_json, extracted_group_id, extracted_session_id, extracted_pair_id)
-        print(f"got scores data")
-        print(1)
         df = df.with_columns(pl.lit(extracted_group_id).cast(pl.UInt32).alias('group_id'))
-        print(2)
         df = df.with_columns(pl.lit(extracted_session_id).cast(pl.UInt32).alias('session_id'))
-        print(3)
         df = df.with_columns(pl.lit(extracted_pair_id).cast(pl.UInt32).alias('team_id'))
-        print(4)
         # from 'team', add useful columns. e.g. section, startTableNumber, orientation columns
         df = df.with_columns(pl.lit(team_df['section'].first()).cast(pl.String).alias('section'))
-        print(5)
         df = df.with_columns(pl.lit(team_df['startTableNumber'].first()).cast(pl.UInt16).alias('startTableNumber'))
-        print(6)
         df = df.with_columns(pl.lit(team_df['orientation'].first()).cast(pl.String).alias('orientation'))
-        print(7)
         df = df.with_columns(pl.struct([pl.col('team_id'),pl.col('session_id')]).alias('team_session_id'))
-        print(8)
         df = df.select([pl.col('group_id','team_session_id','session_id','team_id'),pl.all().exclude('group_id','team_session_id','session_id','team_id')])
-        print(9)
-        ShowDataFrameTable(df, key='team_and_session_df')
+        #ShowDataFrameTable(df, key='team_and_session_df')
 
         # Update the session state
         st.session_state.group_id = extracted_group_id
@@ -477,22 +464,29 @@ if __name__ == '__main__':
         st.session_state.opponent_pair_direction = st.session_state.opponent_pair_direction_default # 'NS'
         st.session_state.game_url = st.session_state.game_url_default
         st.session_state.game_date = st.session_state.game_date_default
-    
-    create_sidebar()
-    
+        st.session_state.use_historical_data = False # use historical data from file or get from url
 
-    if 'df' not in st.session_state:
+    if 'df' in st.session_state:
+        create_sidebar()
+    else:
         with st.spinner("Loading Game Data..."):
 
-            if True:
+            if st.session_state.use_historical_data:
+                st.session_state.df = load_historical_data()
+            else:
                 df = get_team_and_scores_from_url()
+                create_sidebar() # update sidebar using url's data
+
+        with st.spinner('Looking deeply into game data...'):
+
+            if not st.session_state.use_historical_data: # historical data is aleady fully augmented
                 df = ffbridgelib.convert_ffdf_to_mldf(df)
                 df = mlBridgeAugmentLib.perform_hand_augmentations(df,{},sd_productions=st.session_state.single_dummy_sample_count)
                 df = mlBridgeAugmentLib.PerformMatchPointAndPercentAugmentations(df)
                 df = mlBridgeAugmentLib.PerformResultAugmentations(df,{})
                 df = mlBridgeAugmentLib.Perform_DD_SD_Augmentations(df)
-            else:
-                st.session_state.df = load_historical_data()
+
+            # personalize to player, partner, opponents, etc.
             st.session_state.df = filter_dataframe(df, st.session_state.group_id, st.session_state.session_id, st.session_state.player_id, st.session_state.partner_id)
 
             st.session_state.favoritesPath.mkdir(parents=True, exist_ok=True)
@@ -517,20 +511,20 @@ if __name__ == '__main__':
 
             st.session_state.vetted_prompts = load_vetted_prompts()
 
-        with st.container(border=True):
-            st.markdown('### Your Personalized Report')
-            st.text(f'Game Date:? Session:{st.session_state.session_id} Player:{st.session_state.player_id} Partner:{st.session_state.partner_id}')
-            show_dfs(st.session_state.vetted_prompts, pdf_assets)
+            with st.container(border=True):
+                st.markdown('### Your Personalized Report')
+                st.text(f'Game Date:? Session:{st.session_state.session_id} Player:{st.session_state.player_id} Partner:{st.session_state.partner_id}')
+                show_dfs(st.session_state.vetted_prompts, pdf_assets)
 
-            # As a text link
-            #st.markdown('[Back to Top](#your-personalized-report)')
+                # As a text link
+                #st.markdown('[Back to Top](#your-personalized-report)')
 
-            # As an html button (needs styling added)
-            st.markdown(''' <a target="_self" href="#your-personalized-report">
-                                <button>
-                                    Go to top of report
-                                </button>
-                            </a>''', unsafe_allow_html=True)
+                # As an html button (needs styling added)
+                st.markdown(''' <a target="_self" href="#your-personalized-report">
+                                    <button>
+                                        Go to top of report
+                                    </button>
+                                </a>''', unsafe_allow_html=True)
 
             if st.sidebar.download_button(label="Download Personalized Report",
                     data=streamlitlib.create_pdf(pdf_assets, title=f"Bridge Game Postmortem Report Personalized for {st.session_state.player_id}"),
