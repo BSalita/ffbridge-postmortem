@@ -1,6 +1,49 @@
-selenium
-beautifulsoup4
-webdriver_manager
-beautifulsoup4
+# for app.py
+streamlit
+streamlit-extras
+streamlit-chat
+openai
 pandas
-pyppeteer
+polars
+duckdb
+requests
+urllib3
+python-dotenv
+tenacity
+termcolor
+streamlit-chat
+bs4
+endplay
+pyparse
+#pyparse>=3.0.0
+sqlalchemy
+sqlalchemy_utils
+safetensors
+scikit-learn
+fastai
+torch
+torchvision
+torchaudio
+
+# for streamlitlib
+reportlab
+markdown
+aiohttp
+
+
+# for mlBridgeLib
+numpy
+pathlib
+scikit-learn
+matplotlib
+IPython
+streamlit-aggrid
+seaborn
+
+# for acbllib
+
+# for chatlib
+
+# for pytorch lightning
+
+
