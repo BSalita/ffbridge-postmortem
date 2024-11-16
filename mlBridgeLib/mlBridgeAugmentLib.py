@@ -1,3 +1,6 @@
+# todo:
+# rename Pct_NS to MP_Pct_NS?
+# is MP_Top always same for both NS and EW?
 
 import polars as pl
 from collections import defaultdict
@@ -705,22 +708,37 @@ def perform_hand_augmentations(df,hrs_d,sd_productions=40,progress=None):
         )
         print(f"convert_score_to_score: time:{time.time()-t} seconds")
 
+    # todo: not right. some overlap with code in ffbridgelib.convert_ffdf_to_mldf()
+    t = time.time()
+    if 'MP_Top' not in df.columns:
+        # calculate top score (number of board scores - 1)
+        df = df.with_columns(
+            pl.col('Score').count().over(['session_id', 'Board']).sub(1).alias('MP_Top'),
+        )
+        print(f"create MP_Top: time:{time.time()-t} seconds")
+
+    # todo: not right. some overlap with code in ffbridgelib.convert_ffdf_to_mldf()
     t = time.time()
     if 'MP_NS' not in df.columns:
         # Calculate matchpoints
         df = df.with_columns([
             # calculate top score which is number of scores in each group - 1
-            (pl.col('Score').count().over(['session_id', 'Board'])-1).alias('MP_Top'),
             # calculate matchpoints using rank() and average method
+            # assumes 'Score' column contains all scores for the session. if not, _to_mldf() needs to be updated.
             pl.col('Score').rank(method='average', descending=False).sub(1).over(['session_id', 'Board']).alias('MP_NS'),
             pl.col('Score').rank(method='average', descending=True).sub(1).over(['session_id', 'Board']).alias('MP_EW'),
         ])
+        print(f"calculate matchpoints: time:{time.time()-t} seconds")
+
+    # todo: not right. some overlap with code in ffbridgelib.convert_ffdf_to_mldf()
+    t = time.time()
+    if 'Pct_NS' not in df.columns:
         # Calculate percentages using (n-1) as the top
         df = df.with_columns([
             (pl.col('MP_NS') / pl.col('MP_Top')).alias('Pct_NS'),
             (pl.col('MP_EW') / pl.col('MP_Top')).alias('Pct_EW')
         ])
-        print(f"calculate matchpoints and their percentages: time:{time.time()-t} seconds")
+        print(f"calculate matchpoints percentages: time:{time.time()-t} seconds")
     
     t = time.time()
     df = df.with_columns([

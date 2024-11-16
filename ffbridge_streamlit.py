@@ -7,13 +7,15 @@
 
 # todo lower priority:
 # do something with packages/version/authors stuff at top of page.
-# only allow pair games
+# reject non-pair games
 # make player_id string? what about others?
 # don't destroy container? append new dataframes to bottom.
 
 
 import streamlit as st
 import streamlit_chat
+from streamlit_extras.bottom_container import bottom
+
 
 import pathlib
 import pandas as pd # only used for __version__ for now. might need for plotting later as pandas plotting support is better than polars.
@@ -24,11 +26,11 @@ import json
 from datetime import datetime, timezone
 import sys
 
+from urllib.parse import urlparse
+from typing import Dict, Any, List
+from stqdm import stqdm
+
 import endplay # for __version__
-from endplay.parsers import pbn, lin, json
-from endplay.types import Deal, Contract, Denom, Player, Penalty, Vul
-from endplay.dds import par, calc_all_tables
-from endplay.dealer import generate_deals
 
 sys.path.append(str(pathlib.Path.cwd().joinpath('streamlitlib')))  # global
 sys.path.append(str(pathlib.Path.cwd().joinpath('mlBridgeLib')))  # global
@@ -47,10 +49,10 @@ def ShowDataFrameTable(df, key, query='SELECT * FROM self', show_sql_query=True)
     
     try:
         # First try using Polars SQL. However, Polars doesn't support some SQL functions: string_agg(), agg_value(), some joins are not supported.
-        if False: # workaround issued by polars. CASE WHEN AVG() ELSE AVG() -> AVG(CASE WHEN ...)
+        if True: # workaround issued by polars. CASE WHEN AVG() ELSE AVG() -> AVG(CASE WHEN ...)
             result_df = st.session_state.con.execute(query).pl()
         else:
-            result_df = df.sql(query.replace('FROM results','FROM self'))
+            result_df = df.sql(query) # todo: enforce FROM self for security concerns?
     except Exception as e:
         try:
             # If Polars fails, try DuckDB
@@ -61,6 +63,8 @@ def ShowDataFrameTable(df, key, query='SELECT * FROM self', show_sql_query=True)
             return None
     
     try:
+        if show_sql_query and st.session_state.show_sql_query:
+            st.text(f"Result is a dataframe of {len(result_df)} rows.")
         streamlitlib.ShowDataFrameTable(result_df, key) # requires pandas dataframe.
     except Exception as e:
         st.error(f"ShowDataFrameTable: error:{e} query:{query}")
@@ -177,14 +181,12 @@ def filter_dataframe(df, group_id, session_id, player_id, partner_id):
     return df
 
 
-from typing import Dict, Any, List
-
 def flatten_json(nested_json: Dict) -> Dict:
     """Flatten nested JSON structure into a single level dictionary"""
     flat_dict = {}
     
     def flatten(x: Any, name: str = '') -> None:
-        print(f"flattening {name}")
+        #print(f"flattening {name}")
         if isinstance(x, dict):
             for key, value in x.items():
                 flatten(value, f"{name}_{key}" if name else key)
@@ -203,10 +205,10 @@ def create_dataframe(data: List[Dict[str, Any]]) -> pl.DataFrame:
     try:
         # Flatten each record in the dict or list
         if isinstance(data, dict):
-            print(f"flattening dict")
+            #print(f"flattening dict")
             flattened_data = [flatten_json(data)]
         elif isinstance(data, list):
-            print(f"flattening list")
+            #print(f"flattening list")
             flattened_data = [flatten_json(record) for record in data]
         else:
             print(f"Unsupported data type: {type(data)}")
@@ -239,7 +241,6 @@ def get_scores_data(scores_json, group_id, session_id, team_id):
     # add group_id, session_id, team_id to df. Put them in first columns.
     return df
 
-from urllib.parse import urlparse
 
 def get_team_and_scores_from_url():
 
@@ -295,6 +296,9 @@ def get_team_and_scores_from_url():
         scores_json = request.json() # todo: extract data and use instead of historical data.
  
         df = get_scores_data(scores_json, extracted_group_id, extracted_session_id, extracted_pair_id)
+
+        # initialize columns which are needed for SQL queries.
+        # todo: should these be initialized in ffbridgelib.convert_ffdf_to_mldf()?
         df = df.with_columns(pl.lit(extracted_group_id).cast(pl.UInt32).alias('group_id'))
         df = df.with_columns(pl.lit(extracted_session_id).cast(pl.UInt32).alias('session_id'))
         df = df.with_columns(pl.lit(extracted_pair_id).cast(pl.UInt32).alias('team_id'))
@@ -389,7 +393,6 @@ def prompt_keyword_replacements(sql_query):
     return sql_query
 
 
-from stqdm import stqdm
 def show_dfs(vetted_prompts, pdf_assets):
     sql_query_count = 0
 
@@ -466,20 +469,23 @@ if __name__ == '__main__':
         st.session_state.game_date = st.session_state.game_date_default
         st.session_state.use_historical_data = False # use historical data from file or get from url
 
+        # Create connection
+        st.session_state.con = duckdb.connect()
+
     if 'df' in st.session_state:
         create_sidebar()
     else:
         with st.spinner("Loading Game Data..."):
 
             if st.session_state.use_historical_data:
-                st.session_state.df = load_historical_data()
+                df = load_historical_data()
             else:
                 df = get_team_and_scores_from_url()
-                create_sidebar() # update sidebar using url's data
+                create_sidebar() # update sidebar using url's parsed parameters
 
         with st.spinner('Looking deeply into game data...'):
 
-            if not st.session_state.use_historical_data: # historical data is aleady fully augmented
+            if not st.session_state.use_historical_data: # historical data is already fully augmented so skip past augmentations
                 df = ffbridgelib.convert_ffdf_to_mldf(df)
                 df = mlBridgeAugmentLib.perform_hand_augmentations(df,{},sd_productions=st.session_state.single_dummy_sample_count)
                 df = mlBridgeAugmentLib.PerformMatchPointAndPercentAugmentations(df)
@@ -489,6 +495,11 @@ if __name__ == '__main__':
             # personalize to player, partner, opponents, etc.
             st.session_state.df = filter_dataframe(df, st.session_state.group_id, st.session_state.session_id, st.session_state.player_id, st.session_state.partner_id)
 
+            # Register DataFrame as 'results' view
+            st.session_state.con.register('self', st.session_state.df)
+
+            # ShowDataFrameTable(df, key='everything_df', query='SELECT Board, Pct_NS, Pct_EW, MP_NS, MP_EW FROM self')
+
             st.session_state.favoritesPath.mkdir(parents=True, exist_ok=True)
             st.session_state.default_favorites_file = st.session_state.ffbridgePath.joinpath(
                 'default.favorites.json')
@@ -497,12 +508,6 @@ if __name__ == '__main__':
             st.session_state.debug_favorites_file = st.session_state.favoritesPath.joinpath(
                 'debug.favorites.json')
             read_favorites()
-
-            # Create connection
-            st.session_state.con = duckdb.connect()
-
-            # Register DataFrame as 'results' view
-            st.session_state.con.register('results', st.session_state.df)
 
             pdf_assets = []
             pdf_assets.append(f"# Bridge Game Postmortem Report Personalized for {st.session_state.player_id}")
@@ -532,8 +537,8 @@ if __name__ == '__main__':
                     mime='application/octet-stream'):
                 st.warning('Personalized report downloaded.')
 
-    from streamlit_extras.bottom_container import bottom
-    with st.container():    
-        with bottom():
-            st.chat_input('Enter a SQL query e.g. SELECT PBN, Contract, Result, N, S, E, W FROM df', key='main_prompt_chat_input', on_submit=chat_input_on_submit)
+    if st.session_state.show_sql_query:
+        with st.container():
+            with bottom():
+                st.chat_input('Enter a SQL query e.g. SELECT PBN, Contract, Result, N, S, E, W FROM df', key='main_prompt_chat_input', on_submit=chat_input_on_submit)
 

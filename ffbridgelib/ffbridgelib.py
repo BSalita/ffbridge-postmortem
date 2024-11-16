@@ -29,6 +29,7 @@ def PbnToN(bd):
 
 def convert_ffdf_to_mldf(ffdf):
 
+    # assignments are broken into parts for polars compatibility (could be parallelized).
     df = ffdf.select([
         pl.col('group_id'),
         pl.col('board_id'),
@@ -36,7 +37,14 @@ def convert_ffdf_to_mldf(ffdf):
         pl.col('team_id'),
         pl.col('session_id'),
         pl.col('boardNumber').alias('Board'),
-        pl.col('board_frequencies'),
+        #pl.col('board_frequencies'),
+        # flatten the board_frequencies column into multiple columns
+        # todo: need to generalize this to work for any json column with a list of structs. either do it here or in previous step.
+        pl.col('board_frequencies').list.eval(pl.element().struct.field('nsScore')).alias('Scores_List_NS'),
+        pl.col('board_frequencies').list.eval(pl.element().struct.field('nsNote')).alias('Pcts_List_NS'),
+        pl.col('board_frequencies').list.eval(pl.element().struct.field('ewScore')).alias('Scores_List_EW'),
+        pl.col('board_frequencies').list.eval(pl.element().struct.field('ewNote')).alias('Pcts_List_EW'),
+        pl.col('board_frequencies').list.eval(pl.element().struct.field('count')).alias('Score_Freq_List'),
         # todo: have not solved the issue of which direction is dealer using ffbridge. I'm missing something but don't know what.
         # derive dealer from boardNumber which works for standard bridge boards but isn't guaranteed to work for all boards and events.
         pl.col('boardNumber')
@@ -68,6 +76,8 @@ def convert_ffdf_to_mldf(ffdf):
             .otherwise(pl.lit('0'))  # Replace '=' with '0'
             .cast(pl.Int16)
             .alias('Result'),
+        # not liking that only one of the two columns has a value. I prefer to have both with opposite signs.
+        # although this may be an issue for director adjustments.
         pl.when(pl.col('nsScore').str.contains(r'^\d'))
             .then(pl.col('nsScore'))
             .when(pl.col('ewScore').str.contains(r'^\d'))
@@ -75,11 +85,8 @@ def convert_ffdf_to_mldf(ffdf):
             .otherwise(pl.lit('0'))
             .cast(pl.Int16)
             .alias('Score'),
-        # not liking that only one of the two columns has a value. I prefer to have both with opposite signs.
-        #pl.col('nsScore').cast(pl.Int16).alias('Score_NS'),
-        #pl.col('ewScore').cast(pl.Int16).neg().alias('Score_EW'),
-        pl.col('nsNote'),
-        pl.col('ewNote'),
+        (pl.col('nsNote')/100.0).alias('Pct_NS'),
+        (pl.col('ewNote')/100.0).alias('Pct_EW'),
         (pl.col('lineup_northPlayer_firstName')+pl.lit(' ')+pl.col('lineup_northPlayer_lastName')).alias('Player_Name_N'),
         (pl.col('lineup_eastPlayer_firstName')+pl.lit(' ')+pl.col('lineup_eastPlayer_lastName')).alias('Player_Name_E'),
         (pl.col('lineup_southPlayer_firstName')+pl.lit(' ')+pl.col('lineup_southPlayer_lastName')).alias('Player_Name_S'),
@@ -92,5 +99,13 @@ def convert_ffdf_to_mldf(ffdf):
         pl.col('startTableNumber').alias('Table'),
         pl.col('orientation').alias('Pair_Direction'),
     ])
+
+    df = df.with_columns(
+        pl.col('Score_Freq_List').list.sum().sub(1).alias('MP_Top'),
+    )
+    df = df.with_columns(
+        (pl.col('Pct_NS')*pl.col('MP_Top')).round(2).alias('MP_NS'),
+        (pl.col('Pct_EW')*pl.col('MP_Top')).round(2).alias('MP_EW'),
+    )
 
     return df
