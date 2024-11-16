@@ -95,13 +95,25 @@ def convert_ffdf_to_mldf(ffdf):
         pl.col('lineup_eastPlayer_id').alias('Player_ID_E'),
         pl.col('lineup_southPlayer_id').alias('Player_ID_S'),
         pl.col('lineup_westPlayer_id').alias('Player_ID_W'),
-        pl.col('section').alias('Section'),
-        pl.col('startTableNumber').alias('Table'),
-        pl.col('orientation').alias('Pair_Direction'),
+        pl.col('lineup_segment_game_homeTeam_section').alias('section_id_home'),
+        pl.col('lineup_segment_game_homeTeam_orientation').alias('Pair_Direction_Home'),
+        pl.col('lineup_segment_game_homeTeam_startTableNumber').alias('Pair_Number_Home'),
+        pl.col('lineup_segment_game_awayTeam_section').alias('section_id_away'),
+        pl.col('lineup_segment_game_awayTeam_orientation').alias('Pair_Direction_Away'),
+        pl.col('lineup_segment_game_awayTeam_startTableNumber').alias('Pair_Number_Away'),
     ])
-
+    assert all(df['section_id_home'] == df['section_id_away'])
+    assert all(df['Pair_Direction_Home'].is_in(['NS',''])), df['Pair_Direction_Home'].value_counts() # '' is sitout
+    assert all(df['Pair_Direction_Away'].is_in(['EW',''])), df['Pair_Direction_Away'].value_counts() # '' is sitout
     df = df.with_columns(
+        pl.col('section_id_home').alias('section_name'),
         pl.col('Score_Freq_List').list.sum().sub(1).alias('MP_Top'),
+        pl.col('Pair_Direction_Home').alias('Pair_Direction_NS'),
+        pl.col('Pair_Direction_Away').alias('Pair_Direction_EW'),
+        pl.col('Pair_Number_Home').alias('Pair_Number_NS'),
+        pl.col('Pair_Number_Away').alias('Pair_Number_EW'),
+        pl.col('section_id_home')+pl.lit('_')+pl.col('Pair_Direction_Home')+pl.col('Pair_Number_Home').cast(pl.Utf8).alias('Pair_ID_NS'),
+        pl.col('section_id_away')+pl.lit('_')+pl.col('Pair_Direction_Away')+pl.col('Pair_Number_Away').cast(pl.Utf8).alias('Pair_ID_EW'),
     )
     df = df.with_columns(
         (pl.col('Pct_NS')*pl.col('MP_Top')).round(2).alias('MP_NS'),

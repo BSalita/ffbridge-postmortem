@@ -1038,7 +1038,17 @@ def PerformResultAugmentations(df,hrs_d):
             for suit in "SHDC"
         ]
         df = df.with_columns(dp_columns)
-        print(f"Time to create DP_[NESW]_[SHDC]: {time.time()-t} seconds")
+        df = df.with_columns(
+            (pl.col('DP_N_S')+pl.col('DP_N_H')+pl.col('DP_N_D')+pl.col('DP_N_C')).alias('DP_N'),
+            (pl.col('DP_S_S')+pl.col('DP_S_H')+pl.col('DP_S_D')+pl.col('DP_S_C')).alias('DP_S'),
+            (pl.col('DP_E_S')+pl.col('DP_E_H')+pl.col('DP_E_D')+pl.col('DP_E_C')).alias('DP_E'),
+            (pl.col('DP_W_S')+pl.col('DP_W_H')+pl.col('DP_W_D')+pl.col('DP_W_C')).alias('DP_W'),
+        )
+        df = df.with_columns(
+            (pl.col('DP_N')+pl.col('DP_S')).alias('DP_NS'),
+            (pl.col('DP_E')+pl.col('DP_W')).alias('DP_EW'),
+        )
+        print(f"Time to create DP_[NESW]_[SHDC] DP_[NESW] DP_(NS|EW): {time.time()-t} seconds")
 
     if 'SL_Max_NS' in df.columns:
         print('SL_Max_NS already exists. skipping...')
@@ -1211,11 +1221,21 @@ def AugmentACBLHandRecords(df,hrs_d):
 
 
 def Perform_DD_SD_Augmentations(df):
-    # todo: temporary(?) aliases until SQL and other df columns are updated.
+    # todo: temporary(?) aliases until SQL and other df columns are renamed.
     # todo: need to deal with {Vul} replacement by creating row version by selecting NV, V version.
     df = df.with_columns(
+        #pl.col('Section').alias('section_name'), # will this be needed for acbl?
+        pl.col('N').alias('Player_Name_N'),
+        pl.col('S').alias('Player_Name_S'),
+        pl.col('E').alias('Player_Name_E'),
+        pl.col('W').alias('Player_Name_W'),
+        pl.col('Declarer_Name').alias('Name_Declarer'),
+        pl.col('Declarer_ID').alias('Number_Declarer'), #  todo: implement 'Declarer_Id'
+        pl.when(pl.col('Declarer_Direction').is_in(pl.lit('NS'))).then(pl.lit('NS')).otherwise(pl.lit('EW')).alias('Pair_Declarer_Direction'),
         pl.col('DDScore_Pct_NS').alias('DDPct_NS'),
         pl.col('DDScore_Pct_EW').alias('DDPct_EW'),
+        pl.col('MP_NS').alias('Matchpoints_NS'),
+        pl.col('MP_EW').alias('Matchpoints_EW'),
         #pl.col('MP_EV_NS_Max').alias('MP_EV_NS_Max'), # same
         #pl.col('MP_EV_EW_Max').alias('MP_EV_EW_Max'), # same
         # SDScore_Max_NS
@@ -1258,47 +1278,14 @@ def Perform_DD_SD_Augmentations(df):
         pl.col(f'Probs_NS_N_S_11').alias(f'SDProbs_Taking_11'),
         pl.col(f'Probs_NS_N_S_12').alias(f'SDProbs_Taking_12'),
         pl.col(f'Probs_NS_N_S_13').alias(f'SDProbs_Taking_13'),
-        (pl.col('DP_N_S')+pl.col('DP_N_H')+pl.col('DP_N_D')+pl.col('DP_N_C')).alias('DP_N'),
-        (pl.col('DP_S_S')+pl.col('DP_S_H')+pl.col('DP_S_D')+pl.col('DP_S_C')).alias('DP_S'),
-        (pl.col('DP_E_S')+pl.col('DP_E_H')+pl.col('DP_E_D')+pl.col('DP_E_C')).alias('DP_E'),
-        (pl.col('DP_W_S')+pl.col('DP_W_H')+pl.col('DP_W_D')+pl.col('DP_W_C')).alias('DP_W'),
-    )
-    df = df.with_columns(
-        (pl.col('DP_N')+pl.col('DP_S')).alias('DP_NS'),
-        (pl.col('DP_E')+pl.col('DP_W')).alias('DP_EW'),
     )
 
     # unimplemented columns. fake for now.
     df = df.with_columns(
-        pl.col('Section').alias('section_name'),
-        #pl.col('Table').alias('Table'),
-        pl.lit(0).alias('Pair_Number_NS'),
-        pl.lit(0).alias('Pair_Number_EW'), # need Pair_Number_EW
-        pl.col('N').alias('Player_Name_N'),
-        pl.col('S').alias('Player_Name_S'),
-        pl.col('E').alias('Player_Name_E'),
-        pl.col('W').alias('Player_Name_W'),
         pl.lit('Game').alias('ContractType'), # todo: implement Declarer_ContractType
-        pl.col('MP_NS').alias('Matchpoints_NS'),
-        pl.col('MP_EW').alias('Matchpoints_EW'),
-        pl.col('Declarer_Name').alias('Name_Declarer'),
-        pl.col('Declarer_ID').alias('Number_Declarer'), #  todo: implement 'Declarer_Id'
-        pl.when(pl.col('Declarer_Direction').is_in(pl.lit('NS'))).then(pl.lit('NS')).otherwise(pl.lit('EW')).alias('Pair_Declarer_Direction'),
         pl.lit(123).alias('Score_Declarer'), # todo: implement 'Declarer_Score'
         pl.lit(321).alias('ParScore_Declarer'), # todo: implement 'Declarer_ParScore'
         pl.lit(456).alias('Computed_Score_Declarer'), # todo: explicit calculation for validation of score
-
-        # columns that are faked until player_id, partner_id, pair_direction, etc are implemented
-        pl.lit(True).alias('Boards_I_Played'), #.is_in(pl.col('^Player_Number_[NESW]$').rows()).alias('Boards_I_Played'), # Boards_I_Played and Boards_We_Played are the same
-        pl.lit(True).alias('Boards_We_Played'), #.is_in(pl.col('^Player_Number_[NESW]$').rows()).alias('Boards_We_Played'), # Boards_I_Played and Boards_We_Played are the same
-        pl.lit(True).alias('Our_Boards'), #.is_in(pl.col('^Player_Number_[NESW]$').rows()).alias('Our_Boards'), # Boards_I_Played and Boards_We_Played are the same
-        pl.lit(True).alias('Boards_I_Declared'), #.eq(pl.col('Declarer_Id')).alias('Boards_I_Declared'),
-        pl.lit(True).alias('Boards_Partner_Declared'), #.eq(pl.col('Declarer_Id')).alias('Boards_Partner_Declared'),
-        pl.lit(True).alias('Boards_We_Declared'), #.eq(pl.col('Declarer_Id'))|pl.lit(7654321).eq(pl.col('Declarer_Id')).alias('Boards_We_Declared'),
-        pl.lit(True).alias('Boards_Opponent_Declared'), #.ne(pl.col('Declarer_Id'))&pl.lit(7654321).ne(pl.col('Declarer_Id')).alias('Boards_Opponents_Declared'),
-        pl.lit('NS').alias('Pair_Direction'),
-        pl.lit('EW').alias('Opponent_Pair_Direction'),
-        pl.lit(0).alias('Opponent_Pair_Number'), # need Pair_Number_EW
 
         # following are faked until predictions are implemented
         pl.col('Pct_NS').alias('Pct_NS_Actual'),
@@ -1328,6 +1315,7 @@ def Perform_DD_SD_Augmentations(df):
 # todo: comparison_cols only works for one column at a time.
 # todo: there's got to be a simplier algorithm. So far other AI solutions are either too slow or too complex. This is middle ground.
 
+# todo: can't calculate_matchpoints() be deleted if we just pass a list of scores (requires exploding list of scores/frequencies)?
 def calculate_matchpoints(df: pl.DataFrame, score_col: str, comparison_cols: list[str]) -> pl.DataFrame:
     """
     This function is used to answer the question "How many matchpoints would DD, Par, EV receive if they had been scored?"

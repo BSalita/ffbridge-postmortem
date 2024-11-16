@@ -3,13 +3,18 @@
 # Invoke from system prompt using: streamlit run ffbridge_streamlit.py
 
 # todo showstoppers:
-# implment missing and wrong columns
+# implment missing and wrong columns. mostly in mlBridgeAugmentLib.Perform_DD_SD_Augmentations
+# implement game date
 
 # todo lower priority:
 # do something with packages/version/authors stuff at top of page.
 # reject non-pair games
 # make player_id string? what about others?
 # don't destroy container? append new dataframes to bottom.
+
+# todo ffbridge:
+# given a player_id, how to get recent games?
+# unblock my ip address
 
 
 import streamlit as st
@@ -32,6 +37,7 @@ from stqdm import stqdm
 
 import endplay # for __version__
 
+# assumes symlinks are created in current directory.
 sys.path.append(str(pathlib.Path.cwd().joinpath('streamlitlib')))  # global
 sys.path.append(str(pathlib.Path.cwd().joinpath('mlBridgeLib')))  # global
 sys.path.append(str(pathlib.Path.cwd().joinpath('ffbridgelib')))  # global
@@ -160,6 +166,7 @@ def filter_dataframe(df, group_id, session_id, player_id, partner_id):
         pair_direction = 'EW'
         opponent_pair_direction = 'NS'
 
+    # Columns used for filtering to a specific player_id and partner_id. Needs multiple with_columns() to unnest overlapping columns.
     df = df.with_columns(
         pl.col(f'Player_ID_{player_direction}').eq(pl.lit(player_id)).alias('Boards_I_Played'),
         pl.col('Declarer_ID').eq(pl.lit(player_id)).alias('Boards_I_Declared'),
@@ -169,7 +176,9 @@ def filter_dataframe(df, group_id, session_id, player_id, partner_id):
         pl.col('Boards_I_Played').alias('Boards_We_Played'),
         pl.col('Boards_I_Played').alias('Our_Boards'),
         (pl.col('Boards_I_Declared') | pl.col('Boards_Partner_Declared')).alias('Boards_We_Declared'),
-        (pl.col('Boards_We_Played') & ~pl.col('Boards_We_Declared') & pl.col('Contract').ne('PASS')).alias('Boards_Opponent_Declared'),
+    )
+    df = df.with_columns(
+        (pl.col('Boards_I_Played') & ~pl.col('Boards_We_Declared') & pl.col('Contract').ne('PASS')).alias('Boards_Opponent_Declared'),
     )
 
     # Store in session state
@@ -226,19 +235,20 @@ def create_dataframe(data: List[Dict[str, Any]]) -> pl.DataFrame:
 
 # obsolete?
 def get_scores_data(scores_json, group_id, session_id, team_id):
-    # get scores data
     print(f"creating dataframe from scores_json")
-    #error
     df = create_dataframe(scores_json)
-    # df = pl.DataFrame(scores_json)
     if df is None:
         print(f"Couldn't make dataframe from scores_json for {team_id=} {session_id=}")
         return None
-    #ShowDataFrameTable(df, key='create_dataframe_df')
-    #if 'board_id' not in df.columns: # todo: find out why 'board_id' doesn't exist
-    #    print(f"No board_id in scores_json for {team_id=} {session_id=}")
-    #    return None
-    # add group_id, session_id, team_id to df. Put them in first columns.
+    if 'board_id' not in df.columns: # todo: find out why 'board_id' doesn't exist
+        print(f"No board_id for team_session_scores: {team_id} {session_id}")
+        return None
+    if df['lineup_segment_game_homeTeam_orientation'].ne('NS').any():
+        print(f"Not a Mitchell movement. homeTeam_orientations are not all NS. Skipping: {team_id} {session_id}")
+        return None
+    if df['lineup_segment_game_awayTeam_orientation'].ne('EW').any():
+        print(f"Not a Mitchell movement. awayTeam_orientations are not all EW. Skipping: {team_id} {session_id}")
+        return None
     return df
 
 
@@ -382,9 +392,10 @@ def load_vetted_prompts():
     return vetted_prompts
 
 
-def prompt_keyword_replacements(sql_query):
+def process_prompt_macros(sql_query):
     replacements = {
         '{Player_Direction}': st.session_state.player_direction,
+        '{Partner_Direction}': st.session_state.partner_direction,
         '{Pair_Direction}': st.session_state.pair_direction,
         '{Opponent_Pair_Direction}': st.session_state.opponent_pair_direction
     }
@@ -396,7 +407,8 @@ def prompt_keyword_replacements(sql_query):
 def show_dfs(vetted_prompts, pdf_assets):
     sql_query_count = 0
 
-    for category in stqdm(list(vetted_prompts), desc='Morty is analyzing your game...'): #[:-3]:
+    # bar_format='{l_bar}{bar}' isn't working in stqdm. no way to suppress r_bar without editing stqdm source code.
+    for category in stqdm(list(vetted_prompts), desc='Morty is analyzing your game...', bar_format='{l_bar}{bar}'): #[:-3]:
         #print('category:',category)
         if "prompts" in category:
             for i,prompt in enumerate(category["prompts"]):
@@ -407,7 +419,7 @@ def show_dfs(vetted_prompts, pdf_assets):
                         pdf_assets.append(f"## {category['help']}")
                     #print('sql:',prompt["sql"])
                     prompt_sql = prompt['sql']
-                    sql_query = prompt_keyword_replacements(prompt_sql)
+                    sql_query = process_prompt_macros(prompt_sql)
                     query_df = ShowDataFrameTable(st.session_state.df, query=sql_query, key=f'sql_query_{sql_query_count}')
                     if query_df is not None:
                         pdf_assets.append(query_df)
@@ -439,7 +451,8 @@ if __name__ == '__main__':
 
         app_info()
         streamlit_chat.message(f"Morty: Hi. I'm Morty, your bridge game postmortem expert.", key=f'morty_hi', logo=st.session_state.assistant_logo)
-        streamlit_chat.message(f"Morty: Takes me a full minute to download and analyze your game. Please wait until report is fully rendered.", key=f'morty_minute', logo=st.session_state.assistant_logo)
+        streamlit_chat.message(f"Morty: I'm preparing a postmortem report on your game. I only understand pair games using a Mitchell movement.", key=f'morty_restrictions', logo=st.session_state.assistant_logo)
+        streamlit_chat.message(f"Morty: Takes me a full minute to download and analyze your game. Please wait until report is fully rendered.", key=f'morty_in_a_minute', logo=st.session_state.assistant_logo)
 
         single_dummy_sample_count_default = 2  # number of random deals to generate for calculating single dummy probabilities. Use smaller number for testing.
         st.session_state.single_dummy_sample_count = single_dummy_sample_count_default
