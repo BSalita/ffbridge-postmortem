@@ -69,6 +69,7 @@ def OHE_Hands(hands_bin):
             #    handsbind['_'.join(['HCP',direction,suit])].append(shdc)
     return handsbind
 
+
 # generic function to augment metrics by suits
 def Augment_Metric_By_Suits(metrics,metric,dtype=pl.UInt8):
     for d,direction in enumerate(mlBridgeLib.NESW):
@@ -85,10 +86,23 @@ def Augment_Metric_By_Suits(metrics,metric,dtype=pl.UInt8):
     return metrics # why is it necessary to return metrics? Isn't it just df?
 
 
+# global variables static and read-only
+scores_d = None # (level,suit_char,tricks,vul) -> score
+all_scores_d = None # (level,suit_char,tricks,vul,dbl) -> score
+scores_df = None # 'Score_[1-7][SHDCN]'
+
 # calculate dict of contract result scores. each column contains (non-vul,vul) scores for each trick taken. sets are always penalty doubled.
 def calculate_scores():
+    global scores_d
+    global all_scores_d
+    global scores_df
+
+    if scores_d:
+        return scores_d, all_scores_d, scores_df
 
     scores_d = {}
+    all_scores_d = {}
+
     suit_to_denom = [Denom.clubs, Denom.diamonds, Denom.hearts, Denom.spades, Denom.nt]
     for suit_char in 'SHDCN':
         suit_index = 'CDHSN'.index(suit_char) # [3,2,1,0,4]
@@ -99,6 +113,13 @@ def calculate_scores():
                 # sets are always penalty doubled
                 scores_d[(level,suit_char,tricks,False)] = Contract(level=level,denom=denom,declarer=Player.north,penalty=Penalty.passed if result>=0 else Penalty.doubled,result=result).score(Vul.none)
                 scores_d[(level,suit_char,tricks,True)] = Contract(level=level,denom=denom,declarer=Player.north,penalty=Penalty.passed if result>=0 else Penalty.doubled,result=result).score(Vul.both)
+                # calculate all possible scores
+                all_scores_d[(level,suit_char,tricks,False,'')] = Contract(level=level,denom=denom,declarer=Player.north,penalty=Penalty.passed,result=result).score(Vul.none)
+                all_scores_d[(level,suit_char,tricks,False,'X')] = Contract(level=level,denom=denom,declarer=Player.north,penalty=Penalty.doubled,result=result).score(Vul.none)
+                all_scores_d[(level,suit_char,tricks,False,'XX')] = Contract(level=level,denom=denom,declarer=Player.north,penalty=Penalty.redoubled,result=result).score(Vul.none)
+                all_scores_d[(level,suit_char,tricks,True,'')] = Contract(level=level,denom=denom,declarer=Player.north,penalty=Penalty.passed,result=result).score(Vul.both)
+                all_scores_d[(level,suit_char,tricks,True,'X')] = Contract(level=level,denom=denom,declarer=Player.north,penalty=Penalty.doubled,result=result).score(Vul.both)
+                all_scores_d[(level,suit_char,tricks,True,'XX')] = Contract(level=level,denom=denom,declarer=Player.north,penalty=Penalty.redoubled,result=result).score(Vul.both)
 
     # create score dataframe from dict
     sd = defaultdict(list)
@@ -109,7 +130,7 @@ def calculate_scores():
     # st.write(all_scores_d)
     scores_df = pl.DataFrame(sd,orient='row')
     # scores_df.index.name = 'Taken'
-    return scores_d, scores_df
+    return all_scores_d, scores_d, scores_df
 
 
 def display_double_dummy_deals(deals, dd_result_tables, deal_index=0, max_display=4):
@@ -606,7 +627,7 @@ def perform_hand_augmentations(df,hrs_d,sd_productions=40,progress=None):
     print(f"create_hands_lists_column: time:{time.time()-t} seconds")
 
     t = time.time()
-    scores_d, scores_df = calculate_scores()
+    all_scores_d, scores_d, scores_df = calculate_scores()
     print(f"calculate_scores: time:{time.time()-t} seconds")
 
     t = time.time()
@@ -1245,7 +1266,8 @@ def Perform_DD_SD_Augmentations(df):
         pl.col('W').alias('Player_Name_W'),
         pl.col('Declarer_Name').alias('Name_Declarer'),
         pl.col('Declarer_ID').alias('Number_Declarer'), #  todo: implement 'Declarer_Id'
-        pl.when(pl.col('Declarer_Direction').is_in(pl.lit('NS'))).then(pl.lit('NS')).otherwise(pl.lit('EW')).alias('Pair_Declarer_Direction'),
+        # todo: rename to 'Declarer_Pair_Direction'
+        pl.when(pl.col('Declarer_Direction').is_in(['N','S'])).then(pl.lit('NS')).otherwise(pl.lit('EW')).alias('Pair_Declarer_Direction'),
         pl.col('DDScore_Pct_NS').alias('DDPct_NS'),
         pl.col('DDScore_Pct_EW').alias('DDPct_EW'),
         pl.col('MP_NS').alias('Matchpoints_NS'),
@@ -1294,12 +1316,26 @@ def Perform_DD_SD_Augmentations(df):
         pl.col(f'Probs_NS_N_S_13').alias(f'SDProbs_Taking_13'),
     )
 
-    # unimplemented columns. fake for now.
     df = df.with_columns(
-        pl.lit(123).alias('Score_Declarer'), # todo: implement 'Declarer_Score'
-        pl.lit(321).alias('ParScore_Declarer'), # todo: implement 'Declarer_ParScore'
-        pl.lit(456).alias('Computed_Score_Declarer'), # todo: explicit calculation for validation of score
+        # calculate score in terms of declarer pair direction
+        pl.when(pl.col('Pair_Declarer_Direction').eq(pl.lit('NS')))
+        .then(pl.col('Score_NS'))
+        .otherwise(pl.col('Score_EW'))
+        .alias('Score_Declarer'), # todo: rename to 'Declarer_Score'?
+        # calculate par score in terms of declarer pair direction
+        pl.when(pl.col('Pair_Declarer_Direction').eq(pl.lit('NS')))
+        .then(pl.col('ParScore_NS'))
+        .otherwise(pl.col('ParScore_EW'))
+        .alias('ParScore_Declarer'), # todo: rename to 'Declarer_ParScore'?
+        ((pl.col('Pair_Declarer_Direction').eq('NS') & pl.col('Vul_NS')) | (pl.col('Pair_Declarer_Direction').eq('EW') & pl.col('Vul_EW'))).alias('Declarer_Vul'),
+    )
+    df = df.with_columns(
+        pl.struct(['BidLvl', 'BidSuit', 'Tricks', 'Declarer_Vul', 'Dbl'])
+        .map_elements(lambda x: all_scores_d.get(tuple(x.values()), 0)) # note: cool example of calling dict having keys that are tuples
+        .alias('Computed_Score_Declarer')
+    )
 
+    df = df.with_columns(
         # following are faked until predictions are implemented
         # pl.col('Pct_NS').alias('Pct_NS_Actual'),
         # pl.col('Pct_EW').alias('Pct_EW_Actual'),

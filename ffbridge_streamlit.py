@@ -87,8 +87,9 @@ def app_info():
 
 def chat_input_on_submit():
     prompt = st.session_state.main_prompt_chat_input
+    # todo: if sql query doesn't have FROM keyword, insert 'FROM self'?
     if ' from ' not in prompt.lower():
-        prompt += ' FROM df'
+        prompt = 'FROM self ' + prompt
     ShowDataFrameTable(st.session_state.df, query=prompt, key='user_query_main_doit')
 
 
@@ -356,7 +357,7 @@ def create_sidebar():
     st.session_state.partner_id = st.sidebar.number_input('Partner ID',value=st.session_state.partner_id,key='create_sidebar_partner_id_on_change',on_change=partner_id_on_change,help='Enter ffbridge partner id. e.g. 246273 for Robert Salita')
     st.session_state.single_dummy_sample_count = st.sidebar.number_input('Single Dummy Samples Count',value=st.session_state.single_dummy_sample_count,key='create_sidebar_single_dummy_sample_count_on_change',on_change=sample_count_on_change,help='Enter number of single dummy samples to generate.')
 
-    # SELECT Board, Vul, ParContract, ParScore_NS, Custom_ParContract FROM df
+    # SELECT Board, Vul, ParContract, ParScore_NS, Custom_ParContract
     st.sidebar.checkbox('Show SQL Query',value=st.session_state.show_sql_query_default,key='create_sidebar_show_sql_query_checkbox',on_change=sql_query_on_change,help='Show SQL used to query dataframes.')
 
 
@@ -553,5 +554,5 @@ if __name__ == '__main__':
     if st.session_state.show_sql_query:
         with st.container():
             with bottom():
-                st.chat_input('Enter a SQL query e.g. SELECT PBN, Contract, Result, N, S, E, W FROM df', key='main_prompt_chat_input', on_submit=chat_input_on_submit)
+                st.chat_input('Enter a SQL query e.g. SELECT PBN, Contract, Result, N, S, E, W', key='main_prompt_chat_input', on_submit=chat_input_on_submit)
 
