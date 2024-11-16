@@ -569,8 +569,9 @@ def convert_contract_to_DDTricks_Dummy(df):
 
 
 def convert_contract_to_DDScore_Ref(df):
+    # could use pl.str_concat() instead
     df = df.with_columns(
-        (pl.lit('DDScore_')+pl.col('BidLvl')+pl.col('BidSuit')+pl.lit('_')+pl.col('Declarer_Direction')).alias('DDScore_Refs'),
+        (pl.lit('DDScore_')+pl.col('BidLvl').cast(pl.String)+pl.col('BidSuit')+pl.lit('_')+pl.col('Declarer_Direction')).alias('DDScore_Refs'),
     )
     ddscore_ns = []
     for i,(d,ref) in enumerate(zip(df['Declarer_Direction'],df['DDScore_Refs'])):
@@ -640,7 +641,7 @@ def perform_hand_augmentations(df,hrs_d,sd_productions=40,progress=None):
     t = time.time()
     df = df.with_columns(
         pl.Series('Declarer_Direction',convert_contract_to_declarer(df),pl.String,strict=False), # can have nulls or Strings
-        pl.Series('BidLvl',convert_contract_to_level(df),pl.String,strict=False), # can have nulls or Strings
+        pl.Series('BidLvl',convert_contract_to_level(df),pl.UInt8,strict=False), # can have nulls or Strings
         pl.Series('BidSuit',convert_contract_to_strain(df),pl.String,strict=False), # can have nulls or Strings
         pl.Series('Dbl',convert_contract_to_dbl(df),pl.String,strict=False), # can have nulls or Strings
     )
@@ -1223,6 +1224,19 @@ def AugmentACBLHandRecords(df,hrs_d):
 def Perform_DD_SD_Augmentations(df):
     # todo: temporary(?) aliases until SQL and other df columns are renamed.
     # todo: need to deal with {Vul} replacement by creating row version by selecting NV, V version.
+
+    # todo: move somewhere more appropriate?
+    df = df.with_columns(
+        pl.when(pl.col('Contract').eq('PASS')).then(pl.lit("Pass"))
+        .when(pl.col('BidLvl').eq(5) & pl.col('BidSuit').is_in(['C', 'D'])).then(pl.lit("Game"))
+        .when(pl.col('BidLvl').is_in([4,5]) & pl.col('BidSuit').is_in(['H', 'S'])).then(pl.lit("Game"))
+        .when(pl.col('BidLvl').is_in([3,4,5]) & pl.col('BidSuit').eq('N')).then(pl.lit("Game"))
+        .when(pl.col('BidLvl').eq(6)).then(pl.lit("SSlam"))
+        .when(pl.col('BidLvl').eq(7)).then(pl.lit("GSlam"))
+        .otherwise(pl.lit("Partial"))
+        .alias('ContractType'),
+    )
+
     df = df.with_columns(
         #pl.col('Section').alias('section_name'), # will this be needed for acbl?
         pl.col('N').alias('Player_Name_N'),
@@ -1282,24 +1296,23 @@ def Perform_DD_SD_Augmentations(df):
 
     # unimplemented columns. fake for now.
     df = df.with_columns(
-        pl.lit('Game').alias('ContractType'), # todo: implement Declarer_ContractType
         pl.lit(123).alias('Score_Declarer'), # todo: implement 'Declarer_Score'
         pl.lit(321).alias('ParScore_Declarer'), # todo: implement 'Declarer_ParScore'
         pl.lit(456).alias('Computed_Score_Declarer'), # todo: explicit calculation for validation of score
 
         # following are faked until predictions are implemented
-        pl.col('Pct_NS').alias('Pct_NS_Actual'),
-        pl.col('Pct_EW').alias('Pct_EW_Actual'),
-        pl.col('Pct_NS').alias('Pct_NS_Pred'),
-        pl.col('Pct_EW').alias('Pct_EW_Pred'),
-        pl.col('Pct_NS').sub(pl.col('Pct_NS')).alias('Pct_NS_Diff'),
-        pl.col('Pct_EW').sub(pl.col('Pct_EW')).alias('Pct_EW_Diff'),
-        pl.col('Declarer_Direction').alias('Declarer_Direction_Pred'), # Declarer_Direction_Actual not needed
-        pl.lit(.123).alias('Declarer_Pct'), # todo: implement 'Declarer_Pct'
-        pl.lit(.321).alias('Declarer_Pct_Pred'), # todo: implement 'Declarer_Pct'
-        pl.lit(456).alias('Declarer_Number_Pred'), # todo: implement 'Declarer_Id'
-        pl.col('Declarer_Name').alias('Declarer_Name_Pred'),
-        pl.col('Contract').alias('Contract_Pred'),
+        # pl.col('Pct_NS').alias('Pct_NS_Actual'),
+        # pl.col('Pct_EW').alias('Pct_EW_Actual'),
+        # pl.col('Pct_NS').alias('Pct_NS_Pred'),
+        # pl.col('Pct_EW').alias('Pct_EW_Pred'),
+        # pl.col('Pct_NS').sub(pl.col('Pct_NS')).alias('Pct_NS_Diff'),
+        # pl.col('Pct_EW').sub(pl.col('Pct_EW')).alias('Pct_EW_Diff'),
+        # pl.col('Declarer_Direction').alias('Declarer_Direction_Pred'), # Declarer_Direction_Actual not needed
+        # pl.lit(.123).alias('Declarer_Pct'), # todo: implement 'Declarer_Pct'
+        # pl.lit(.321).alias('Declarer_Pct_Pred'), # todo: implement 'Declarer_Pct'
+        # pl.lit(456).alias('Declarer_Number_Pred'), # todo: implement 'Declarer_Id'
+        # pl.col('Declarer_Name').alias('Declarer_Name_Pred'),
+        # pl.col('Contract').alias('Contract_Pred'),
     )
 
     return df

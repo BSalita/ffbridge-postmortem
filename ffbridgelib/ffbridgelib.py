@@ -65,9 +65,9 @@ def convert_ffdf_to_mldf(ffdf):
         })
         .alias('Vul'),
         pl.concat_str([
-            pl.col('contract').str.slice(0,2),
+            pl.col('contract').str.replace('NT', 'N').str.slice(0,2),
             pl.col('declarer'),
-            pl.col('contract').str.slice(2)
+            pl.col('contract').str.replace('NT', 'N').str.slice(2)
         ]).alias('Contract'),
         pl.when(pl.col('result').str.starts_with('+'))
             .then(pl.col('result').str.slice(1))  # Remove '+'
