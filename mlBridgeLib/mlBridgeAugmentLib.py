@@ -87,18 +87,16 @@ def Augment_Metric_By_Suits(metrics,metric,dtype=pl.UInt8):
 
 
 # global variables static and read-only
-scores_d = None # (level,suit_char,tricks,vul) -> score
-all_scores_d = None # (level,suit_char,tricks,vul,dbl) -> score
-scores_df = None # 'Score_[1-7][SHDCN]'
+# oops. globals don't behave as expected in streamlit. need to use st.session_state but that's not available in this module. just recompute.
+#scores_d = None # (level,suit_char,tricks,vul) -> score
+#all_scores_d = None # (level,suit_char,tricks,vul,dbl) -> score
+#scores_df = None # 'Score_[1-7][SHDCN]'
 
 # calculate dict of contract result scores. each column contains (non-vul,vul) scores for each trick taken. sets are always penalty doubled.
 def calculate_scores():
     global scores_d
     global all_scores_d
     global scores_df
-
-    if scores_d:
-        return scores_d, all_scores_d, scores_df
 
     scores_d = {}
     all_scores_d = {}
@@ -371,6 +369,7 @@ def get_cached_sd_data(pbn, hrs_d):
 
 def calculate_sd_expected_values(df, hrs_d, scores_df):
 
+    # retrieve probabilities from cache
     sd_probs = [get_cached_sd_data(pbn, hrs_d) for pbn in df['PBN']]
 
     # Create a DataFrame from the extracted sd probs (frequency distribution of tricks).
@@ -379,6 +378,7 @@ def calculate_sd_expected_values(df, hrs_d, scores_df):
     scores_df_vuls = create_scores_df_with_vul(scores_df)
 
     # Define the combinations
+    # todo: move this to globals? but beware that globals can create weirdness with streamlit.
     pair_directions = ['NS', 'EW']
     declarer_directions = 'NESW'
     strains = 'SHDCN'
@@ -390,7 +390,7 @@ def calculate_sd_expected_values(df, hrs_d, scores_df):
     result = sd_df.select([
         pl.col(f'{pair_direction}_{declarer_direction}_{strain}_{taken}').mul(score).alias(f'{pair_direction}_{declarer_direction}_{strain}_{level}_{vul}_{taken}_{score}')
         for pair_direction in pair_directions
-        for declarer_direction in declarer_directions
+        for declarer_direction in pair_direction #declarer_directions
         for strain in strains
         for level in levels
         for vul in vuls
@@ -404,7 +404,7 @@ def calculate_sd_expected_values(df, hrs_d, scores_df):
     result = result.with_columns([
         pl.sum_horizontal(pl.col(f'^{pair_direction}_{declarer_direction}_{strain}_{level}_{vul}_\\d+_.*$')).alias(f'EV_{pair_direction}_{declarer_direction}_{strain}_{level}_{vul}')
         for pair_direction in pair_directions
-        for declarer_direction in declarer_directions
+        for declarer_direction in pair_direction #declarer_directions
         for strain in strains
         for level in levels
         for vul in vuls
@@ -413,75 +413,9 @@ def calculate_sd_expected_values(df, hrs_d, scores_df):
     #print("\nResults with expected value:")
     return result
 
-# create max contracts for the entire hierarchy of expected values.
-# def create_best_contracts(sd_ev_df):
-#     # Define the combinations
-#     pair_directions = ['NS', 'EW']
-#     declarer_directions = 'NESW'
-#     strains = 'SHDCN'
-#     vulnerabilities = ['NV', 'V']
 
-#     # Function to get max value and its column name
-#     def max_and_col(df, pattern):
-#         cols = df.select(pl.col(pattern)).columns
-#         max_expr = pl.max_horizontal(pl.col(pattern))
-#         col_expr = pl.when(pl.col(cols[0]) == max_expr).then(pl.lit(cols[0]))
-#         for col in cols[1:]:
-#             col_expr = col_expr.when(pl.col(col) == max_expr).then(pl.lit(col))
-#         return max_expr, col_expr.otherwise(pl.lit(""))
-
-#     # Initialize list to store all max EV expressions
-#     all_max_ev_expr = []
-
-#     # 1. Max EV for each combination of pair direction, declarer direction, strain, and vulnerability
-#     for pd in pair_directions:
-#         for dd in declarer_directions:
-#             for s in strains:
-#                 for v in vulnerabilities:
-#                     pattern = f'^EV_{pd}_{dd}_{s}_[1-7]_{v}$'
-#                     max_expr, col_expr = max_and_col(sd_ev_df, pattern)
-#                     all_max_ev_expr.extend([
-#                         max_expr.alias(f'EV_{pd}_{dd}_{s}_{v}_Max'),
-#                         col_expr.alias(f'EV_{pd}_{dd}_{s}_{v}_MaxCol')
-#                     ])
-
-#     # 2. Max EV for each combination of pair direction, declarer direction, and vulnerability (across all strains)
-#     for pd in pair_directions:
-#         for dd in declarer_directions:
-#             for v in vulnerabilities:
-#                 pattern = f'^EV_{pd}_{dd}_[SHDCN]_[1-7]_{v}$'
-#                 max_expr, col_expr = max_and_col(sd_ev_df, pattern)
-#                 all_max_ev_expr.extend([
-#                     max_expr.alias(f'EV_{pd}_{dd}_{v}_Max'),
-#                     col_expr.alias(f'EV_{pd}_{dd}_{v}_MaxCol')
-#                 ])
-
-#     # 3. Max EV for each combination of pair direction and vulnerability (across all declarer directions and strains)
-#     for pd in pair_directions:
-#         for v in vulnerabilities:
-#             pattern = f'^EV_{pd}_[NESW]_[SHDCN]_[1-7]_{v}$'
-#             max_expr, col_expr = max_and_col(sd_ev_df, pattern)
-#             all_max_ev_expr.extend([
-#                 max_expr.alias(f'EV_{pd}_{v}_Max'),
-#                 col_expr.alias(f'EV_{pd}_{v}_MaxCol')
-#             ])
-
-#     # 4. Overall Max EV for each vulnerability (across all pair directions, declarer directions, and strains)
-#     for v in vulnerabilities:
-#         pattern = f'^EV_.*_{v}$'
-#         max_expr, col_expr = max_and_col(sd_ev_df, pattern)
-#         all_max_ev_expr.extend([
-#             max_expr.alias(f'EV_{v}_Max'),
-#             col_expr.alias(f'EV_{v}_MaxCol')
-#         ])
-
-#     # Create a new DataFrame with only the new columns
-#     sd_ev_max_df = sd_ev_df.select(all_max_ev_expr)
-
-#     return sd_ev_max_df
-
-
-def create_best_contracts(sd_ev_df):
+# calculate EV max scores for various regexes including all vulnerabilities. also create columns of the column names of the max values.
+def create_best_contracts(df):
 
     # Define the combinations
     pair_directions = ['NS', 'EW']
@@ -489,7 +423,7 @@ def create_best_contracts(sd_ev_df):
     strains = 'SHDCN'
     vulnerabilities = ['NV', 'V']
 
-    # Function to get max value and its column name
+    # Function to create columns of max values from various regexes of columns. also creates columns of the column names of the max value.
     def max_and_col(df, pattern):
         cols = df.select(pl.col(pattern)).columns
         max_expr = pl.max_horizontal(pl.col(pattern))
@@ -501,32 +435,34 @@ def create_best_contracts(sd_ev_df):
     # Dictionary to store expressions with their aliases as keys
     max_ev_dict = {}
 
-    # Single loop to handle all pattern combinations
+    # all EV columns are already calculated. just need to get the max.
+
+    # Single loop handles all EV Max, MaxCol combinations
     for v in vulnerabilities:
         # Level 4: Overall Max EV for each vulnerability
-        pattern = f'^EV_.*_{v}$'
-        max_expr, col_expr = max_and_col(sd_ev_df, pattern)
+        ev_columns = f'^EV_(NS|EW)_[NESW]_[SHDCN]_[1-7]_{v}$'
+        max_expr, col_expr = max_and_col(df, ev_columns)
         max_ev_dict[f'EV_{v}_Max'] = max_expr
         max_ev_dict[f'EV_{v}_MaxCol'] = col_expr
 
         for pd in pair_directions:
             # Level 3: Max EV for each pair direction and vulnerability
-            pattern = f'^EV_{pd}_[NESW]_[SHDCN]_[1-7]_{v}$'
-            max_expr, col_expr = max_and_col(sd_ev_df, pattern)
+            ev_columns = f'^EV_{pd}_[NESW]_[SHDCN]_[1-7]_{v}$'
+            max_expr, col_expr = max_and_col(df, ev_columns)
             max_ev_dict[f'EV_{pd}_{v}_Max'] = max_expr
             max_ev_dict[f'EV_{pd}_{v}_MaxCol'] = col_expr
 
-            for dd in declarer_directions:
+            for dd in pd: #declarer_directions:
                 # Level 2: Max EV for each pair direction, declarer direction, and vulnerability
-                pattern = f'^EV_{pd}_{dd}_[SHDCN]_[1-7]_{v}$'
-                max_expr, col_expr = max_and_col(sd_ev_df, pattern)
+                ev_columns = f'^EV_{pd}_{dd}_[SHDCN]_[1-7]_{v}$'
+                max_expr, col_expr = max_and_col(df, ev_columns)
                 max_ev_dict[f'EV_{pd}_{dd}_{v}_Max'] = max_expr
                 max_ev_dict[f'EV_{pd}_{dd}_{v}_MaxCol'] = col_expr
 
                 for s in strains:
                     # Level 1: Max EV for each combination
-                    pattern = f'^EV_{pd}_{dd}_{s}_[1-7]_{v}$'
-                    max_expr, col_expr = max_and_col(sd_ev_df, pattern)
+                    ev_columns = f'^EV_{pd}_{dd}_{s}_[1-7]_{v}$'
+                    max_expr, col_expr = max_and_col(df, ev_columns)
                     max_ev_dict[f'EV_{pd}_{dd}_{s}_{v}_Max'] = max_expr
                     max_ev_dict[f'EV_{pd}_{dd}_{s}_{v}_MaxCol'] = col_expr
 
@@ -538,10 +474,10 @@ def create_best_contracts(sd_ev_df):
     # Create a new DataFrame with only the new columns
     # todo: this step is inexplicably slow. appears to take 6 seconds regardless of row count?
     t = time.time()
-    sd_ev_max_df = sd_ev_df.select(all_max_ev_expr)
+    df = df.select(all_max_ev_expr)
     print(f"create_best_contracts: sd_ev_max_df created: time:{time.time()-t} seconds")
 
-    return sd_ev_max_df
+    return df
 
 
 def convert_contract_to_contract(df):
@@ -606,6 +542,8 @@ def convert_contract_to_DDScore_Ref(df):
 
 
 def perform_hand_augmentations(df,hrs_d,sd_productions=40,progress=None):
+
+    # todo: refactor all of these df ops into separate functions.
 
     t = time.time()
     if 'session_id' not in df.columns:
@@ -762,25 +700,81 @@ def perform_hand_augmentations(df,hrs_d,sd_productions=40,progress=None):
         ])
         print(f"calculate matchpoints percentages: time:{time.time()-t} seconds")
     
+    # create EV Max and MaxCol with consideration to vulnerability
     t = time.time()
-    df = df.with_columns([
-        pl.when(pl.col('Vul').is_in(['N_S', 'Both']))
-          .then(pl.col('EV_NS_V_Max'))
-          .otherwise(pl.col('EV_NS_NV_Max'))
-          .alias('EV_NS_Max'),
+    pair_directions = ['NS', 'EW']
+    vul_conditions = {
+        'NS': pl.col('Vul').is_in(['N_S', 'Both']),
+        'EW': pl.col('Vul').is_in(['E_W', 'Both'])
+    }
 
-        pl.when(pl.col('Vul').is_in(['N_S', 'Both']))
-          .then(pl.col('EV_NS_V_MaxCol'))
-          .otherwise(pl.col('EV_NS_NV_MaxCol'))
-          .alias('EV_NS_MaxCol'),
+    # Using already created EV columns (Vul and not vul), creates new columns of Max values and columns of the column names of the max value.
+    # # Define the combinations
+    # pair_directions = ['NS', 'EW']
+    # declarer_directions = 'NESW'
+    # strains = 'SHDCN'
+    # vulnerabilities = ['NV', 'V']
+    max_expressions = []
 
-        pl.when(pl.col('Vul').is_in(['E_W', 'Both']))
-          .then(pl.col('EV_EW_V_Max'))
-          .otherwise(pl.col('EV_EW_NV_Max'))
-          .alias('EV_EW_Max'),
-    ])
-    print(f"create EV_NS_Max and EV_NS_MaxCol: time:{time.time()-t} seconds")
+    for pd in ['NS','EW']:
+        # Basic EV Max columns
+        max_expressions.extend([
+            pl.when(vul_conditions[pd])
+              .then(pl.col(f'EV_{pd}_V_Max'))
+              .otherwise(pl.col(f'EV_{pd}_NV_Max'))
+              .alias(f'EV_{pd}_Max'),
 
+            pl.when(vul_conditions[pd])
+              .then(pl.col(f'EV_{pd}_V_MaxCol'))
+              .otherwise(pl.col(f'EV_{pd}_NV_MaxCol'))
+              .alias(f'EV_{pd}_MaxCol')
+        ])
+
+        # For each declarer direction
+        for dd in pd: #'NESW':
+            max_expressions.extend([
+                pl.when(vul_conditions[pd])
+                  .then(pl.col(f'EV_{pd}_{dd}_V_Max'))
+                  .otherwise(pl.col(f'EV_{pd}_{dd}_NV_Max'))
+                  .alias(f'EV_{pd}_{dd}_Max'),
+
+                pl.when(vul_conditions[pd])
+                  .then(pl.col(f'EV_{pd}_{dd}_V_MaxCol'))
+                  .otherwise(pl.col(f'EV_{pd}_{dd}_NV_MaxCol'))
+                  .alias(f'EV_{pd}_{dd}_MaxCol')
+            ])
+
+            # For each strain
+            for s in 'SHDCN':
+                max_expressions.extend([
+                    pl.when(vul_conditions[pd])
+                      .then(pl.col(f'EV_{pd}_{dd}_{s}_V_Max'))
+                      .otherwise(pl.col(f'EV_{pd}_{dd}_{s}_NV_Max'))
+                      .alias(f'EV_{pd}_{dd}_{s}_Max'),
+
+                    pl.when(vul_conditions[pd])
+                      .then(pl.col(f'EV_{pd}_{dd}_{s}_V_MaxCol'))
+                      .otherwise(pl.col(f'EV_{pd}_{dd}_{s}_NV_MaxCol'))
+                      .alias(f'EV_{pd}_{dd}_{s}_MaxCol')
+                ])
+                # For each level
+                for l in range(1,8):
+                    max_expressions.extend([
+                        pl.when(vul_conditions[pd])
+                        .then(pl.col(f'EV_{pd}_{dd}_{s}_{l}_V'))
+                        .otherwise(pl.col(f'EV_{pd}_{dd}_{s}_{l}_NV'))
+                        .alias(f'EV_{pd}_{dd}_{s}_{l}'),
+                    ])
+
+    # Apply all expressions at once
+    df = df.with_columns(max_expressions)
+    df = df.with_columns(
+        pl.max_horizontal('EV_NS_Max','EV_EW_Max').alias('EV_Max'),
+        pl.max_horizontal('EV_NS_MaxCol','EV_EW_MaxCol').alias('EV_MaxCol')
+    )
+    print(f"create EV Max and MaxCol with consideration to vulnerability: time:{time.time()-t} seconds")
+
+    # todo: aren't there other diffs that should be create here?
     t = time.time()
     df = df.with_columns(
         pl.Series('ParScore_Diff_NS',(df['Score_NS']-df['ParScore_NS']),pl.Int16),
@@ -790,13 +784,93 @@ def perform_hand_augmentations(df,hrs_d,sd_productions=40,progress=None):
         pl.Series('EV_MaxScore_Diff_NS',df['Score_NS'] - df['EV_NS_Max'],pl.Float32),
         pl.Series('EV_MaxScore_Diff_EW',-df['Score_NS'] - df['EV_EW_Max'],pl.Float32)
     )
-    print(f"create EV_MaxScore_Diff_NS and EV_MaxScore_Diff_EW: time:{time.time()-t} seconds")
+    print(f"create ParScore, DDTricks, EV_MaxScore diffs: time:{time.time()-t} seconds")
 
     t = time.time()
     df = df.with_columns(
         pl.Series('ParScore_Diff_EW',-df['ParScore_Diff_NS'],pl.Int16), # used for open-closed room comparisons
     )
     print(f"create ParScore_Diff_EW: time:{time.time()-t} seconds")
+
+    return df
+
+
+# example of working ranking code. but column must contain all scores.
+# scores = pl.col('Score_NS')
+# df = df.with_columns(
+#     scores.rank(method='average', descending=False).sub(1).over(['session_id', 'Board']).alias('ParScore_MP_NS'),
+#     scores.rank(method='average', descending=True).sub(1).over(['session_id', 'Board']).alias('ParScore_MP_EW')
+# )
+
+
+def calculate_matchpoint_scores_ns(df,score_columns):
+    
+    # Process each row
+    mp_columns = defaultdict(list)
+    for r in df.iter_rows(named=True):
+        scores_list = r['Expanded_Scores_List'] # todo: make 'Expanded_Scores_List' sorted and with a 'Score_NS' removed?
+        scores_list.remove(r['Score_NS'])
+        
+        for col in score_columns:
+            # Calculate rank for each DD score
+            rank = 0.0
+            new_score = r[col]
+            
+            for score in scores_list:
+                if new_score > score:
+                    rank += 1.0
+                elif new_score == score:
+                    rank += 0.5
+                    
+            mp_columns['MP_'+col].append(rank)
+    
+    # Add all new columns at once
+    return df.hstack(pl.DataFrame(mp_columns))
+
+
+def PerformMatchPointAndPercentAugmentations(df):
+
+    # Define all column names first
+    t = time.time()
+    discrete_score_columns = ['DDScore_NS','ParScore_NS','EV_NS_Max'] # todo: EV needs {Vul} replacement. Use NV for now.'
+    dd_score_columns = [f'DDScore_{l}{s}_{d}' for d in 'NESW' for s in 'SHDCN' for l in range(1,8)]
+    # EV_{pd}_{dd}_{s}_[1-7]_{v}
+    ev_score_columns = [f'EV_{pd}_{d}_{s}_{l}' for pd in ['NS','EW'] for d in pd for s in 'SHDCN' for l in range(1,8)]
+    df = calculate_matchpoint_scores_ns(df,discrete_score_columns+dd_score_columns+ev_score_columns)
+
+    for col_ns in discrete_score_columns:
+        col_ew = col_ns.replace('NS','EW')
+        df = df.with_columns(
+            (pl.col('MP_Top')-pl.col(f'MP_{col_ns}')).alias(f'MP_{col_ew}')
+        )
+        df = df.with_columns(
+            (pl.col(f'MP_{col_ns}')/pl.col('MP_Top')).alias(col_ns.replace('_NS','_Pct_NS')),
+            (pl.col(f'MP_{col_ew}')/pl.col('MP_Top')).alias(col_ew.replace('_EW','_Pct_EW')),
+        )
+
+    df = df.with_columns([
+        pl.max_horizontal(f'^MP_DDScore_[1-7][SHDCN]_[NS]$').alias(f'MP_DDScore_NS_Max'),
+    ])
+    df = df.with_columns([
+        pl.max_horizontal(f'^MP_DDScore_[1-7][SHDCN]_[EW]$').alias(f'MP_DDScore_EW_Max'),
+    ])
+    df = df.with_columns([
+        pl.max_horizontal(f'^MP_EV_NS_[NS]_[SHDCN]_[1-7]$').alias(f'MP_EV_NS_Max'),
+    ])
+    df = df.with_columns([
+        pl.max_horizontal(f'^MP_EV_EW_[EW]_[SHDCN]_[1-7]$').alias(f'MP_EV_EW_Max'),
+    ])
+
+    df = df.with_columns([
+        (pl.col('MP_DDScore_NS_Max')/pl.col('MP_Top')).alias('DDScore_Pct_NS_Max'),
+        (pl.col('MP_DDScore_EW_Max')/pl.col('MP_Top')).alias('DDScore_Pct_EW_Max'),
+        (pl.col('MP_EV_NS_Max')/pl.col('MP_Top')).alias('EV_Pct_NS_Max'),
+        (pl.col('MP_EV_EW_Max')/pl.col('MP_Top')).alias('EV_Pct_EW_Max'),
+    ])
+
+    # test sql query: FROM self SELECT Board, Contract, Score, Score_NS, Score_EW, ParScore_NS, Expanded_Scores_List, MP_NS, MP_EW, MP_ParScore_NS, MP_ParScore_EW, ParScore_Pct_NS, ParScore_Pct_EW, DDScore_3N_N, MP_DDScore_3N_N, MP_DDScore_NS, MP_DDScore_EW, MP_EV_NS, MP_EV_EW, DDScore_Pct_NS, DDScore_Pct_EW, EV_NS_NV_Max, EV_EW_NV_MaxMP_EV_NS, MP_EV_EW, EV_Pct_NS, EV_Pct_EW, EV_NS_N_H_4_NV, EV_EW_E_H_4_NV
+    # test sql query: SELECT Board, Contract, Score, Score_NS, Score_EW, ParScore_NS, ParScore_EW, SDScore, SDScore_NS, SDScore_EW
+    print(f"Time to rank expanded scores: {time.time()-t} seconds")
 
     return df
 
@@ -1085,15 +1159,16 @@ def PerformResultAugmentations(df,hrs_d):
         #    df = df.with_columns(pl.max_horizontal(f'DD_{d_ns[-4]}_{d_ns[-1]}',f'DD_{d_ew[-4]}_{d_ew[-1]}'),d_ns[-1]).alias(f'DD_Max_NS_{d_ns[-1]}')
         print(f"Time to create SL_Max_(NS|EW): {time.time()-t} seconds")
 
-    if 'ParScore_NS' in df.columns:
-        print('ParScore_NS already exists. skipping...')
-    else:
-        # takes 15s
-        t = time.time()
-        Pars_l = [hrs_d[pbn]['Par'][(d,v)] for pbn,d,v in df[('PBN','Dealer','Vul')].rows()] # 'Par' is hrs_d's legacy name for ParScore_NS
-        df = df.with_columns(pl.Series('ParScore_NS',Pars_l,pl.Object)) # todo: specify correct dtype instead of object
-        df = df.with_columns(pl.Series('ParScore_EW',-df['ParScore_NS'],pl.Object)) # todo: specify correct dtype instead of object
-        print(f"Time to create ParScore_NS: {time.time()-t} seconds")
+    assert 'ParScore_NS' in df.columns
+    # if 'ParScore_NS' in df.columns:
+    #     print('ParScore_NS already exists. skipping...')
+    # else:
+    #     # takes 15s
+    #     t = time.time()
+    #     Pars_l = [hrs_d[pbn]['Par'][(d,v)] for pbn,d,v in df[('PBN','Dealer','Vul')].rows()] # 'Par' is hrs_d's legacy name for ParScore_NS
+    #     df = df.with_columns(pl.Series('ParScore_NS',Pars_l,pl.Object)) # todo: specify correct dtype instead of object
+    #     df = df.with_columns(pl.Series('ParScore_EW',-df['ParScore_NS'],pl.Object)) # todo: specify correct dtype instead of object
+    #     print(f"Time to create ParScore_NS: {time.time()-t} seconds")
 
     if 'LoTT' in df.columns:
         print('LoTT already exists. skipping...')
@@ -1246,7 +1321,8 @@ def Perform_DD_SD_Augmentations(df):
     # todo: temporary(?) aliases until SQL and other df columns are renamed.
     # todo: need to deal with {Vul} replacement by creating row version by selecting NV, V version.
 
-    # todo: move somewhere more appropriate?
+    # create a column of contract types for each df['Contract']. e.g. 'Contract': Pass, Partial, Game, SSlam, GSlam
+    # todo: move somewhere more appropriate but requires cleaned board results data. e.g. 'Contract', 'BidLvl', 'BidSuit'.
     df = df.with_columns(
         pl.when(pl.col('Contract').eq('PASS')).then(pl.lit("Pass"))
         .when(pl.col('BidLvl').eq(5) & pl.col('BidSuit').is_in(['C', 'D'])).then(pl.lit("Game"))
@@ -1275,25 +1351,27 @@ def Perform_DD_SD_Augmentations(df):
         #pl.col('MP_EV_NS_Max').alias('MP_EV_NS_Max'), # same
         #pl.col('MP_EV_EW_Max').alias('MP_EV_EW_Max'), # same
         # SDScore_Max_NS
-        pl.col('EV_NV_MaxCol').alias('SDContract_Max'), # needs {Vul} replacement. Use NV for now. Pair direction invariant.
-        pl.col('EV_NS_NV_Max').alias('SDScore_NS'), # wrong should be e.g. EV_NS_1S_N
-        pl.col('EV_EW_NV_Max').alias('SDScore_EW'), # wrong should be e.g. EV_NS_1S_N
-        pl.col('EV_NS_NV_Max').alias('SDScore_Max_NS'),  # needs {Vul} replacement. Use NV for now.
-        pl.col('EV_EW_NV_Max').alias('SDScore_Max_EW'),  # needs {Vul} replacement. Use NV for now.
-        pl.col('EV_Pct_NS').alias('SDPct_NS'),
-        pl.col('EV_Pct_EW').alias('SDPct_EW'),
-        pl.col('MP_EV_NS_Max').alias('SDMPs_Max_NS'),
-        pl.col('MP_Top').add(1).sub(pl.col('MP_EV_NS_Max')).alias('SDMPs_Max_EW'),
-        pl.col('EV_Pct_NS').alias('SDPct_Max_NS'),
-        pl.col('EV_Pct_EW').alias('SDPct_Max_EW'),
-        (pl.col('EV_NS_NV_Max')-pl.col('Score_NS')).alias('SDScore_Diff_NS'), # wrong should be e.g. EV_NS_1S_N
-        (pl.col('EV_EW_NV_Max')-pl.col('Score_EW')).alias('SDScore_Diff_EW'), # wrong should be e.g. EV_NS_1S_N
-        (pl.col('EV_NS_NV_Max')-pl.col('Score_NS')).alias('SDScore_Max_Diff_NS'),
-        (pl.col('EV_EW_NV_Max')-pl.col('Score_EW')).alias('SDScore_Max_Diff_EW'),
-        (pl.col('EV_Pct_NS')-pl.col('Pct_NS')).alias('SDPct_Diff_NS'),
-        (pl.col('EV_Pct_EW')-pl.col('Pct_EW')).alias('SDPct_Diff_EW'),
-        (pl.col('EV_Pct_NS_Max')-pl.col('Pct_NS')).alias('SDPct_Max_Diff_NS'),
-        (pl.col('EV_Pct_EW_Max')-pl.col('Pct_EW')).alias('SDPct_Max_Diff_EW'),
+
+        # todo: EV stuff looks pretty wrong. check it out.
+        pl.col('EV_MaxCol').alias('SDContract_Max'), # needs {Vul} replacement. Use NV for now. Pair direction invariant.
+        pl.col('EV_NS_Max').alias('SDScore_NS'), # wrong should be e.g. EV_NS_1S_N
+        pl.col('EV_EW_Max').alias('SDScore_EW'), # wrong should be e.g. EV_NS_1S_N
+        pl.col('EV_NS_Max').alias('SDScore_Max_NS'),  # needs {Vul} replacement. Use NV for now.
+        pl.col('EV_EW_Max').alias('SDScore_Max_EW'),  # needs {Vul} replacement. Use NV for now.
+        pl.col('EV_Pct_NS_Max').alias('SDPct_NS'),  # needs {Vul} replacement. Use NV for now.
+        pl.col('EV_Pct_EW_Max').alias('SDPct_EW'),  # needs {Vul} replacement. Use NV for now.
+        pl.col('MP_EV_NS_Max').alias('SDMPs_Max_NS'),  # needs {Vul} replacement. Use NV for now.
+        pl.col('MP_Top').sub(pl.col('MP_EV_NS_Max')).alias('SDMPs_Max_EW'),  # needs {Vul} replacement. Use NV for now.
+        pl.col('EV_Pct_NS_Max').alias('SDPct_Max_NS'),  # needs {Vul} replacement. Use NV for now.
+        pl.col('EV_Pct_EW_Max').alias('SDPct_Max_EW'),  # needs {Vul} replacement. Use NV for now.
+        (pl.col('EV_NS_Max')-pl.col('Score_NS')).alias('SDScore_Diff_NS'), # wrong should be e.g. EV_NS_1S_N
+        (pl.col('EV_EW_Max')-pl.col('Score_EW')).alias('SDScore_Diff_EW'), # wrong should be e.g. EV_NS_1S_N
+        (pl.col('EV_NS_Max')-pl.col('Score_NS')).alias('SDScore_Max_Diff_NS'),  # needs {Vul} replacement. Use NV for now.
+        (pl.col('EV_EW_Max')-pl.col('Score_EW')).alias('SDScore_Max_Diff_EW'),  # needs {Vul} replacement. Use NV for now.
+        (pl.col('EV_NS_Max')-pl.col('Pct_NS')).alias('SDPct_Diff_NS'),  # needs {Vul} replacement. Use NV for now.
+        (pl.col('EV_EW_Max')-pl.col('Pct_EW')).alias('SDPct_Diff_EW'),  # needs {Vul} replacement. Use NV for now.
+        (pl.col('EV_Pct_NS_Max')-pl.col('Pct_NS')).alias('SDPct_Max_Diff_NS'),  # needs {Vul} replacement. Use NV for now.
+        (pl.col('EV_Pct_EW_Max')-pl.col('Pct_EW')).alias('SDPct_Max_Diff_EW'),  # needs {Vul} replacement. Use NV for now.
         (pl.col('ParScore_Pct_NS')-pl.col('Pct_NS')).alias('SDParScore_Pct_Diff_NS'), # wrong should be e.g. EV_NS_1S_N
         (1-pl.col('ParScore_Pct_NS')-pl.col('Pct_EW')).alias('SDParScore_Pct_Diff_EW'), # wrong should be e.g. EV_EW_1S_N
         (pl.col('ParScore_Pct_NS')-pl.col('Pct_NS')).alias('SDParScore_Pct_Max_Diff_NS'), # wrong looks like it needs max pct of all the Pars?
@@ -1316,7 +1394,17 @@ def Perform_DD_SD_Augmentations(df):
         pl.col(f'Probs_NS_N_S_13').alias(f'SDProbs_Taking_13'),
     )
 
+    print(df.select(pl.col('^EV_.*$')).columns)
     df = df.with_columns(
+        # create a column of column names of the SD score of the declarer's contract
+        pl.concat_str([
+            pl.lit('EV'),
+            pl.col('Pair_Declarer_Direction'), # renamed?
+            pl.col('Declarer_Direction'),
+            pl.col('BidSuit'),
+            pl.col('BidLvl').cast(pl.String),
+            ], separator='_')
+            .alias('Declarer_SDContract'),
         # calculate score in terms of declarer pair direction
         pl.when(pl.col('Pair_Declarer_Direction').eq(pl.lit('NS')))
         .then(pl.col('Score_NS'))
@@ -1330,13 +1418,19 @@ def Perform_DD_SD_Augmentations(df):
         ((pl.col('Pair_Declarer_Direction').eq('NS') & pl.col('Vul_NS')) | (pl.col('Pair_Declarer_Direction').eq('EW') & pl.col('Vul_EW'))).alias('Declarer_Vul'),
     )
     df = df.with_columns(
+        # word to the wise: map_elements() is requires every column to be specified in pl.struct() and return_dtype must be compatible.
+        # SDScore is the SD score of the declarer's contract.
+        pl.struct(['Declarer_SDContract','^EV_(NS|EW)_[NESW]_[SHDCN]_[1-7]$'])
+        .map_elements(lambda x: x[x['Declarer_SDContract']],return_dtype=pl.Float32).alias('SDScore'),
+        # Computed_Score_Declarer is the computed score of the declarer's contract.
+        # note: cool example of calling dict having keys that are tuples
         pl.struct(['BidLvl', 'BidSuit', 'Tricks', 'Declarer_Vul', 'Dbl'])
-        .map_elements(lambda x: all_scores_d.get(tuple(x.values()), 0)) # note: cool example of calling dict having keys that are tuples
+        .map_elements(lambda x: all_scores_d.get(tuple(x.values()), 0),return_dtype=pl.Int16)
         .alias('Computed_Score_Declarer')
     )
 
     df = df.with_columns(
-        # following are faked until predictions are implemented
+        # following are faked until NN predictions are implemented
         # pl.col('Pct_NS').alias('Pct_NS_Actual'),
         # pl.col('Pct_EW').alias('Pct_EW_Actual'),
         # pl.col('Pct_NS').alias('Pct_NS_Pred'),
@@ -1352,93 +1446,3 @@ def Perform_DD_SD_Augmentations(df):
     )
 
     return df
-
-
-# scores = pl.col('Score_NS')
-# df = df.with_columns(
-#     scores.rank(method='average', descending=False).sub(1).over(['session_id', 'Board']).alias('ParScore_MP_NS'),
-#     scores.rank(method='average', descending=True).sub(1).over(['session_id', 'Board']).alias('ParScore_MP_EW')
-# )
-# df['session_id','Board','Score_NS','DDScore_NS','ParScore_NS','MP_Top','MP_NS','MP_EW','ParScore_MP_NS','ParScore_MP_EW']
-
-# todo: comparison_cols only works for one column at a time.
-# todo: there's got to be a simplier algorithm. So far other AI solutions are either too slow or too complex. This is middle ground.
-
-# todo: can't calculate_matchpoints() be deleted if we just pass a list of scores (requires exploding list of scores/frequencies)?
-def calculate_matchpoints(df: pl.DataFrame, score_col: str, comparison_cols: list[str]) -> pl.DataFrame:
-    """
-    This function is used to answer the question "How many matchpoints would DD, Par, EV receive if they had been scored?"
-    This is a bit flawed solution because, for simplicity, it always adds one new result to the list of scores even if DD/Par/EV are already scored.
-    Worst case, it introduces an inaccuracy of (MP_Top+1)/MP_Top? This method and error bounds need to be explored.
-    It calculates matchpoints for each value in comparison_cols against score_col within groups.
-    The method works by adding a new result, from comparison columns, to the list of scores.
-    Therefore, for purposes of matchpoint calculation, the number of scores is actually MP_Top+1.
-    MP_Top+1 must be used when calculating percentages of comparision columns.
-    
-    Args:
-        df: DataFrame containing the columns
-        score_col: Column name containing scores to compare against
-        comparison_cols: List of column names to calculate matchpoints for
-        
-    Returns:
-        DataFrame with added MP columns (named 'MP_' + original_column_name)
-    """
-    # First add group indices to original dataframe
-    df_with_idx = (
-        df.sort(['session_id', 'Board', score_col])
-        .with_columns([
-            pl.col('session_id').cum_count().over(['session_id', 'Board']).sub(1).alias('group_idx')
-        ])
-    )
-
-    # Calculate MP scores for each comparison column
-    gdf = (
-        df_with_idx.group_by(['session_id', 'Board'])
-        .agg([
-            pl.col(score_col).alias('scores_list'),
-            *[pl.col(col) for col in comparison_cols],
-            pl.col('group_idx')
-        ])
-        .with_columns([
-            pl.struct(['scores_list'] + comparison_cols).map_elements(
-                lambda x: [
-                    sum(1.0 if score < comp_score else 0.5 if score == comp_score else 0.0 
-                        for score in x['scores_list'])
-                    for comp_score in x[col]
-                ],
-                return_dtype=pl.List(pl.Float32)
-            ).alias(f'MP_{col}')
-            for col in comparison_cols
-        ])
-    )
-
-    # Join back to original dataframe and extract correct MP scores
-    df_with_mp = df_with_idx.join(
-        gdf.select(['session_id', 'Board'] + [f'MP_{col}' for col in comparison_cols]),
-        on=['session_id', 'Board']
-    ).with_columns([
-        pl.col(f'MP_{col}').list.get(pl.col('group_idx')).alias(f'MP_{col}')
-        for col in comparison_cols
-    ])
-
-    return df_with_mp.drop('group_idx')
-
-
-def PerformMatchPointAndPercentAugmentations(df):
-    df = calculate_matchpoints(df, 'Score_NS', ['DDScore_NS']) 
-    df = calculate_matchpoints(df, 'Score_NS', ['ParScore_NS']) 
-    df = calculate_matchpoints(df, 'Score_NS', ['EV_NS_Max']) 
-
-    # calculate percentages. Add 1 to MP_Top as we have added a new Score to calculate the Pct.
-    df = df.with_columns(
-        (pl.col('MP_DDScore_NS')/pl.col('MP_Top').add(1)).alias('DDScore_Pct_NS'),
-        (1-pl.col('MP_DDScore_NS')/pl.col('MP_Top').add(1)).alias('DDScore_Pct_EW'),
-        (pl.col('MP_ParScore_NS')/pl.col('MP_Top').add(1)).alias('ParScore_Pct_NS'),
-        (1-pl.col('MP_ParScore_NS')/pl.col('MP_Top').add(1)).alias('ParScore_Pct_EW'),
-        (pl.col('MP_EV_NS_Max')/pl.col('MP_Top').add(1)).alias('EV_Pct_NS'), # wrong
-        (1-pl.col('MP_EV_NS_Max')/pl.col('MP_Top').add(1)).alias('EV_Pct_EW'), # wrong
-        (pl.col('MP_EV_NS_Max')/pl.col('MP_Top').add(1)).alias('EV_Pct_NS_Max'), # wrong
-        (1-pl.col('MP_EV_NS_Max')/pl.col('MP_Top').add(1)).alias('EV_Pct_EW_Max'), # wrong
-    )
-    return df
-

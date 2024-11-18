@@ -3,14 +3,14 @@
 # Invoke from system prompt using: streamlit run ffbridge_streamlit.py
 
 # todo showstoppers:
-# implment missing and wrong columns. mostly in mlBridgeAugmentLib.Perform_DD_SD_Augmentations
-# implement game date
+# fix EV stuff. lot's wrong. NV vs V, column naming, are they even correctly calculated and displayed?
+# game date? do we have to get a new URL?
 
 # todo lower priority:
 # do something with packages/version/authors stuff at top of page.
-# reject non-pair games
-# make player_id string? what about others?
-# don't destroy container? append new dataframes to bottom.
+# test that non-pair games are rejected.
+# change player_id dtype from int to string? what about others?
+# don't destroy st.container()? append new dataframes to bottom of container.
 
 # todo ffbridge:
 # given a player_id, how to get recent games?
@@ -52,28 +52,35 @@ import mlBridgeAugmentLib
 def ShowDataFrameTable(df, key, query='SELECT * FROM self', show_sql_query=True):
     if show_sql_query and st.session_state.show_sql_query:
         st.text(f"SQL Query: {query}")
+
+    # if query doesn't start with 'FROM self', add 'FROM self' to the beginning of the query.
+    # this syntax makes easy work of adding FROM but isn't compatible with polars SQL. duckdb only.
+    if not query.lower().startswith('from self '):
+        query = 'FROM self ' + query
+
+    # polars SQL has so many issues that it's impossible to use. disabling until 2030.
+    # try:
+    #     # First try using Polars SQL. However, Polars doesn't support some SQL functions: string_agg(), agg_value(), some joins are not supported.
+    #     if True: # workaround issued by polars. CASE WHEN AVG() ELSE AVG() -> AVG(CASE WHEN ...)
+    #         result_df = st.session_state.con.execute(query).pl()
+    #     else:
+    #         result_df = df.sql(query) # todo: enforce FROM self for security concerns?
+    # except Exception as e:
+    #     try:
+    #         # If Polars fails, try DuckDB
+    #         print(f"Polars SQL failed. Trying DuckDB: {e}")
+    #         result_df = st.session_state.con.execute(query).pl()
+    #     except Exception as e2:
+    #         st.error(f"Both Polars and DuckDB SQL engines have failed. Polars error: {e}, DuckDB error: {e2}. Query: {query}")
+    #         return None
     
     try:
-        # First try using Polars SQL. However, Polars doesn't support some SQL functions: string_agg(), agg_value(), some joins are not supported.
-        if True: # workaround issued by polars. CASE WHEN AVG() ELSE AVG() -> AVG(CASE WHEN ...)
-            result_df = st.session_state.con.execute(query).pl()
-        else:
-            result_df = df.sql(query) # todo: enforce FROM self for security concerns?
-    except Exception as e:
-        try:
-            # If Polars fails, try DuckDB
-            print(f"Polars SQL failed. Trying DuckDB: {e}")
-            result_df = st.session_state.con.execute(query).pl()
-        except Exception as e2:
-            st.error(f"Both Polars and DuckDB SQL engines have failed. Polars error: {e}, DuckDB error: {e2}. Query: {query}")
-            return None
-    
-    try:
+        result_df = st.session_state.con.execute(query).pl()
         if show_sql_query and st.session_state.show_sql_query:
             st.text(f"Result is a dataframe of {len(result_df)} rows.")
         streamlitlib.ShowDataFrameTable(result_df, key) # requires pandas dataframe.
     except Exception as e:
-        st.error(f"ShowDataFrameTable: error:{e} query:{query}")
+        st.error(f"duckdb exception: error:{e} query:{query}")
         return None
     
     return result_df
@@ -88,13 +95,11 @@ def app_info():
 def chat_input_on_submit():
     prompt = st.session_state.main_prompt_chat_input
     # todo: if sql query doesn't have FROM keyword, insert 'FROM self'?
-    if ' from ' not in prompt.lower():
-        prompt = 'FROM self ' + prompt
     ShowDataFrameTable(st.session_state.df, query=prompt, key='user_query_main_doit')
 
 
 def sample_count_on_change():
-    st.session_state.single_dummy_sample_count = st.session_state.create_sidebar_single_dummy_sample_count
+    st.session_state.single_dummy_sample_count = st.session_state.create_sidebar_single_dummy_sample_count_on_change
     if 'df' in st.session_state: # todo: is this still needed?
         st.session_state.df = load_historical_data()
 
@@ -455,7 +460,7 @@ if __name__ == '__main__':
         streamlit_chat.message(f"Morty: I'm preparing a postmortem report on your game. I only understand pair games using a Mitchell movement.", key=f'morty_restrictions', logo=st.session_state.assistant_logo)
         streamlit_chat.message(f"Morty: Takes me a full minute to download and analyze your game. Please wait until report is fully rendered.", key=f'morty_in_a_minute', logo=st.session_state.assistant_logo)
 
-        single_dummy_sample_count_default = 2  # number of random deals to generate for calculating single dummy probabilities. Use smaller number for testing.
+        single_dummy_sample_count_default = 40 #2  # number of random deals to generate for calculating single dummy probabilities. Use smaller number for testing.
         st.session_state.single_dummy_sample_count = single_dummy_sample_count_default
         st.session_state.show_sql_query_default = True
         st.session_state.show_sql_query = st.session_state.show_sql_query_default
@@ -539,6 +544,8 @@ if __name__ == '__main__':
                 #st.markdown('[Back to Top](#your-personalized-report)')
 
                 # As an html button (needs styling added)
+                # can't use link_button() restarts page rendering. markdown() will correctly jump to href.
+                # st.link_button('Go to top of report',url='#your-personalized-report')
                 st.markdown(''' <a target="_self" href="#your-personalized-report">
                                     <button>
                                         Go to top of report

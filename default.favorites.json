@@ -107,7 +107,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, parscore, pct, parscore pct, sd pct, DD score, tricks, DD tricks. Boards_We_Played=True",
-						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, ParScore_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_Pct_{Pair_Direction}, SDPct_{Pair_Direction}, DDScore_{Pair_Direction}, Tricks, DDTricks FROM self WHERE Boards_We_Played = True ORDER BY Board"
+						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, ParScore_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_Pct_{Pair_Direction}, SDPct_{Pair_Direction}, DDScore_{Pair_Direction}, Tricks, DDTricks WHERE Boards_We_Played = True ORDER BY Board"
 					}
 				]
 			},
@@ -117,7 +117,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, pct, contract, score, parscore, parscore pct, sd pct. Show those boards I played and pct > .7. Sort by pct descending.",
-						"sql": "SELECT Board, Pct_{Pair_Direction} AS Pct, Contract, Score_{Pair_Direction} AS Score, ParScore_{Pair_Direction} AS ParScore, ParScore_Pct_{Pair_Direction} AS ParScore_Pct, SDPct_{Pair_Direction} AS SD_Pct FROM self WHERE Boards_I_Played = True AND Pct_{Pair_Direction} > .7 ORDER BY Pct_{Pair_Direction} DESC"
+						"sql": "SELECT Board, Pct_{Pair_Direction} AS Pct, Contract, Score_{Pair_Direction} AS Score, ParScore_{Pair_Direction} AS ParScore, ParScore_Pct_{Pair_Direction} AS ParScore_Pct, SDPct_{Pair_Direction} AS SD_Pct WHERE Boards_I_Played = True AND Pct_{Pair_Direction} > .7 ORDER BY Pct_{Pair_Direction} DESC"
 					}
 				]
 			},
@@ -127,7 +127,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, pct, contract, score, parscore, parscore pct, sd pct. Show those boards I played and pct < .3. Sort by pct ascending.",
-						"sql": "SELECT Board, Pct_{Pair_Direction} AS Pct, Contract, Score_{Pair_Direction} AS Score, ParScore_{Pair_Direction} AS ParScore, ParScore_Pct_{Pair_Direction} AS ParScore_Pct, SDPct_{Pair_Direction} AS SD_Pct FROM self WHERE Boards_I_Played = True AND Pct_{Pair_Direction} < .3 ORDER BY Pct_{Pair_Direction} ASC"
+						"sql": "SELECT Board, Pct_{Pair_Direction} AS Pct, Contract, Score_{Pair_Direction} AS Score, ParScore_{Pair_Direction} AS ParScore, ParScore_Pct_{Pair_Direction} AS ParScore_Pct, SDPct_{Pair_Direction} AS SD_Pct WHERE Boards_I_Played = True AND Pct_{Pair_Direction} < .3 ORDER BY Pct_{Pair_Direction} ASC"
 					}
 				]
 			},
@@ -137,7 +137,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, parscore, pct, parscore pct, sd pct. Show those boards I played and score > parscore.",
-						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, ParScore_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_Pct_{Pair_Direction}, SDPct_{Pair_Direction} FROM self WHERE Boards_I_Played = True AND Score_{Pair_Direction} > ParScore_{Pair_Direction} ORDER BY Board"
+						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, ParScore_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_Pct_{Pair_Direction}, SDPct_{Pair_Direction} WHERE Boards_I_Played = True AND Score_{Pair_Direction} > ParScore_{Pair_Direction} ORDER BY Board"
 					}
 				]
 			},
@@ -147,7 +147,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, parscore, pct, parscore pct, sd pct. Show those boards I played and score = parscore.",
-						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, ParScore_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_Pct_{Pair_Direction}, SDPct_{Pair_Direction} FROM self WHERE Boards_I_Played = True AND Score_{Pair_Direction} = ParScore_{Pair_Direction} ORDER BY Board"
+						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, ParScore_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_Pct_{Pair_Direction}, SDPct_{Pair_Direction} WHERE Boards_I_Played = True AND Score_{Pair_Direction} = ParScore_{Pair_Direction} ORDER BY Board"
 					}
 				]
 			},
@@ -157,7 +157,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, parscore, pct, parscore pct, sd pct. Show those boards I played and score < parscore.",
-						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, ParScore_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_Pct_{Pair_Direction}, SDPct_{Pair_Direction} FROM self WHERE Boards_I_Played = True AND Score_{Pair_Direction} < ParScore_{Pair_Direction} ORDER BY Board"
+						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, ParScore_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_Pct_{Pair_Direction}, SDPct_{Pair_Direction} WHERE Boards_I_Played = True AND Score_{Pair_Direction} < ParScore_{Pair_Direction} ORDER BY Board"
 					}
 				]
 			},
@@ -167,7 +167,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, parscore, pct, parscore pct, sd pct, tricks, DD tricks. Show those boards I declared and tricks < DD tricks.",
-						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, ParScore_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_Pct_{Pair_Direction}, SDPct_{Pair_Direction}, Tricks, DDTricks FROM self WHERE Boards_I_Declared = True AND Tricks < DDTricks ORDER BY Board"
+						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, ParScore_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_Pct_{Pair_Direction}, SDPct_{Pair_Direction}, Tricks, DDTricks WHERE Boards_I_Declared = True AND Tricks < DDTricks ORDER BY Board"
 					}
 				]
 			},
@@ -177,7 +177,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, parscore, pct, parscore pct, sd pct, tricks, DD tricks. Show those boards partner declared and tricks < DD tricks.",
-						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, ParScore_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_Pct_{Pair_Direction}, SDPct_{Pair_Direction}, Tricks, DDTricks FROM self WHERE Boards_Partner_Declared = True AND Tricks < DDTricks ORDER BY Board"
+						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, ParScore_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_Pct_{Pair_Direction}, SDPct_{Pair_Direction}, Tricks, DDTricks WHERE Boards_Partner_Declared = True AND Tricks < DDTricks ORDER BY Board"
 					}
 				]
 			},
@@ -187,7 +187,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, parscore, pct, parscore pct, sd pct, tricks, DD tricks. Show those boards we played and pct < parscore pct.",
-						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, ParScore_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_Pct_{Pair_Direction}, SDPct_{Pair_Direction}, Tricks, DDTricks FROM self WHERE Boards_We_Played = True AND Pct_{Pair_Direction} < ParScore_Pct_{Pair_Direction} ORDER BY Board"
+						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, ParScore_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_Pct_{Pair_Direction}, SDPct_{Pair_Direction}, Tricks, DDTricks WHERE Boards_We_Played = True AND Pct_{Pair_Direction} < ParScore_Pct_{Pair_Direction} ORDER BY Board"
 					}
 				]
 			},
@@ -197,7 +197,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, parscore, pct, parscore pct, sd contract, sd score, sd pct, sd mps max, sd pct max, sd score diff, sd score max diff, sd pct diff, sd pct max diff, sd parscore pct diff, sd parscore pct max diff. Show those boards we declared.",
-						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, ParScore_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_Pct_{Pair_Direction}, SDContract_Max, SDScore_{Pair_Direction}, SDPct_{Pair_Direction}, SDMPs_Max_{Pair_Direction}, SDPct_Max_{Pair_Direction}, SDScore_Diff_{Pair_Direction}, SDScore_Max_Diff_{Pair_Direction}, SDPct_Diff_{Pair_Direction}, SDPct_Max_Diff_{Pair_Direction}, SDParScore_Pct_Diff_{Pair_Direction}, SDParScore_Pct_Max_Diff_{Pair_Direction} FROM self WHERE Boards_We_Declared = True ORDER BY Board"
+						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, ParScore_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_Pct_{Pair_Direction}, SDContract_Max, SDScore_{Pair_Direction}, SDPct_{Pair_Direction}, SDMPs_Max_{Pair_Direction}, SDPct_Max_{Pair_Direction}, SDScore_Diff_{Pair_Direction}, SDScore_Max_Diff_{Pair_Direction}, SDPct_Diff_{Pair_Direction}, SDPct_Max_Diff_{Pair_Direction}, SDParScore_Pct_Diff_{Pair_Direction}, SDParScore_Pct_Max_Diff_{Pair_Direction} WHERE Boards_We_Declared = True ORDER BY Board"
 					}
 				]
 			},
@@ -207,7 +207,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, pct, parscore, tricks, dd tricks, sd score, sd score max, sd contract max. Show those boards we declared and score > parscore and score > sd score.",
-						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_{Pair_Direction}, Tricks, DDTricks, SDScore_{Pair_Direction}, SDScore_Max_{Pair_Direction}, SDContract_Max FROM self WHERE Boards_We_Declared = True AND Score_{Pair_Direction} > ParScore_{Pair_Direction} AND Score_{Pair_Direction} > SDScore_{Pair_Direction} ORDER BY Board"
+						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_{Pair_Direction}, Tricks, DDTricks, SDScore_{Pair_Direction}, SDScore_Max_{Pair_Direction}, SDContract_Max WHERE Boards_We_Declared = True AND Score_{Pair_Direction} > ParScore_{Pair_Direction} AND Score_{Pair_Direction} > SDScore_{Pair_Direction} ORDER BY Board"
 					}
 				]
 			},
@@ -217,11 +217,11 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_Name_NS, AVG(CASE WHEN Score_NS <= ParScore_NS OR Score_NS <= SDScore_NS THEN Pct_NS ELSE NULL END) AS Avg_Pct_NS, COUNT(CASE WHEN Score_NS <= ParScore_NS OR Score_NS <= SDScore_NS THEN 1 ELSE NULL END) AS Board_Count, STRING_AGG(CASE WHEN Score_NS > ParScore_NS AND Score_NS > SDScore_NS THEN Board END, ', ') AS Gifted_Boards_Removed FROM self GROUP BY Pair_Name_NS ORDER BY Avg_Pct_NS DESC, Board_Count DESC"
+						"sql": "SELECT CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_Name_NS, AVG(CASE WHEN Score_NS <= ParScore_NS OR Score_NS <= SDScore_NS THEN Pct_NS ELSE NULL END) AS Avg_Pct_NS, COUNT(CASE WHEN Score_NS <= ParScore_NS OR Score_NS <= SDScore_NS THEN 1 ELSE NULL END) AS Board_Count, STRING_AGG(CASE WHEN Score_NS > ParScore_NS AND Score_NS > SDScore_NS THEN Board END, ', ') AS Gifted_Boards_Removed GROUP BY Pair_Name_NS ORDER BY Avg_Pct_NS DESC, Board_Count DESC"
 					},
 					{
 						"prompt": "",
-						"sql": "SELECT CONCAT(section_name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_Name_EW, AVG(CASE WHEN Score_EW <= ParScore_EW OR Score_EW <= SDScore_EW THEN Pct_EW ELSE NULL END) AS Avg_Pct_EW, COUNT(CASE WHEN Score_EW <= ParScore_EW OR Score_EW <= SDScore_EW THEN 1 ELSE NULL END) AS Board_Count, STRING_AGG(CASE WHEN Score_EW > ParScore_EW AND Score_EW > SDScore_EW THEN Board END, ', ') AS Gifted_Boards_Removed FROM self GROUP BY Pair_Name_EW ORDER BY Avg_Pct_EW DESC, Board_Count DESC"
+						"sql": "SELECT CONCAT(section_name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_Name_EW, AVG(CASE WHEN Score_EW <= ParScore_EW OR Score_EW <= SDScore_EW THEN Pct_EW ELSE NULL END) AS Avg_Pct_EW, COUNT(CASE WHEN Score_EW <= ParScore_EW OR Score_EW <= SDScore_EW THEN 1 ELSE NULL END) AS Board_Count, STRING_AGG(CASE WHEN Score_EW > ParScore_EW AND Score_EW > SDScore_EW THEN Board END, ', ') AS Gifted_Boards_Removed GROUP BY Pair_Name_EW ORDER BY Avg_Pct_EW DESC, Board_Count DESC"
 					}
 				]
 			},
@@ -231,7 +231,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, pct, parscore, tricks, dd tricks, sd score, sd score max, sd contract max. Show those boards we played and score < parscore and pct > .70.",
-						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_{Pair_Direction}, Tricks, DDTricks, SDScore_{Pair_Direction}, SDScore_Max_{Pair_Direction}, SDContract_Max FROM self WHERE Boards_We_Played = True AND Score_{Pair_Direction} < ParScore_{Pair_Direction} AND Pct_{Pair_Direction} > .70 ORDER BY Board"
+						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_{Pair_Direction}, Tricks, DDTricks, SDScore_{Pair_Direction}, SDScore_Max_{Pair_Direction}, SDContract_Max WHERE Boards_We_Played = True AND Score_{Pair_Direction} < ParScore_{Pair_Direction} AND Pct_{Pair_Direction} > .70 ORDER BY Board"
 					}
 				]
 			},
@@ -242,7 +242,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, pct, parscore, tricks, dd tricks, sd score, sd score max, sd contract max. Show those boards we played and score < parscore and pct < .30.",
-						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_{Pair_Direction}, Tricks, DDTricks, SDScore_{Pair_Direction}, SDScore_Max_{Pair_Direction}, SDContract_Max FROM self WHERE Boards_We_Played = True AND Score_{Pair_Direction} < ParScore_{Pair_Direction} AND Pct_{Pair_Direction} < 0.30 ORDER BY Board"
+						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_{Pair_Direction}, Tricks, DDTricks, SDScore_{Pair_Direction}, SDScore_Max_{Pair_Direction}, SDContract_Max WHERE Boards_We_Played = True AND Score_{Pair_Direction} < ParScore_{Pair_Direction} AND Pct_{Pair_Direction} < 0.30 ORDER BY Board"
 					}
 				]
 			},
@@ -252,7 +252,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, contract, pct, score, tricks, dd tricks, parscore, sd score, sd score max, sd contract max. Show those boards opponent declared and score < parscore and score < sd score.",
-						"sql": "SELECT Board, Contract, Pct_{Pair_Direction}, Score_{Pair_Direction}, Tricks, DDTricks, ParScore_{Pair_Direction}, SDScore_{Pair_Direction}, SDScore_Max_{Pair_Direction}, SDContract_Max FROM self WHERE Boards_Opponent_Declared = True AND Score_{Pair_Direction} < ParScore_{Pair_Direction} AND Score_{Pair_Direction} < SDScore_{Pair_Direction} ORDER BY Board"
+						"sql": "SELECT Board, Contract, Pct_{Pair_Direction}, Score_{Pair_Direction}, Tricks, DDTricks, ParScore_{Pair_Direction}, SDScore_{Pair_Direction}, SDScore_Max_{Pair_Direction}, SDContract_Max WHERE Boards_Opponent_Declared = True AND Score_{Pair_Direction} < ParScore_{Pair_Direction} AND Score_{Pair_Direction} < SDScore_{Pair_Direction} ORDER BY Board"
 					}
 				]
 			},
@@ -262,7 +262,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, contract, pct, score, tricks, dd tricks, parscore, sd score, sd score max, sd contract max. Show those boards we declared and score > 0 and score < parscore and score < sd score.",
-						"sql": "SELECT Board, Contract, Pct_{Pair_Direction} AS Pct, Score_{Pair_Direction} AS Score, Tricks, DDTricks, ParScore_{Pair_Direction} AS ParScore, SDScore_{Pair_Direction} AS SDScore, SDScore_Max_{Pair_Direction} AS SDScore_Max, SDContract_Max FROM self WHERE Boards_We_Declared = True AND Score_{Pair_Direction} > 0 AND Score_{Pair_Direction} < ParScore_{Pair_Direction} AND Score_{Pair_Direction} < SDScore_{Pair_Direction} ORDER BY Board"
+						"sql": "SELECT Board, Contract, Pct_{Pair_Direction} AS Pct, Score_{Pair_Direction} AS Score, Tricks, DDTricks, ParScore_{Pair_Direction} AS ParScore, SDScore_{Pair_Direction} AS SDScore, SDScore_Max_{Pair_Direction} AS SDScore_Max, SDContract_Max WHERE Boards_We_Declared = True AND Score_{Pair_Direction} > 0 AND Score_{Pair_Direction} < ParScore_{Pair_Direction} AND Score_{Pair_Direction} < SDScore_{Pair_Direction} ORDER BY Board"
 					}
 				]
 			},
@@ -272,7 +272,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, parscore, sd score, sd score max, sd contract max. Show those boards opponent declared and score > 0 and score < parscore and score < sd score.",
-						"sql": "SELECT Board, Contract, Score_{Opponent_Pair_Direction}, ParScore_{Opponent_Pair_Direction}, SDScore_{Opponent_Pair_Direction}, SDScore_Max_{Opponent_Pair_Direction}, SDContract_Max FROM self WHERE Boards_Opponent_Declared = True AND Score_{Opponent_Pair_Direction} > 0 AND Score_{Opponent_Pair_Direction} < ParScore_{Opponent_Pair_Direction} AND Score_{Opponent_Pair_Direction} < SDScore_{Opponent_Pair_Direction} ORDER BY Board"
+						"sql": "SELECT Board, Contract, Score_{Opponent_Pair_Direction}, ParScore_{Opponent_Pair_Direction}, SDScore_{Opponent_Pair_Direction}, SDScore_Max_{Opponent_Pair_Direction}, SDContract_Max WHERE Boards_Opponent_Declared = True AND Score_{Opponent_Pair_Direction} > 0 AND Score_{Opponent_Pair_Direction} < ParScore_{Opponent_Pair_Direction} AND Score_{Opponent_Pair_Direction} < SDScore_{Opponent_Pair_Direction} ORDER BY Board"
 					}
 				]
 			},
@@ -282,7 +282,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, parscore, pct, parscore pct, sd pct, DD score, tricks, DD tricks. Show those boards I declared.",
-						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, ParScore_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_Pct_{Pair_Direction}, SDPct_{Pair_Direction}, DDScore_{Pair_Direction}, Tricks, DDTricks FROM self WHERE Boards_I_Declared = True ORDER BY Board"
+						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, ParScore_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_Pct_{Pair_Direction}, SDPct_{Pair_Direction}, DDScore_{Pair_Direction}, Tricks, DDTricks WHERE Boards_I_Declared = True ORDER BY Board"
 					}
 				]
 			},
@@ -292,7 +292,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, parscore, pct, parscore pct, sd pct, DD score, tricks, DD tricks. Show those boards partner declared.",
-						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, ParScore_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_Pct_{Pair_Direction}, SDPct_{Pair_Direction}, DDScore_{Pair_Direction}, Tricks, DDTricks FROM self WHERE Boards_Partner_Declared = True ORDER BY Board"
+						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, ParScore_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_Pct_{Pair_Direction}, SDPct_{Pair_Direction}, DDScore_{Pair_Direction}, Tricks, DDTricks WHERE Boards_Partner_Declared = True ORDER BY Board"
 					}
 				]
 			},
@@ -302,7 +302,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT AVG(CASE WHEN Our_Boards THEN Pct_{Pair_Direction} ELSE NULL END) AS Avg_Of_All_Our_Boards, AVG(CASE WHEN Boards_We_Declared THEN Pct_{Pair_Direction} ELSE NULL END) AS Avg_Of_Boards_We_Declared, AVG(CASE WHEN Boards_I_Declared THEN Pct_{Pair_Direction} ELSE NULL END) AS Avg_Of_Boards_I_Declared, AVG(CASE WHEN Boards_Partner_Declared THEN Pct_{Pair_Direction} ELSE NULL END) AS Avg_Of_Boards_Partner_Declared FROM self"
+						"sql": "SELECT AVG(CASE WHEN Our_Boards THEN Pct_{Pair_Direction} ELSE NULL END) AS Avg_Of_All_Our_Boards, AVG(CASE WHEN Boards_We_Declared THEN Pct_{Pair_Direction} ELSE NULL END) AS Avg_Of_Boards_We_Declared, AVG(CASE WHEN Boards_I_Declared THEN Pct_{Pair_Direction} ELSE NULL END) AS Avg_Of_Boards_I_Declared, AVG(CASE WHEN Boards_Partner_Declared THEN Pct_{Pair_Direction} ELSE NULL END) AS Avg_Of_Boards_Partner_Declared"
 					}
 				]
 			},
@@ -312,7 +312,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT AVG(CASE WHEN Boards_We_Declared THEN DDPct_{Pair_Direction} ELSE NULL END) AS Avg_DD_Pct_Of_Boards_We_Declared, AVG(CASE WHEN Boards_I_Declared THEN DDPct_{Pair_Direction} ELSE NULL END) AS Avg_DD_Pct_Of_Boards_I_Declared, AVG(CASE WHEN Boards_Partner_Declared THEN DDPct_{Pair_Direction} ELSE NULL END) AS Avg_DD_Pct_Of_Boards_Partner_Declared FROM self"
+						"sql": "SELECT AVG(CASE WHEN Boards_We_Declared THEN DDPct_{Pair_Direction} ELSE NULL END) AS Avg_DD_Pct_Of_Boards_We_Declared, AVG(CASE WHEN Boards_I_Declared THEN DDPct_{Pair_Direction} ELSE NULL END) AS Avg_DD_Pct_Of_Boards_I_Declared, AVG(CASE WHEN Boards_Partner_Declared THEN DDPct_{Pair_Direction} ELSE NULL END) AS Avg_DD_Pct_Of_Boards_Partner_Declared"
 					}
 				]
 			},
@@ -322,7 +322,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT AVG(CASE WHEN Boards_We_Declared THEN ParScore_Pct_{Pair_Direction} ELSE NULL END) AS Avg_ParScore_Pct_Of_Boards_We_Declared, AVG(CASE WHEN Boards_I_Declared THEN ParScore_Pct_{Pair_Direction} ELSE NULL END) AS Avg_ParScore_Pct_Of_Boards_I_Declared, AVG(CASE WHEN Boards_Partner_Declared THEN ParScore_Pct_{Pair_Direction} ELSE NULL END) AS Avg_ParScore_Pct_Of_Boards_Partner_Declared FROM self"
+						"sql": "SELECT AVG(CASE WHEN Boards_We_Declared THEN ParScore_Pct_{Pair_Direction} ELSE NULL END) AS Avg_ParScore_Pct_Of_Boards_We_Declared, AVG(CASE WHEN Boards_I_Declared THEN ParScore_Pct_{Pair_Direction} ELSE NULL END) AS Avg_ParScore_Pct_Of_Boards_I_Declared, AVG(CASE WHEN Boards_Partner_Declared THEN ParScore_Pct_{Pair_Direction} ELSE NULL END) AS Avg_ParScore_Pct_Of_Boards_Partner_Declared"
 					}
 				]
 			},
@@ -332,7 +332,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT AVG(CASE WHEN Boards_We_Declared THEN SDPct_{Pair_Direction} ELSE NULL END) AS Avg_SD_Pct_Of_Boards_We_Declared, AVG(CASE WHEN Boards_I_Declared THEN SDPct_{Pair_Direction} ELSE NULL END) AS Avg_SD_Pct_Of_Boards_I_Declared, AVG(CASE WHEN Boards_Partner_Declared THEN SDPct_{Pair_Direction} ELSE NULL END) AS Avg_SD_Pct_Of_Boards_Partner_Declared FROM self"
+						"sql": "SELECT AVG(CASE WHEN Boards_We_Declared THEN SDPct_{Pair_Direction} ELSE NULL END) AS Avg_SD_Pct_Of_Boards_We_Declared, AVG(CASE WHEN Boards_I_Declared THEN SDPct_{Pair_Direction} ELSE NULL END) AS Avg_SD_Pct_Of_Boards_I_Declared, AVG(CASE WHEN Boards_Partner_Declared THEN SDPct_{Pair_Direction} ELSE NULL END) AS Avg_SD_Pct_Of_Boards_Partner_Declared"
 					}
 				]
 			},
@@ -342,7 +342,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT AVG(CASE WHEN Boards_We_Declared THEN SDPct_Max_{Pair_Direction} ELSE NULL END) AS Avg_SDPct_Max_Of_Boards_We_Declared, AVG(CASE WHEN Boards_I_Declared THEN SDPct_Max_{Pair_Direction} ELSE NULL END) AS Avg_SDPct_Max_Of_Boards_I_Declared, AVG(CASE WHEN Boards_Partner_Declared THEN SDPct_Max_{Pair_Direction} ELSE NULL END) AS Avg_SDPct_Max_Of_Boards_Partner_Declared FROM self"
+						"sql": "SELECT AVG(CASE WHEN Boards_We_Declared THEN SDPct_Max_{Pair_Direction} ELSE NULL END) AS Avg_SDPct_Max_Of_Boards_We_Declared, AVG(CASE WHEN Boards_I_Declared THEN SDPct_Max_{Pair_Direction} ELSE NULL END) AS Avg_SDPct_Max_Of_Boards_I_Declared, AVG(CASE WHEN Boards_Partner_Declared THEN SDPct_Max_{Pair_Direction} ELSE NULL END) AS Avg_SDPct_Max_Of_Boards_Partner_Declared"
 					}
 				]
 			},
@@ -353,7 +353,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, sd pct diff, contract, score, parscore, pct, parscore pct, sd pct, dd tricks, sd parscore pct diff, sd score, sd probs taking_* sort by sd pct diff descending. Show those boards we played.",
-						"sql": "SELECT Board, SDPct_Diff_{Pair_Direction} AS SD_Pct_Diff, Contract, Score_{Pair_Direction} AS Score, ParScore_{Pair_Direction} AS ParScore, Pct_{Pair_Direction} AS Pct, ParScore_Pct_{Pair_Direction} AS ParScore_Pct, section_name, Pair_Number_NS, Pair_Number_EW, SDPct_{Pair_Direction} AS SD_Pct, DDTricks, SDParScore_Pct_Diff_{Pair_Direction} AS SD_ParScore_Pct_Diff, SDScore_{Pair_Direction} AS SD_Score, SDProbs_Taking_0, SDProbs_Taking_1, SDProbs_Taking_2, SDProbs_Taking_3, SDProbs_Taking_4, SDProbs_Taking_5, SDProbs_Taking_6, SDProbs_Taking_7, SDProbs_Taking_8, SDProbs_Taking_9, SDProbs_Taking_10, SDProbs_Taking_11, SDProbs_Taking_12, SDProbs_Taking_13 FROM self WHERE Boards_We_Played = True ORDER BY SDPct_Diff_{Pair_Direction} DESC"
+						"sql": "SELECT Board, SDPct_Diff_{Pair_Direction} AS SD_Pct_Diff, Contract, Score_{Pair_Direction} AS Score, ParScore_{Pair_Direction} AS ParScore, Pct_{Pair_Direction} AS Pct, ParScore_Pct_{Pair_Direction} AS ParScore_Pct, section_name, Pair_Number_NS, Pair_Number_EW, SDPct_{Pair_Direction} AS SD_Pct, DDTricks, SDParScore_Pct_Diff_{Pair_Direction} AS SD_ParScore_Pct_Diff, SDScore_{Pair_Direction} AS SD_Score, SDProbs_Taking_0, SDProbs_Taking_1, SDProbs_Taking_2, SDProbs_Taking_3, SDProbs_Taking_4, SDProbs_Taking_5, SDProbs_Taking_6, SDProbs_Taking_7, SDProbs_Taking_8, SDProbs_Taking_9, SDProbs_Taking_10, SDProbs_Taking_11, SDProbs_Taking_12, SDProbs_Taking_13 WHERE Boards_We_Played = True ORDER BY SDPct_Diff_{Pair_Direction} DESC"
 					}
 				]
 			},
@@ -364,7 +364,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, bidsuit, contract, score, pct, section_name, pair_number_ns, pair_number_ew, sd score, sd pct diff, sd pct, dd tricks, sd probs taking_* sort by board, bidsuit, sd pct diff descending.",
-						"sql": "SELECT Board, BidSuit, Contract, Score_{Pair_Direction}, Pct_{Pair_Direction}, section_name, Pair_Number_NS, Pair_Number_EW, SDScore_{Pair_Direction}, SDPct_Max_Diff_{Pair_Direction}, SDPct_{Pair_Direction}, DDTricks, SDProbs_Taking_0, SDProbs_Taking_1, SDProbs_Taking_2, SDProbs_Taking_3, SDProbs_Taking_4, SDProbs_Taking_5, SDProbs_Taking_6, SDProbs_Taking_7, SDProbs_Taking_8, SDProbs_Taking_9, SDProbs_Taking_10, SDProbs_Taking_11, SDProbs_Taking_12, SDProbs_Taking_13 FROM self WHERE Pair_Number_{Pair_Direction} IS NOT NULL ORDER BY Board, BidSuit, SDPct_Max_Diff_{Pair_Direction} DESC"
+						"sql": "SELECT Board, BidSuit, Contract, Score_{Pair_Direction}, Pct_{Pair_Direction}, section_name, Pair_Number_NS, Pair_Number_EW, SDScore_{Pair_Direction}, SDPct_Max_Diff_{Pair_Direction}, SDPct_{Pair_Direction}, DDTricks, SDProbs_Taking_0, SDProbs_Taking_1, SDProbs_Taking_2, SDProbs_Taking_3, SDProbs_Taking_4, SDProbs_Taking_5, SDProbs_Taking_6, SDProbs_Taking_7, SDProbs_Taking_8, SDProbs_Taking_9, SDProbs_Taking_10, SDProbs_Taking_11, SDProbs_Taking_12, SDProbs_Taking_13 WHERE Pair_Number_{Pair_Direction} IS NOT NULL ORDER BY Board, BidSuit, SDPct_Max_Diff_{Pair_Direction} DESC"
 					}
 				]
 			},
@@ -374,7 +374,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT Board, COUNT(Contract) AS Freq_Contract, Contract, ANY_VALUE(ParScore_{Pair_Direction}) AS ParScore_{Pair_Direction}, ANY_VALUE(ParScore_Pct_{Pair_Direction}) AS ParScore_Pct_{Pair_Direction}, ANY_VALUE(SDScore_{Pair_Direction}) AS SDScore_{Pair_Direction}, ANY_VALUE(SDPct_Max_Diff_{Pair_Direction}) AS SDPct_Max_Diff_{Pair_Direction}, ANY_VALUE(SDPct_{Pair_Direction}) AS SDPct_{Pair_Direction}, ANY_VALUE(DDTricks) AS DDTricks, ANY_VALUE(SDProbs_Taking_0) AS SDProbs_Taking_0, ANY_VALUE(SDProbs_Taking_1) AS SDProbs_Taking_1, ANY_VALUE(SDProbs_Taking_2) AS SDProbs_Taking_2, ANY_VALUE(SDProbs_Taking_3) AS SDProbs_Taking_3, ANY_VALUE(SDProbs_Taking_4) AS SDProbs_Taking_4, ANY_VALUE(SDProbs_Taking_5) AS SDProbs_Taking_5, ANY_VALUE(SDProbs_Taking_6) AS SDProbs_Taking_6, ANY_VALUE(SDProbs_Taking_7) AS SDProbs_Taking_7, ANY_VALUE(SDProbs_Taking_8) AS SDProbs_Taking_8, ANY_VALUE(SDProbs_Taking_9) AS SDProbs_Taking_9, ANY_VALUE(SDProbs_Taking_10) AS SDProbs_Taking_10, ANY_VALUE(SDProbs_Taking_11) AS SDProbs_Taking_11, ANY_VALUE(SDProbs_Taking_12) AS SDProbs_Taking_12, ANY_VALUE(SDProbs_Taking_13) AS SDProbs_Taking_13 FROM self GROUP BY Board, Contract ORDER BY Board, Contract"
+						"sql": "SELECT Board, COUNT(Contract) AS Freq_Contract, Contract, ANY_VALUE(ParScore_{Pair_Direction}) AS ParScore_{Pair_Direction}, ANY_VALUE(ParScore_Pct_{Pair_Direction}) AS ParScore_Pct_{Pair_Direction}, ANY_VALUE(SDScore_{Pair_Direction}) AS SDScore_{Pair_Direction}, ANY_VALUE(SDPct_Max_Diff_{Pair_Direction}) AS SDPct_Max_Diff_{Pair_Direction}, ANY_VALUE(SDPct_{Pair_Direction}) AS SDPct_{Pair_Direction}, ANY_VALUE(DDTricks) AS DDTricks, ANY_VALUE(SDProbs_Taking_0) AS SDProbs_Taking_0, ANY_VALUE(SDProbs_Taking_1) AS SDProbs_Taking_1, ANY_VALUE(SDProbs_Taking_2) AS SDProbs_Taking_2, ANY_VALUE(SDProbs_Taking_3) AS SDProbs_Taking_3, ANY_VALUE(SDProbs_Taking_4) AS SDProbs_Taking_4, ANY_VALUE(SDProbs_Taking_5) AS SDProbs_Taking_5, ANY_VALUE(SDProbs_Taking_6) AS SDProbs_Taking_6, ANY_VALUE(SDProbs_Taking_7) AS SDProbs_Taking_7, ANY_VALUE(SDProbs_Taking_8) AS SDProbs_Taking_8, ANY_VALUE(SDProbs_Taking_9) AS SDProbs_Taking_9, ANY_VALUE(SDProbs_Taking_10) AS SDProbs_Taking_10, ANY_VALUE(SDProbs_Taking_11) AS SDProbs_Taking_11, ANY_VALUE(SDProbs_Taking_12) AS SDProbs_Taking_12, ANY_VALUE(SDProbs_Taking_13) AS SDProbs_Taking_13 GROUP BY Board, Contract ORDER BY Board, Contract"
 					}
 				]
 			},
@@ -385,7 +385,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, contract, result, score, parscore, pct, parscore pct, sd pct, dd tricks, dd tricks dummy. Show those boards we played and dd tricks < dd tricks dummy.",
-						"sql": "SELECT Board, Contract, Result, Score_{Pair_Direction}, ParScore_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_Pct_{Pair_Direction}, SDPct_{Pair_Direction}, DDTricks, DDTricks_Dummy FROM self WHERE Boards_We_Played = True AND DDTricks < DDTricks_Dummy ORDER BY Board"
+						"sql": "SELECT Board, Contract, Result, Score_{Pair_Direction}, ParScore_{Pair_Direction}, Pct_{Pair_Direction}, ParScore_Pct_{Pair_Direction}, SDPct_{Pair_Direction}, DDTricks, DDTricks_Dummy WHERE Boards_We_Played = True AND DDTricks < DDTricks_Dummy ORDER BY Board"
 					}
 				]
 			},
@@ -395,7 +395,7 @@
 				"prompts": [
 					{
 						"prompt": "Show distinct board and all directions of HCP, QT, DP.",
-						"sql": "SELECT DISTINCT Board, HCP_{Pair_Direction}, HCP_{Opponent_Pair_Direction}, QT_{Pair_Direction}, QT_{Opponent_Pair_Direction}, DP_{Pair_Direction}, DP_{Opponent_Pair_Direction} FROM self ORDER BY Board"
+						"sql": "SELECT DISTINCT Board, HCP_{Pair_Direction}, HCP_{Opponent_Pair_Direction}, QT_{Pair_Direction}, QT_{Opponent_Pair_Direction}, DP_{Pair_Direction}, DP_{Opponent_Pair_Direction} ORDER BY Board"
 					}
 				]
 			},
@@ -405,7 +405,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT CASE WHEN '{Opponent_Pair_Direction}'='NS' THEN CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) ELSE CONCAT(section_name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) END AS Opponents, AVG(Pct_{Pair_Direction}) AS Avg_Pct_{Pair_Direction}, STRING_AGG(Board, ', ') AS Boards, STRING_AGG(ROUND(Pct_{Pair_Direction},2), ', ') AS Pcts_{Pair_Direction} FROM self WHERE Boards_We_Played = True GROUP BY Opponents ORDER BY Opponents"
+						"sql": "SELECT CASE WHEN '{Opponent_Pair_Direction}'='NS' THEN CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) ELSE CONCAT(section_name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) END AS Opponents, AVG(Pct_{Pair_Direction}) AS Avg_Pct_{Pair_Direction}, STRING_AGG(Board, ', ') AS Boards, STRING_AGG(ROUND(Pct_{Pair_Direction},2), ', ') AS Pcts_{Pair_Direction} WHERE Boards_We_Played = True GROUP BY Opponents ORDER BY Opponents"
 					}
 				]
 			},
@@ -416,7 +416,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT x.Board, x.BidSuit, x.ContractType, y.Contract, y.Pct_{Pair_Direction}, y.section_name, y.Pair_Number_NS, y.Pair_Number_EW FROM ((SELECT Board, BidSuit, ContractType FROM self GROUP BY Board, BidSuit, ContractType HAVING COUNT(*) = 1) AS x LEFT JOIN (SELECT * FROM self) AS y ON (x.Board, x.BidSuit, x.ContractType) = (y.Board, y.BidSuit, y.ContractType)) ORDER BY x.Board"
+						"sql": "SELECT x.Board, x.BidSuit, x.ContractType, y.Contract, y.Pct_{Pair_Direction}, y.section_name, y.Pair_Number_NS, y.Pair_Number_EW FROM ((SELECT Board, BidSuit, ContractType GROUP BY Board, BidSuit, ContractType HAVING COUNT(*) = 1) AS x LEFT JOIN (SELECT *) AS y ON (x.Board, x.BidSuit, x.ContractType) = (y.Board, y.BidSuit, y.ContractType)) ORDER BY x.Board"
 					}
 				]
 			},
@@ -427,7 +427,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT x.Board, x.BidSuit, x.ContractType, y.Contract, y.Pct_{Pair_Direction}, y.section_name, y.Pair_Number_NS, y.Pair_Number_EW, y.Boards_I_Played FROM ((SELECT Board, BidSuit, ContractType FROM self GROUP BY Board, BidSuit, ContractType HAVING COUNT(*) = 1) AS x LEFT JOIN (SELECT * FROM self) AS y ON (x.Board, x.BidSuit, x.ContractType) = (y.Board, y.BidSuit, y.ContractType)) WHERE y.Boards_I_Played=TRUE ORDER BY x.Board"
+						"sql": "SELECT x.Board, x.BidSuit, x.ContractType, y.Contract, y.Pct_{Pair_Direction}, y.section_name, y.Pair_Number_NS, y.Pair_Number_EW, y.Boards_I_Played FROM ((SELECT Board, BidSuit, ContractType GROUP BY Board, BidSuit, ContractType HAVING COUNT(*) = 1) AS x LEFT JOIN (SELECT *) AS y ON (x.Board, x.BidSuit, x.ContractType) = (y.Board, y.BidSuit, y.ContractType)) WHERE y.Boards_I_Played=TRUE ORDER BY x.Board"
 					}
 				]
 			},
@@ -438,7 +438,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT x.Board, x.BidSuit, x.ContractType, y.Contract, y.Pct_{Pair_Direction} AS Pct, y.section_name, y.Pair_Number_NS, y.Pair_Number_EW, y.Boards_We_Declared FROM ((SELECT Board, BidSuit, ContractType FROM self GROUP BY Board, BidSuit, ContractType HAVING COUNT(*) = 1) AS x LEFT JOIN (SELECT * FROM self) AS y ON (x.Board, x.BidSuit, x.ContractType) = (y.Board, y.BidSuit, y.ContractType)) WHERE y.Boards_We_Declared=TRUE ORDER BY x.Board"
+						"sql": "SELECT x.Board, x.BidSuit, x.ContractType, y.Contract, y.Pct_{Pair_Direction} AS Pct, y.section_name, y.Pair_Number_NS, y.Pair_Number_EW, y.Boards_We_Declared FROM ((SELECT Board, BidSuit, ContractType GROUP BY Board, BidSuit, ContractType HAVING COUNT(*) = 1) AS x LEFT JOIN (SELECT *) AS y ON (x.Board, x.BidSuit, x.ContractType) = (y.Board, y.BidSuit, y.ContractType)) WHERE y.Boards_We_Declared=TRUE ORDER BY x.Board"
 					}
 				]
 			},
@@ -448,11 +448,11 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_Name_NS, COUNT(CASE WHEN Score_NS>=Parscore_NS THEN 1 ELSE NULL END) AS Count_GE, AVG(Pct_NS) AS Pct, STRING_AGG(CASE WHEN Score_NS>ParScore_NS THEN Board END, ', ') AS Boards_GT, STRING_AGG(CASE WHEN Score_NS=ParScore_NS THEN Board END, ', ') AS Boards_EQ, STRING_AGG(CASE WHEN Score_NS < ParScore_NS THEN Board END, ', ') AS Boards_LT, COUNT(CASE WHEN Score_NS=Parscore_NS THEN 1 ELSE NULL END) AS Count_EQ FROM self GROUP BY Pair_Name_NS ORDER BY Count_GE DESC, Count_EQ"
+						"sql": "SELECT CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_Name_NS, COUNT(CASE WHEN Score_NS>=Parscore_NS THEN 1 ELSE NULL END) AS Count_GE, AVG(Pct_NS) AS Pct, STRING_AGG(CASE WHEN Score_NS>ParScore_NS THEN Board END, ', ') AS Boards_GT, STRING_AGG(CASE WHEN Score_NS=ParScore_NS THEN Board END, ', ') AS Boards_EQ, STRING_AGG(CASE WHEN Score_NS < ParScore_NS THEN Board END, ', ') AS Boards_LT, COUNT(CASE WHEN Score_NS=Parscore_NS THEN 1 ELSE NULL END) AS Count_EQ GROUP BY Pair_Name_NS ORDER BY Count_GE DESC, Count_EQ"
 					},
 					{
 						"prompt": "",
-						"sql": "SELECT CONCAT(section_name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_Name_EW, COUNT(CASE WHEN Score_EW>=Parscore_EW THEN 1 ELSE NULL END) AS Count_GE, AVG(Pct_EW) AS Pct, STRING_AGG(CASE WHEN Score_EW>ParScore_EW THEN Board END, ', ') AS Boards_GT, STRING_AGG(CASE WHEN Score_EW=ParScore_EW THEN Board END, ', ') AS Boards_EQ, STRING_AGG(CASE WHEN Score_EW < ParScore_EW THEN Board END, ', ') AS Boards_LT, COUNT(CASE WHEN Score_EW=Parscore_EW THEN 1 ELSE NULL END) AS Count_EQ FROM self GROUP BY Pair_Name_EW ORDER BY Count_GE DESC, Count_EQ"
+						"sql": "SELECT CONCAT(section_name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_Name_EW, COUNT(CASE WHEN Score_EW>=Parscore_EW THEN 1 ELSE NULL END) AS Count_GE, AVG(Pct_EW) AS Pct, STRING_AGG(CASE WHEN Score_EW>ParScore_EW THEN Board END, ', ') AS Boards_GT, STRING_AGG(CASE WHEN Score_EW=ParScore_EW THEN Board END, ', ') AS Boards_EQ, STRING_AGG(CASE WHEN Score_EW < ParScore_EW THEN Board END, ', ') AS Boards_LT, COUNT(CASE WHEN Score_EW=Parscore_EW THEN 1 ELSE NULL END) AS Count_EQ GROUP BY Pair_Name_EW ORDER BY Count_GE DESC, Count_EQ"
 					}
 				]
 			},
@@ -462,7 +462,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT Name_Declarer AS Name, AVG(CASE WHEN Declarer_Direction IN ('N', 'S') THEN Pct_NS ELSE Pct_EW END) AS Avg_Pct, COUNT(*) AS Count, Number_Declarer AS Declarer, Declarer_Direction AS Direction, AVG(CAST(Tricks > DDTricks AS INT)) AS Pct_GT_DD, AVG(CAST(Tricks = DDTricks AS INT)) AS Pct_EQ_DD, AVG(CAST(Score_Declarer > ParScore_Declarer AS INT)) AS Pct_GT_ParScore, AVG(CAST(Score_Declarer = ParScore_Declarer AS INT)) AS Pct_EQ_ParScore FROM self GROUP BY Number_Declarer, Name_Declarer, Declarer_Direction HAVING COUNT(*) >= 4 ORDER BY Avg_Pct DESC"
+						"sql": "SELECT Name_Declarer AS Name, AVG(CASE WHEN Declarer_Direction IN ('N', 'S') THEN Pct_NS ELSE Pct_EW END) AS Avg_Pct, COUNT(*) AS Count, Number_Declarer AS Declarer, Declarer_Direction AS Direction, AVG(CAST(Tricks > DDTricks AS INT)) AS Pct_GT_DD, AVG(CAST(Tricks = DDTricks AS INT)) AS Pct_EQ_DD, AVG(CAST(Score_Declarer > ParScore_Declarer AS INT)) AS Pct_GT_ParScore, AVG(CAST(Score_Declarer = ParScore_Declarer AS INT)) AS Pct_EQ_ParScore GROUP BY Number_Declarer, Name_Declarer, Declarer_Direction HAVING COUNT(*) >= 4 ORDER BY Avg_Pct DESC"
 					}
 				]
 			},
@@ -473,7 +473,7 @@
 					{
 						"failed prompt": "show board, contract, score_declarer, computed_score_declarer, score_ns, score_ew when score_declarer <> computed_score_declarer or score_ns <> -score_ew sort by board.",
 						"prompt": "",
-						"sql": "SELECT CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_Name_NS, CONCAT(section_name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_Name_EW, Board, Contract, Score_Declarer, Computed_Score_Declarer, Score_NS, Score_EW FROM self WHERE Score_Declarer <> Computed_Score_Declarer OR Score_NS <> -Score_EW ORDER BY Board"
+						"sql": "SELECT CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_Name_NS, CONCAT(section_name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_Name_EW, Board, Contract, Score_Declarer, Computed_Score_Declarer, Score_NS, Score_EW WHERE Score_Declarer <> Computed_Score_Declarer OR Score_NS <> -Score_EW ORDER BY Board"
 					}
 				]
 			},
@@ -483,11 +483,11 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_Name_NS, AVG(Pct_NS_Actual) AS Avg_Pct_NS_Actual, AVG(Pct_NS_Pred) AS Avg_Pct_NS_Pred, AVG(Pct_NS_Diff) AS Avg_Pct_NS_Diff FROM self GROUP BY Pair_Name_NS ORDER BY Avg_Pct_NS_Actual DESC"
+						"sql": "SELECT CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_Name_NS, AVG(Pct_NS_Actual) AS Avg_Pct_NS_Actual, AVG(Pct_NS_Pred) AS Avg_Pct_NS_Pred, AVG(Pct_NS_Diff) AS Avg_Pct_NS_Diff GROUP BY Pair_Name_NS ORDER BY Avg_Pct_NS_Actual DESC"
 					},
 					{
 						"prompt": "",
-						"sql": "SELECT CONCAT(section_name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_Name_EW, AVG(Pct_EW_Actual) AS Avg_Pct_EW_Actual, AVG(Pct_EW_Pred) AS Avg_Pct_EW_Pred, AVG(Pct_EW_Diff) AS Avg_Pct_EW_Diff FROM self GROUP BY Pair_Name_EW ORDER BY Avg_Pct_EW_Actual DESC"
+						"sql": "SELECT CONCAT(section_name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_Name_EW, AVG(Pct_EW_Actual) AS Avg_Pct_EW_Actual, AVG(Pct_EW_Pred) AS Avg_Pct_EW_Pred, AVG(Pct_EW_Diff) AS Avg_Pct_EW_Diff GROUP BY Pair_Name_EW ORDER BY Avg_Pct_EW_Actual DESC"
 					}
 				]
 			},
@@ -497,11 +497,11 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_Name_NS, Board, Contract, Score_NS, Pct_NS_Actual, Pct_NS_Pred, Pct_NS_Diff, Declarer_Direction_Pred, Pair_Number_NS, Pair_Number_EW FROM self ORDER BY Board, Pair_Name_NS"
+						"sql": "SELECT CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_Name_NS, Board, Contract, Score_NS, Pct_NS_Actual, Pct_NS_Pred, Pct_NS_Diff, Declarer_Direction_Pred, Pair_Number_NS, Pair_Number_EW ORDER BY Board, Pair_Name_NS"
 					},
 					{
 						"prompt": "",
-						"sql": "SELECT CONCAT(section_name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_Name_EW, Board, Contract, Score_EW, Pct_EW_Actual, Pct_EW_Pred, Pct_EW_Diff, Declarer_Direction_Pred, Pair_Number_NS, Pair_Number_EW FROM self ORDER BY Board, Pair_Name_EW"
+						"sql": "SELECT CONCAT(section_name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_Name_EW, Board, Contract, Score_EW, Pct_EW_Actual, Pct_EW_Pred, Pct_EW_Diff, Declarer_Direction_Pred, Pair_Number_NS, Pair_Number_EW ORDER BY Board, Pair_Name_EW"
 					}
 				]
 			},
@@ -511,7 +511,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT Board, Contract, Score, Declarer_Pct, Declarer_Pct_Pred, Declarer_Direction_Pred, Opponent_Pair_Number, boards_we_played FROM self WHERE boards_we_played=TRUE ORDER BY Board"
+						"sql": "SELECT Board, Contract, Score, Declarer_Pct, Declarer_Pct_Pred, Declarer_Direction_Pred, Opponent_Pair_Number, boards_we_played WHERE boards_we_played=TRUE ORDER BY Board"
 					}
 				]
 			},
@@ -521,7 +521,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT Board, Declarer_Direction_Pred AS Pred, Contract, Result, Score_NS, Parscore_NS, Matchpoints_NS, CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_Name_NS, CONCAT(section_name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_Name_EW FROM self ORDER BY Board, Matchpoints_NS DESC"
+						"sql": "SELECT Board, Declarer_Direction_Pred AS Pred, Contract, Result, Score_NS, Parscore_NS, Matchpoints_NS, CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_Name_NS, CONCAT(section_name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_Name_EW ORDER BY Board, Matchpoints_NS DESC"
 					}
 				]
 			},
@@ -531,7 +531,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT Board, ANY_VALUE(Parscore_NS) AS Parscore_NS, Declarer_Direction_Pred, COUNT() AS Board_Plays, SUM(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN 1 ELSE 0 END) AS Correct_Preds, Correct_Preds/Board_Plays AS Correct_Direction_Pct, SUM(CASE WHEN (Declarer_Direction IN ('N','S') AND Declarer_Direction_Pred IN ('N', 'S')) OR (Declarer_Direction IN ('E','W') AND Declarer_Direction_Pred IN ('E', 'W')) THEN 1 ELSE 0 END) AS Correct_Pair_Preds, Correct_Pair_Preds/Board_Plays AS Correct_Pair_Pct FROM self GROUP BY Board, Declarer_Direction_Pred ORDER BY Board"
+						"sql": "SELECT Board, ANY_VALUE(Parscore_NS) AS Parscore_NS, Declarer_Direction_Pred, COUNT() AS Board_Plays, SUM(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN 1 ELSE 0 END) AS Correct_Preds, Correct_Preds/Board_Plays AS Correct_Direction_Pct, SUM(CASE WHEN (Declarer_Direction IN ('N','S') AND Declarer_Direction_Pred IN ('N', 'S')) OR (Declarer_Direction IN ('E','W') AND Declarer_Direction_Pred IN ('E', 'W')) THEN 1 ELSE 0 END) AS Correct_Pair_Preds, Correct_Pair_Preds/Board_Plays AS Correct_Pair_Pct GROUP BY Board, Declarer_Direction_Pred ORDER BY Board"
 					}
 				]
 			},
@@ -541,7 +541,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT CONCAT(Number_Declarer, ' - ', Name_Declarer, ' - ', Declarer_Direction) AS Player, SUM(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN 1 ELSE 0 END) AS Correct_Preds, COUNT() AS Boards_Declared, STRING_AGG(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN Board END, ', ') AS Correctly_Pred_Boards, STRING_AGG(CASE WHEN Declarer_Direction <> Declarer_Direction_Pred THEN Board END, ', ') AS Declared_Not_Predicted, Correct_Preds/Boards_Declared AS Correct_Direction_Pct, SUM(CASE WHEN (Declarer_Direction IN ('N','S') AND Declarer_Direction_Pred IN ('N', 'S')) OR (Declarer_Direction IN ('E','W') AND Declarer_Direction_Pred IN ('E', 'W')) THEN 1 ELSE 0 END) AS Correct_Pair_Preds, Correct_Pair_Preds/Boards_Declared AS Correct_Pair_Pct FROM self GROUP BY Number_Declarer, Name_Declarer, Declarer_Direction ORDER BY Correct_Direction_Pct DESC, Boards_Declared DESC"
+						"sql": "SELECT CONCAT(Number_Declarer, ' - ', Name_Declarer, ' - ', Declarer_Direction) AS Player, SUM(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN 1 ELSE 0 END) AS Correct_Preds, COUNT() AS Boards_Declared, STRING_AGG(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN Board END, ', ') AS Correctly_Pred_Boards, STRING_AGG(CASE WHEN Declarer_Direction <> Declarer_Direction_Pred THEN Board END, ', ') AS Declared_Not_Predicted, Correct_Preds/Boards_Declared AS Correct_Direction_Pct, SUM(CASE WHEN (Declarer_Direction IN ('N','S') AND Declarer_Direction_Pred IN ('N', 'S')) OR (Declarer_Direction IN ('E','W') AND Declarer_Direction_Pred IN ('E', 'W')) THEN 1 ELSE 0 END) AS Correct_Pair_Preds, Correct_Pair_Preds/Boards_Declared AS Correct_Pair_Pct GROUP BY Number_Declarer, Name_Declarer, Declarer_Direction ORDER BY Correct_Direction_Pct DESC, Boards_Declared DESC"
 					}
 				]
 			},
@@ -552,7 +552,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT CONCAT(Declarer_Number_Pred, ' - ', Declarer_Name_Pred, ' - ', Declarer_Direction_Pred) AS Player, SUM(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN 1 ELSE 0 END) AS Correct_Preds, COUNT() AS Pred_To_Declare, STRING_AGG(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN Board END, ', ') AS Correctly_Pred_Boards, STRING_AGG(CASE WHEN Declarer_Direction <> Declarer_Direction_Pred THEN Board END, ', ') AS Predicted_Not_Declared, Correct_Preds/Pred_To_Declare AS Correct_Direction_Pct, SUM(CASE WHEN (Declarer_Direction IN ('N','S') AND Declarer_Direction_Pred IN ('N', 'S')) OR (Declarer_Direction IN ('E','W') AND Declarer_Direction_Pred IN ('E', 'W')) THEN 1 ELSE 0 END) AS Correct_Pair_Preds, Correct_Pair_Preds/Pred_To_Declare AS Correct_Pair_Pct FROM self GROUP BY Declarer_Number_Pred, Declarer_Name_Pred, Declarer_Direction_Pred ORDER BY Correct_Direction_Pct DESC, Pred_To_Declare DESC"
+						"sql": "SELECT CONCAT(Declarer_Number_Pred, ' - ', Declarer_Name_Pred, ' - ', Declarer_Direction_Pred) AS Player, SUM(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN 1 ELSE 0 END) AS Correct_Preds, COUNT() AS Pred_To_Declare, STRING_AGG(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN Board END, ', ') AS Correctly_Pred_Boards, STRING_AGG(CASE WHEN Declarer_Direction <> Declarer_Direction_Pred THEN Board END, ', ') AS Predicted_Not_Declared, Correct_Preds/Pred_To_Declare AS Correct_Direction_Pct, SUM(CASE WHEN (Declarer_Direction IN ('N','S') AND Declarer_Direction_Pred IN ('N', 'S')) OR (Declarer_Direction IN ('E','W') AND Declarer_Direction_Pred IN ('E', 'W')) THEN 1 ELSE 0 END) AS Correct_Pair_Preds, Correct_Pair_Preds/Pred_To_Declare AS Correct_Pair_Pct GROUP BY Declarer_Number_Pred, Declarer_Name_Pred, Declarer_Direction_Pred ORDER BY Correct_Direction_Pct DESC, Pred_To_Declare DESC"
 					}
 				]
 			},
@@ -563,7 +563,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT Board, CASE WHEN {Opponent_Pair_Direction}='NS' THEN CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) ELSE CONCAT(section_name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) END AS Opponents, Contract, Contract_Pred FROM self WHERE Boards_We_Played = True ORDER BY Board, CONCAT(section_name, Pair_Number_NS)"
+						"sql": "SELECT Board, CASE WHEN {Opponent_Pair_Direction}='NS' THEN CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) ELSE CONCAT(section_name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) END AS Opponents, Contract, Contract_Pred WHERE Boards_We_Played = True ORDER BY Board, CONCAT(section_name, Pair_Number_NS)"
 					}
 				]
 			},
@@ -573,7 +573,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT Board, CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' vs ', section_name, Pair_Number_EW, ' - ', Player_Name_E) AS NS_vs_EW, Contract, Contract_Pred FROM self ORDER BY Board, CONCAT(section_name, Pair_Number_NS)"
+						"sql": "SELECT Board, CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' vs ', section_name, Pair_Number_EW, ' - ', Player_Name_E) AS NS_vs_EW, Contract, Contract_Pred ORDER BY Board, CONCAT(section_name, Pair_Number_NS)"
 					}
 				]
 			},
@@ -583,7 +583,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT Board, Contract, Contract_Pred, COUNT() AS Board_Plays, SUM(CASE WHEN Contract = Contract_Pred THEN 1 ELSE 0 END) AS Correct_Preds, Correct_Preds/Board_Plays AS Correct_Contract_Pct FROM self GROUP BY Board, Contract, Contract_Pred ORDER BY Board"
+						"sql": "SELECT Board, Contract, Contract_Pred, COUNT() AS Board_Plays, SUM(CASE WHEN Contract = Contract_Pred THEN 1 ELSE 0 END) AS Correct_Preds, Correct_Preds/Board_Plays AS Correct_Contract_Pct GROUP BY Board, Contract, Contract_Pred ORDER BY Board"
 					}
 				]
 			},
@@ -594,11 +594,11 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT Number_Declarer AS Declarer_NS, Name_Declarer AS Name_NS, AVG(Pct_NS) AS Pct_NS_Actual, AVG(Pct_NS_Pred) AS Pct_NS_Pred,  COUNT() AS Boards_Declared, AVG(CAST(Tricks > DDTricks AS INT)) AS Pct_GT_DD, AVG(CAST(Tricks = DDTricks AS INT)) AS Pct_EQ_DD FROM self WHERE Pair_Declarer_Direction='NS' GROUP BY Number_Declarer, Name_Declarer ORDER BY Pct_NS_Actual DESC, Boards_Declared DESC"
+						"sql": "SELECT Number_Declarer AS Declarer_NS, Name_Declarer AS Name_NS, AVG(Pct_NS) AS Pct_NS_Actual, AVG(Pct_NS_Pred) AS Pct_NS_Pred,  COUNT() AS Boards_Declared, AVG(CAST(Tricks > DDTricks AS INT)) AS Pct_GT_DD, AVG(CAST(Tricks = DDTricks AS INT)) AS Pct_EQ_DD WHERE Pair_Declarer_Direction='NS' GROUP BY Number_Declarer, Name_Declarer ORDER BY Pct_NS_Actual DESC, Boards_Declared DESC"
 					},
 					{
 						"prompt": "",
-						"sql": "SELECT Number_Declarer AS Declarer_EW, Name_Declarer AS Name_EW, AVG(Pct_EW) AS Pct_EW_Actual, AVG(Pct_EW_Pred) AS Pct_EW_Pred,  COUNT() AS Boards_Declared, AVG(CAST(Tricks > DDTricks AS INT)) AS Pct_GT_DD, AVG(CAST(Tricks = DDTricks AS INT)) AS Pct_EQ_DD FROM self WHERE Pair_Declarer_Direction='EW' GROUP BY Number_Declarer, Name_Declarer ORDER BY Pct_EW_Actual DESC, Boards_Declared DESC"
+						"sql": "SELECT Number_Declarer AS Declarer_EW, Name_Declarer AS Name_EW, AVG(Pct_EW) AS Pct_EW_Actual, AVG(Pct_EW_Pred) AS Pct_EW_Pred,  COUNT() AS Boards_Declared, AVG(CAST(Tricks > DDTricks AS INT)) AS Pct_GT_DD, AVG(CAST(Tricks = DDTricks AS INT)) AS Pct_EQ_DD WHERE Pair_Declarer_Direction='EW' GROUP BY Number_Declarer, Name_Declarer ORDER BY Pct_EW_Actual DESC, Boards_Declared DESC"
 					}
 				]
 			}
