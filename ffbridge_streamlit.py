@@ -55,7 +55,7 @@ def ShowDataFrameTable(df, key, query='SELECT * FROM self', show_sql_query=True)
 
     # if query doesn't start with 'FROM self', add 'FROM self' to the beginning of the query.
     # this syntax makes easy work of adding FROM but isn't compatible with polars SQL. duckdb only.
-    if not query.lower().startswith('from self '):
+    if 'from self' not in query.lower():
         query = 'FROM self ' + query
 
     # polars SQL has so many issues that it's impossible to use. disabling until 2030.
@@ -87,15 +87,15 @@ def ShowDataFrameTable(df, key, query='SELECT * FROM self', show_sql_query=True)
 
 
 def app_info():
-    st.caption(f"Project lead is Robert Salita research@AiPolice.org. Code written in Python. UI written in streamlit. Data engine is polars. Query engine is duckdb. Bridge lib is endplay. Self hosted using Cloudflare Tunnel. Repo:https://github.com/BSalita/Calculate_PBN_Results")
+    st.caption(f"Project lead is Robert Salita research@AiPolice.org. Code written in Python. UI written in streamlit. Data engine is polars. Query engine is duckdb. Bridge lib is endplay. Self hosted using Cloudflare Tunnel. Repo:https://github.com/BSalita/ffbridge-postmortem")
     st.caption(
         f"App:{st.session_state.app_datetime} Python:{'.'.join(map(str, sys.version_info[:3]))} Streamlit:{st.__version__} Pandas:{pd.__version__} polars:{pl.__version__} endplay:{endplay.__version__} Query Params:{st.query_params.to_dict()}")
 
 
 def chat_input_on_submit():
     prompt = st.session_state.main_prompt_chat_input
-    # todo: if sql query doesn't have FROM keyword, insert 'FROM self'?
-    ShowDataFrameTable(st.session_state.df, query=prompt, key='user_query_main_doit')
+    sql_query = process_prompt_macros(prompt)
+    ShowDataFrameTable(st.session_state.df, query=sql_query, key='user_query_main_doit')
 
 
 def sample_count_on_change():

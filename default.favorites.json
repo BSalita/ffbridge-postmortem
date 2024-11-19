@@ -416,7 +416,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT x.Board, x.BidSuit, x.ContractType, y.Contract, y.Pct_{Pair_Direction}, y.section_name, y.Pair_Number_NS, y.Pair_Number_EW FROM ((SELECT Board, BidSuit, ContractType GROUP BY Board, BidSuit, ContractType HAVING COUNT(*) = 1) AS x LEFT JOIN (SELECT *) AS y ON (x.Board, x.BidSuit, x.ContractType) = (y.Board, y.BidSuit, y.ContractType)) ORDER BY x.Board"
+						"sql": "SELECT x.Board, x.BidSuit, x.ContractType, y.Contract, y.Pct_{Pair_Direction}, y.section_name, y.Pair_Number_NS, y.Pair_Number_EW FROM (SELECT Board, BidSuit, ContractType FROM self GROUP BY Board, BidSuit, ContractType HAVING COUNT(*) = 1) AS x LEFT JOIN self AS y ON (x.Board = y.Board AND x.BidSuit = y.BidSuit AND x.ContractType = y.ContractType) ORDER BY x.Board"
 					}
 				]
 			},
@@ -427,7 +427,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT x.Board, x.BidSuit, x.ContractType, y.Contract, y.Pct_{Pair_Direction}, y.section_name, y.Pair_Number_NS, y.Pair_Number_EW, y.Boards_I_Played FROM ((SELECT Board, BidSuit, ContractType GROUP BY Board, BidSuit, ContractType HAVING COUNT(*) = 1) AS x LEFT JOIN (SELECT *) AS y ON (x.Board, x.BidSuit, x.ContractType) = (y.Board, y.BidSuit, y.ContractType)) WHERE y.Boards_I_Played=TRUE ORDER BY x.Board"
+						"sql": "SELECT x.Board, x.BidSuit, x.ContractType, y.Contract, y.Pct_EW, y.section_name, y.Pair_Number_NS, y.Pair_Number_EW, y.Boards_I_Played FROM (SELECT Board, BidSuit, ContractType FROM self GROUP BY Board, BidSuit, ContractType HAVING COUNT(*) = 1) AS x LEFT JOIN self AS y ON (x.Board = y.Board AND x.BidSuit = y.BidSuit AND x.ContractType = y.ContractType) WHERE y.Boards_I_Played = TRUE ORDER BY x.Board"
 					}
 				]
 			},
