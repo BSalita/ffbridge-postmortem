@@ -604,7 +604,21 @@ def perform_hand_augmentations(df,hrs_d,sd_productions=40,progress=None):
         pl.Series('BidSuit',convert_contract_to_strain(df),pl.String,strict=False), # can have nulls or Strings
         pl.Series('Dbl',convert_contract_to_dbl(df),pl.String,strict=False), # can have nulls or Strings
     )
-    print(f"convert_contract_to_contract: time:{time.time()-t} seconds")
+    print(f"convert_contract_to_contract_parts: time:{time.time()-t} seconds")
+
+    # create a column classifying contract type: Pass, Partial, Game, SSlam, GSlam
+    t = time.time()
+    df = df.with_columns(
+        pl.when(pl.col('Contract').eq('PASS')).then(pl.lit("Pass"))
+        .when(pl.col('BidLvl').eq(5) & pl.col('BidSuit').is_in(['C', 'D'])).then(pl.lit("Game"))
+        .when(pl.col('BidLvl').is_in([4,5]) & pl.col('BidSuit').is_in(['H', 'S'])).then(pl.lit("Game"))
+        .when(pl.col('BidLvl').is_in([3,4,5]) & pl.col('BidSuit').eq('N')).then(pl.lit("Game"))
+        .when(pl.col('BidLvl').eq(6)).then(pl.lit("SSlam"))
+        .when(pl.col('BidLvl').eq(7)).then(pl.lit("GSlam"))
+        .otherwise(pl.lit("Partial"))
+        .alias('ContractType'),
+    )
+    print(f"create_contract_types: time:{time.time()-t} seconds")
 
     t = time.time()
     # todo: replace dicts with generic direction conversion
@@ -699,6 +713,16 @@ def perform_hand_augmentations(df,hrs_d,sd_productions=40,progress=None):
             (pl.col('MP_EW') / pl.col('MP_Top')).alias('Pct_EW')
         ])
         print(f"calculate matchpoints percentages: time:{time.time()-t} seconds")
+
+    t = time.time()
+    if 'Declarer_Pct' not in df.columns:
+        df = df.with_columns(
+            pl.when(pl.col('Declarer_Direction').is_in(['N','S']))
+            .then('Pct_NS')
+            .otherwise('Pct_EW')
+            .alias('Declarer_Pct'),
+        )
+        print(f"create Declarer_Pct: time:{time.time()-t} seconds")
     
     # create EV Max and MaxCol with consideration to vulnerability
     t = time.time()
@@ -1179,6 +1203,7 @@ def PerformResultAugmentations(df,hrs_d):
         print(f"Time to create LoTT: {time.time()-t} seconds")
 
     # Create column of contract types by partnership by suit. e.g. CT_NS_C.
+    # rename to DD_CT_[NESW]_[SHDC]
     if 'CT_N_C' in df.columns:
         print('CT_N_C already exists. skipping...')
     else:
@@ -1317,22 +1342,7 @@ def AugmentACBLHandRecords(df,hrs_d):
     return df
 
 
-def Perform_DD_SD_Augmentations(df):
-    # todo: temporary(?) aliases until SQL and other df columns are renamed.
-    # todo: need to deal with {Vul} replacement by creating row version by selecting NV, V version.
-
-    # create a column of contract types for each df['Contract']. e.g. 'Contract': Pass, Partial, Game, SSlam, GSlam
-    # todo: move somewhere more appropriate but requires cleaned board results data. e.g. 'Contract', 'BidLvl', 'BidSuit'.
-    df = df.with_columns(
-        pl.when(pl.col('Contract').eq('PASS')).then(pl.lit("Pass"))
-        .when(pl.col('BidLvl').eq(5) & pl.col('BidSuit').is_in(['C', 'D'])).then(pl.lit("Game"))
-        .when(pl.col('BidLvl').is_in([4,5]) & pl.col('BidSuit').is_in(['H', 'S'])).then(pl.lit("Game"))
-        .when(pl.col('BidLvl').is_in([3,4,5]) & pl.col('BidSuit').eq('N')).then(pl.lit("Game"))
-        .when(pl.col('BidLvl').eq(6)).then(pl.lit("SSlam"))
-        .when(pl.col('BidLvl').eq(7)).then(pl.lit("GSlam"))
-        .otherwise(pl.lit("Partial"))
-        .alias('ContractType'),
-    )
+def Perform_Legacy_Renames(df):
 
     df = df.with_columns(
         #pl.col('Section').alias('section_name'), # will this be needed for acbl?
@@ -1341,7 +1351,7 @@ def Perform_DD_SD_Augmentations(df):
         pl.col('E').alias('Player_Name_E'),
         pl.col('W').alias('Player_Name_W'),
         pl.col('Declarer_Name').alias('Name_Declarer'),
-        pl.col('Declarer_ID').alias('Number_Declarer'), #  todo: implement 'Declarer_Id'
+        pl.col('Declarer_ID').alias('Number_Declarer'), #  todo: rename to 'Declarer_ID'?
         # todo: rename to 'Declarer_Pair_Direction'
         pl.when(pl.col('Declarer_Direction').is_in(['N','S'])).then(pl.lit('NS')).otherwise(pl.lit('EW')).alias('Pair_Declarer_Direction'),
         pl.col('DDScore_Pct_NS').alias('DDPct_NS'),
@@ -1352,30 +1362,30 @@ def Perform_DD_SD_Augmentations(df):
         #pl.col('MP_EV_EW_Max').alias('MP_EV_EW_Max'), # same
         # SDScore_Max_NS
 
-        # todo: EV stuff looks pretty wrong. check it out.
-        pl.col('EV_MaxCol').alias('SDContract_Max'), # needs {Vul} replacement. Use NV for now. Pair direction invariant.
-        pl.col('EV_NS_Max').alias('SDScore_NS'), # wrong should be e.g. EV_NS_1S_N
-        pl.col('EV_EW_Max').alias('SDScore_EW'), # wrong should be e.g. EV_NS_1S_N
-        pl.col('EV_NS_Max').alias('SDScore_Max_NS'),  # needs {Vul} replacement. Use NV for now.
-        pl.col('EV_EW_Max').alias('SDScore_Max_EW'),  # needs {Vul} replacement. Use NV for now.
-        pl.col('EV_Pct_NS_Max').alias('SDPct_NS'),  # needs {Vul} replacement. Use NV for now.
-        pl.col('EV_Pct_EW_Max').alias('SDPct_EW'),  # needs {Vul} replacement. Use NV for now.
-        pl.col('MP_EV_NS_Max').alias('SDMPs_Max_NS'),  # needs {Vul} replacement. Use NV for now.
-        pl.col('MP_Top').sub(pl.col('MP_EV_NS_Max')).alias('SDMPs_Max_EW'),  # needs {Vul} replacement. Use NV for now.
-        pl.col('EV_Pct_NS_Max').alias('SDPct_Max_NS'),  # needs {Vul} replacement. Use NV for now.
-        pl.col('EV_Pct_EW_Max').alias('SDPct_Max_EW'),  # needs {Vul} replacement. Use NV for now.
-        (pl.col('EV_NS_Max')-pl.col('Score_NS')).alias('SDScore_Diff_NS'), # wrong should be e.g. EV_NS_1S_N
-        (pl.col('EV_EW_Max')-pl.col('Score_EW')).alias('SDScore_Diff_EW'), # wrong should be e.g. EV_NS_1S_N
-        (pl.col('EV_NS_Max')-pl.col('Score_NS')).alias('SDScore_Max_Diff_NS'),  # needs {Vul} replacement. Use NV for now.
-        (pl.col('EV_EW_Max')-pl.col('Score_EW')).alias('SDScore_Max_Diff_EW'),  # needs {Vul} replacement. Use NV for now.
-        (pl.col('EV_NS_Max')-pl.col('Pct_NS')).alias('SDPct_Diff_NS'),  # needs {Vul} replacement. Use NV for now.
-        (pl.col('EV_EW_Max')-pl.col('Pct_EW')).alias('SDPct_Diff_EW'),  # needs {Vul} replacement. Use NV for now.
-        (pl.col('EV_Pct_NS_Max')-pl.col('Pct_NS')).alias('SDPct_Max_Diff_NS'),  # needs {Vul} replacement. Use NV for now.
-        (pl.col('EV_Pct_EW_Max')-pl.col('Pct_EW')).alias('SDPct_Max_Diff_EW'),  # needs {Vul} replacement. Use NV for now.
-        (pl.col('ParScore_Pct_NS')-pl.col('Pct_NS')).alias('SDParScore_Pct_Diff_NS'), # wrong should be e.g. EV_NS_1S_N
-        (1-pl.col('ParScore_Pct_NS')-pl.col('Pct_EW')).alias('SDParScore_Pct_Diff_EW'), # wrong should be e.g. EV_EW_1S_N
-        (pl.col('ParScore_Pct_NS')-pl.col('Pct_NS')).alias('SDParScore_Pct_Max_Diff_NS'), # wrong looks like it needs max pct of all the Pars?
-        (1-pl.col('ParScore_Pct_NS')-pl.col('Pct_EW')).alias('SDParScore_Pct_Max_Diff_EW'), # wrong looks like it needs max pct of all the Pars?
+        # EV legacy renames
+        pl.col('EV_MaxCol').alias('SDContract_Max'), # Pair direction invariant.
+        pl.col('EV_NS_Max').alias('SDScore_NS'),
+        pl.col('EV_EW_Max').alias('SDScore_EW'),
+        pl.col('EV_NS_Max').alias('SDScore_Max_NS'),
+        pl.col('EV_EW_Max').alias('SDScore_Max_EW'),
+        pl.col('EV_Pct_NS_Max').alias('SDPct_NS'),
+        pl.col('EV_Pct_EW_Max').alias('SDPct_EW'),
+        pl.col('MP_EV_NS_Max').alias('SDMPs_Max_NS'),
+        pl.col('MP_Top').sub(pl.col('MP_EV_NS_Max')).alias('SDMPs_Max_EW'),
+        pl.col('EV_Pct_NS_Max').alias('SDPct_Max_NS'),
+        pl.col('EV_Pct_EW_Max').alias('SDPct_Max_EW'),
+        (pl.col('EV_NS_Max')-pl.col('Score_NS')).alias('SDScore_Diff_NS'),
+        (pl.col('EV_EW_Max')-pl.col('Score_EW')).alias('SDScore_Diff_EW'),
+        (pl.col('EV_NS_Max')-pl.col('Score_NS')).alias('SDScore_Max_Diff_NS'),
+        (pl.col('EV_EW_Max')-pl.col('Score_EW')).alias('SDScore_Max_Diff_EW'),
+        (pl.col('EV_NS_Max')-pl.col('Pct_NS')).alias('SDPct_Diff_NS'),
+        (pl.col('EV_EW_Max')-pl.col('Pct_EW')).alias('SDPct_Diff_EW'),
+        (pl.col('EV_Pct_NS_Max')-pl.col('Pct_NS')).alias('SDPct_Max_Diff_NS'),
+        (pl.col('EV_Pct_EW_Max')-pl.col('Pct_EW')).alias('SDPct_Max_Diff_EW'),
+        (pl.col('ParScore_Pct_NS')-pl.col('Pct_NS')).alias('SDParScore_Pct_Diff_NS'),
+        (1-pl.col('ParScore_Pct_NS')-pl.col('Pct_EW')).alias('SDParScore_Pct_Diff_EW'),
+        (pl.col('ParScore_Pct_NS')-pl.col('Pct_NS')).alias('SDParScore_Pct_Max_Diff_NS'),
+        (1-pl.col('ParScore_Pct_NS')-pl.col('Pct_EW')).alias('SDParScore_Pct_Max_Diff_EW'),
         #['Probs',pair_direction,declarer_direction,suit,str(i)]
         #([pl.lit(f'Probs_NS_N_S_{t}').alias(f'SDProbs_Taking_{t}') for t in range(14)]), # wrong should be e.g. SDProbs_Taking_0
         pl.col(f'Probs_NS_N_S_0').alias(f'SDProbs_Taking_0'),
@@ -1393,6 +1403,33 @@ def Perform_DD_SD_Augmentations(df):
         pl.col(f'Probs_NS_N_S_12').alias(f'SDProbs_Taking_12'),
         pl.col(f'Probs_NS_N_S_13').alias(f'SDProbs_Taking_13'),
     )
+    return df
+
+
+def Create_Fake_Predictions(df):
+    # todo: remove this once NN predictions are implemented
+    df = df.with_columns(
+
+        # pl.col('Pct_NS').alias('Pct_NS_Pred'),
+        # pl.col('Pct_EW').alias('Pct_EW_Pred'),
+        # pl.col('Pct_NS').sub(pl.col('Pct_NS')).alias('Pct_NS_Diff_Pred'),
+        # pl.col('Pct_EW').sub(pl.col('Pct_EW')).alias('Pct_EW_Diff_Pred'),
+        # pl.col('Declarer_Direction').alias('Declarer_Direction_Pred'), # Declarer_Direction_Actual not needed
+        # pl.lit(.321).alias('Declarer_Pct_Pred'), # todo: implement 'Declarer_Pct'
+        # pl.lit(456).alias('Declarer_Number_Pred'), # todo: implement 'Declarer_ID'
+        # pl.col('Declarer_Name').alias('Declarer_Name_Pred'),
+        # pl.col('Contract').alias('Contract_Pred'),
+    )
+    return df
+
+
+def Perform_DD_SD_Augmentations(df):
+
+    df = Perform_Legacy_Renames(df) # todo: update names/SQL to make this unnecessary.
+    df = Create_Fake_Predictions(df)
+
+    # todo: temporary(?) aliases until SQL and other df columns are renamed.
+    # todo: need to deal with {Vul} replacement by creating row version by selecting NV, V version.
 
     print(df.select(pl.col('^EV_.*$')).columns)
     df = df.with_columns(
@@ -1420,6 +1457,7 @@ def Perform_DD_SD_Augmentations(df):
     df = df.with_columns(
         # word to the wise: map_elements() is requires every column to be specified in pl.struct() and return_dtype must be compatible.
         # SDScore is the SD score of the declarer's contract.
+        # note: cool example of dereferencing a column of column names into a column of values
         pl.struct(['Declarer_SDContract','^EV_(NS|EW)_[NESW]_[SHDCN]_[1-7]$'])
         .map_elements(lambda x: x[x['Declarer_SDContract']],return_dtype=pl.Float32).alias('SDScore'),
         # Computed_Score_Declarer is the computed score of the declarer's contract.
@@ -1427,22 +1465,6 @@ def Perform_DD_SD_Augmentations(df):
         pl.struct(['BidLvl', 'BidSuit', 'Tricks', 'Declarer_Vul', 'Dbl'])
         .map_elements(lambda x: all_scores_d.get(tuple(x.values()), 0),return_dtype=pl.Int16)
         .alias('Computed_Score_Declarer')
-    )
-
-    df = df.with_columns(
-        # following are faked until NN predictions are implemented
-        # pl.col('Pct_NS').alias('Pct_NS_Actual'),
-        # pl.col('Pct_EW').alias('Pct_EW_Actual'),
-        # pl.col('Pct_NS').alias('Pct_NS_Pred'),
-        # pl.col('Pct_EW').alias('Pct_EW_Pred'),
-        # pl.col('Pct_NS').sub(pl.col('Pct_NS')).alias('Pct_NS_Diff'),
-        # pl.col('Pct_EW').sub(pl.col('Pct_EW')).alias('Pct_EW_Diff'),
-        # pl.col('Declarer_Direction').alias('Declarer_Direction_Pred'), # Declarer_Direction_Actual not needed
-        # pl.lit(.123).alias('Declarer_Pct'), # todo: implement 'Declarer_Pct'
-        # pl.lit(.321).alias('Declarer_Pct_Pred'), # todo: implement 'Declarer_Pct'
-        # pl.lit(456).alias('Declarer_Number_Pred'), # todo: implement 'Declarer_Id'
-        # pl.col('Declarer_Name').alias('Declarer_Name_Pred'),
-        # pl.col('Contract').alias('Contract_Pred'),
     )
 
     return df

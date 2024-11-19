@@ -53,7 +53,8 @@ def ShowDataFrameTable(df, key, query='SELECT * FROM self', show_sql_query=True)
     if show_sql_query and st.session_state.show_sql_query:
         st.text(f"SQL Query: {query}")
 
-    # if query doesn't start with 'FROM self', add 'FROM self' to the beginning of the query.
+    # if query doesn't contain 'FROM self', add 'FROM self ' to the beginning of the query.
+    # can't just check for startswith 'from self'. Not universal because 'from self' can appear in subqueries or after JOIN.
     # this syntax makes easy work of adding FROM but isn't compatible with polars SQL. duckdb only.
     if 'from self' not in query.lower():
         query = 'FROM self ' + query
