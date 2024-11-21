@@ -145,6 +145,7 @@ def partner_id_on_change():
 
 def filter_dataframe(df, group_id, session_id, player_id, partner_id):
     # First filter for sessions containing player_id
+
     df = df.filter(
         pl.col('group_id').eq(group_id) &
         pl.col('session_id').eq(session_id)
@@ -173,12 +174,26 @@ def filter_dataframe(df, group_id, session_id, player_id, partner_id):
         pair_direction = 'EW'
         opponent_pair_direction = 'NS'
 
-    # Columns used for filtering to a specific player_id and partner_id. Needs multiple with_columns() to unnest overlapping columns.
-    df = df.with_columns(
-        pl.col(f'Player_ID_{player_direction}').eq(pl.lit(player_id)).alias('Boards_I_Played'),
-        pl.col('Declarer_ID').eq(pl.lit(player_id)).alias('Boards_I_Declared'),
-        pl.col('Declarer_ID').eq(pl.lit(partner_id)).alias('Boards_Partner_Declared'),
-    )
+    # todo: not sure what to do here. pbns might not contain names or ids. endplay has names but not ids.
+    if player_direction is None:
+        df = df.with_columns(
+            pl.lit(True).alias('Boards_I_Played'), # player_id could be numeric
+            pl.lit(True).alias('Boards_I_Declared'), # player_id could be numeric
+            pl.lit(True).alias('Boards_Partner_Declared'), # partner_id could be numeric
+        )
+    else:
+        # Store in session state
+        st.session_state.player_direction = player_direction
+        st.session_state.partner_direction = partner_direction
+        st.session_state.pair_direction = pair_direction
+        st.session_state.opponent_pair_direction = opponent_pair_direction
+
+        # Columns used for filtering to a specific player_id and partner_id. Needs multiple with_columns() to unnest overlapping columns.
+        df = df.with_columns(
+            pl.col(f'Player_ID_{player_direction}').eq(pl.lit(str(player_id))).alias('Boards_I_Played'), # player_id could be numeric
+            pl.col('Declarer_ID').eq(pl.lit(str(player_id))).alias('Boards_I_Declared'), # player_id could be numeric
+            pl.col('Declarer_ID').eq(pl.lit(str(partner_id))).alias('Boards_Partner_Declared'), # partner_id could be numeric
+        )
     df = df.with_columns(
         pl.col('Boards_I_Played').alias('Boards_We_Played'),
         pl.col('Boards_I_Played').alias('Our_Boards'),
@@ -188,13 +203,8 @@ def filter_dataframe(df, group_id, session_id, player_id, partner_id):
         (pl.col('Boards_I_Played') & ~pl.col('Boards_We_Declared') & pl.col('Contract').ne('PASS')).alias('Boards_Opponent_Declared'),
     )
 
-    # Store in session state
-    st.session_state.player_direction = player_direction
-    st.session_state.partner_direction = partner_direction
-    st.session_state.pair_direction = pair_direction
-    st.session_state.opponent_pair_direction = opponent_pair_direction
-
     return df
+
 
 
 def flatten_json(nested_json: Dict) -> Dict:
@@ -525,7 +535,7 @@ if __name__ == '__main__':
 
             st.session_state.default_favorites_file = pathlib.Path(
                 'default.favorites.json')
-            st.session_state.player_number_custom_favorites_file = pathlib.Path(
+            st.session_state.player_id_custom_favorites_file = pathlib.Path(
                 f'favorites/{st.session_state.player_id}.favorites.json')
             st.session_state.debug_favorites_file = pathlib.Path(
                 'favorites/debug.favorites.json')

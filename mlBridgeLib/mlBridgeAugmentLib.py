@@ -871,9 +871,9 @@ def PerformMatchPointAndPercentAugmentations(df):
     # todo: probably wrong test. 
     t = time.time()
 
-    if 'MP_NS' in df.columns and 'MP_EW' in df.columns and 'MP_Top' in df.columns:
-        print('PerformMatchPointAndPercentAugmentations: MP_NS, MP_EW, MP_Top exist but code is not implemented to use them. skipping.')
-        return df
+    #if 'MP_NS' in df.columns and 'MP_EW' in df.columns and 'MP_Top' in df.columns:
+    #    print('PerformMatchPointAndPercentAugmentations: MP_NS, MP_EW, MP_Top exist but code is not implemented to use them. skipping.')
+    #    return df
 
     if 'Expanded_Scores_List' not in df.columns:
         print('PerformMatchPointAndPercentAugmentations: Expanded_Scores_List not found. skipping.')
@@ -895,6 +895,9 @@ def PerformMatchPointAndPercentAugmentations(df):
                 (pl.col(f'MP_{col_ew}')/pl.col('MP_Top')).alias(col_ew.replace('_EW','_Pct_EW')),
             )
 
+        df = df.with_columns([
+            (1-pl.col('ParScore_Pct_NS')).alias('ParScore_Pct_EW'),
+        ])
         df = df.with_columns([
             pl.max_horizontal(f'^MP_DDScore_[1-7][SHDCN]_[NS]$').alias(f'MP_DDScore_NS_Max'),
         ])
@@ -930,9 +933,9 @@ def PerformMatchPointAndPercentAugmentations(df):
         (pl.col('EV_Pct_NS_Max')-pl.col('Pct_NS')).alias('SDPct_Max_Diff_NS'),
         (pl.col('EV_Pct_EW_Max')-pl.col('Pct_EW')).alias('SDPct_Max_Diff_EW'),
         (pl.col('ParScore_Pct_NS')-pl.col('Pct_NS')).alias('SDParScore_Pct_Diff_NS'),
-        (1-pl.col('ParScore_Pct_NS')-pl.col('Pct_EW')).alias('SDParScore_Pct_Diff_EW'),
+        (pl.col('ParScore_Pct_EW')-pl.col('Pct_EW')).alias('SDParScore_Pct_Diff_EW'),
         (pl.col('ParScore_Pct_NS')-pl.col('Pct_NS')).alias('SDParScore_Pct_Max_Diff_NS'),
-        (1-pl.col('ParScore_Pct_NS')-pl.col('Pct_EW')).alias('SDParScore_Pct_Max_Diff_EW'),
+        (pl.col('ParScore_Pct_EW')-pl.col('Pct_EW')).alias('SDParScore_Pct_Max_Diff_EW'),
         ])
 
     # test sql query: FROM self SELECT Board, Contract, Score, Score_NS, Score_EW, ParScore_NS, Expanded_Scores_List, MP_NS, MP_EW, MP_ParScore_NS, MP_ParScore_EW, ParScore_Pct_NS, ParScore_Pct_EW, DDScore_3N_N, MP_DDScore_3N_N, MP_DDScore_NS, MP_DDScore_EW, MP_EV_NS, MP_EV_EW, DDScore_Pct_NS, DDScore_Pct_EW, EV_NS_NV_Max, EV_EW_NV_MaxMP_EV_NS, MP_EV_EW, EV_Pct_NS, EV_Pct_EW, EV_NS_N_H_4_NV, EV_EW_E_H_4_NV
