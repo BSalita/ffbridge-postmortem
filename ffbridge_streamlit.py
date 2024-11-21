@@ -20,6 +20,7 @@
 import streamlit as st
 import streamlit_chat
 from streamlit_extras.bottom_container import bottom
+from stqdm import stqdm
 
 
 import pathlib
@@ -33,7 +34,6 @@ import sys
 
 from urllib.parse import urlparse
 from typing import Dict, Any, List
-from stqdm import stqdm
 
 import endplay # for __version__
 
@@ -101,46 +101,46 @@ def chat_input_on_submit():
 
 def sample_count_on_change():
     st.session_state.single_dummy_sample_count = st.session_state.create_sidebar_single_dummy_sample_count_on_change
-    if 'df' in st.session_state: # todo: is this still needed?
-        st.session_state.df = load_historical_data()
+    # if 'df' in st.session_state: # todo: is this still needed?
+    #     st.session_state.df = load_historical_data()
 
 
 def sql_query_on_change():
     st.session_state.show_sql_query = st.session_state.create_sidebar_show_sql_query_checkbox
-    if 'df' in st.session_state: # todo: is this still needed?
-        st.session_state.df = load_historical_data()
+    # if 'df' in st.session_state: # todo: is this still needed?
+    #     st.session_state.df = load_historical_data()
 
 
 def group_id_on_change():
     st.session_state.group_id = st.session_state.create_sidebar_group_id
-    if 'df' in st.session_state: # todo: is this still needed?
-        st.session_state.df = load_historical_data()
+    # if 'df' in st.session_state: # todo: is this still needed?
+    #     st.session_state.df = load_historical_data()
 
 
 def session_id_on_change():
     st.session_state.session_id = st.session_state.create_sidebar_session_id
-    if 'df' in st.session_state: # todo: is this still needed?
-        st.session_state.df = load_historical_data()
+    # if 'df' in st.session_state: # todo: is this still needed?
+    #     st.session_state.df = load_historical_data()
 
 
 def player_id_on_change():
     st.session_state.group_id = st.session_state.create_sidebar_player_id
-    if 'df' in st.session_state: # todo: is this still needed?
-        st.session_state.df = load_historical_data()
+    # if 'df' in st.session_state: # todo: is this still needed?
+    #     st.session_state.df = load_historical_data()
 
 
 def partner_id_on_change():
     st.session_state.partner_id = st.session_state.create_sidebar_partner_id
-    if 'df' in st.session_state: # todo: is this still needed?
-        st.session_state.df = load_historical_data()
+    # if 'df' in st.session_state: # todo: is this still needed?
+    #     st.session_state.df = load_historical_data()
 
 
-def load_historical_data():
-    ffbridge_experimental_data_df_filename = f'ffbridge_training_data_df.parquet'
-    ffbridge_experimental_data_df_file = st.session_state.dataPath.joinpath(ffbridge_experimental_data_df_filename)
-    df = pl.read_parquet(ffbridge_experimental_data_df_file)
-    print(f"Loaded {ffbridge_experimental_data_df_filename}: shape:{df.shape} size:{ffbridge_experimental_data_df_file.stat().st_size}")
-    return df
+# def load_historical_data():
+#     ffbridge_experimental_data_df_filename = f'ffbridge_training_data_df.parquet'
+#     ffbridge_experimental_data_df_file = st.session_state.dataPath.joinpath(ffbridge_experimental_data_df_filename)
+#     df = pl.read_parquet(ffbridge_experimental_data_df_file)
+#     print(f"Loaded {ffbridge_experimental_data_df_filename}: shape:{df.shape} size:{ffbridge_experimental_data_df_file.stat().st_size}")
+#     return df
 
 
 def filter_dataframe(df, group_id, session_id, player_id, partner_id):
@@ -385,9 +385,7 @@ def read_favorites():
             st.session_state.debug_favorites = debug_favorites
 
 
-def load_vetted_prompts():
-
-    json_file = pathlib.Path('default.favorites.json')
+def load_vetted_prompts(json_file):
     sql_queries = []
     if json_file.exists():
         with open(json_file) as f:
@@ -451,7 +449,7 @@ if __name__ == '__main__':
         # todo: put filenames into a .json or .toml file?
         st.session_state.rootPath = pathlib.Path('e:/bridge/data')
         st.session_state.ffbridgePath = st.session_state.rootPath.joinpath('ffbridge')
-        st.session_state.favoritesPath = st.session_state.ffbridgePath.joinpath('favorites')
+        #st.session_state.favoritesPath = pathlib.joinpath('favorites')
         st.session_state.dataPath = st.session_state.ffbridgePath.joinpath('data')
     
         st.session_state.app_datetime = datetime.fromtimestamp(pathlib.Path(__file__).stat().st_mtime, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S %Z')
@@ -473,6 +471,7 @@ if __name__ == '__main__':
         st.session_state.partner_id_default = None
         st.session_state.player_direction_default = 'E'
         st.session_state.partner_direction_default = 'W'
+        st.session_state.pair_direction_default = 'EW'
         st.session_state.opponent_pair_direction_default = 'NS'
         st.session_state.game_url_default = None
         st.session_state.game_date_default = 'Unknown date' #pd.to_datetime(st.session_state.df['Date'].iloc[0]).strftime('%Y-%m-%d')
@@ -482,9 +481,10 @@ if __name__ == '__main__':
         st.session_state.pair_id = st.session_state.pair_id_default
         st.session_state.player_id = st.session_state.player_id_default # Robert Salita
         st.session_state.partner_id = st.session_state.partner_id_default
-        st.session_state.player_direction = st.session_state.player_direction_default # 'E'
-        st.session_state.partner_direction = st.session_state.partner_direction_default # 'W'
-        st.session_state.opponent_pair_direction = st.session_state.opponent_pair_direction_default # 'NS'
+        st.session_state.player_direction = st.session_state.player_direction_default
+        st.session_state.partner_direction = st.session_state.partner_direction_default
+        st.session_state.pair_direction = st.session_state.pair_direction_default
+        st.session_state.opponent_pair_direction = st.session_state.opponent_pair_direction_default
         st.session_state.game_url = st.session_state.game_url_default
         st.session_state.game_date = st.session_state.game_date_default
         st.session_state.use_historical_data = False # use historical data from file or get from url
@@ -497,9 +497,9 @@ if __name__ == '__main__':
     else:
         with st.spinner("Loading Game Data..."):
 
-            if st.session_state.use_historical_data:
-                df = load_historical_data()
-            else:
+            # if st.session_state.use_historical_data:
+            #     df = load_historical_data()
+            # else:
                 df = get_team_and_scores_from_url()
                 create_sidebar() # update sidebar using url's parsed parameters
 
@@ -511,6 +511,9 @@ if __name__ == '__main__':
                 df = mlBridgeAugmentLib.PerformMatchPointAndPercentAugmentations(df)
                 df = mlBridgeAugmentLib.PerformResultAugmentations(df,{})
                 df = mlBridgeAugmentLib.Perform_DD_SD_Augmentations(df)
+                with open('df_columns.txt','w') as f:
+                    for col in sorted(df.columns):
+                        f.write(col+'\n')
 
             # personalize to player, partner, opponents, etc.
             st.session_state.df = filter_dataframe(df, st.session_state.group_id, st.session_state.session_id, st.session_state.player_id, st.session_state.partner_id)
@@ -520,13 +523,12 @@ if __name__ == '__main__':
 
             # ShowDataFrameTable(df, key='everything_df', query='SELECT Board, Pct_NS, Pct_EW, MP_NS, MP_EW FROM self')
 
-            st.session_state.favoritesPath.mkdir(parents=True, exist_ok=True)
-            st.session_state.default_favorites_file = st.session_state.ffbridgePath.joinpath(
+            st.session_state.default_favorites_file = pathlib.Path(
                 'default.favorites.json')
-            st.session_state.player_id_custom_favorites_file = st.session_state.favoritesPath.joinpath(
-                str(st.session_state.player_id)+'.favorites.json')
-            st.session_state.debug_favorites_file = st.session_state.favoritesPath.joinpath(
-                'debug.favorites.json')
+            st.session_state.player_number_custom_favorites_file = pathlib.Path(
+                f'favorites/{st.session_state.player_id}.favorites.json')
+            st.session_state.debug_favorites_file = pathlib.Path(
+                'favorites/debug.favorites.json')
             read_favorites()
 
             pdf_assets = []
@@ -534,7 +536,7 @@ if __name__ == '__main__':
             pdf_assets.append(f"### Created by https://ffbridge.postmortem.chat")
             pdf_assets.append(f"## Game Date:? Session:{st.session_state.session_id} Player:{st.session_state.player_id} Partner:{st.session_state.partner_id}")
 
-            st.session_state.vetted_prompts = load_vetted_prompts()
+            st.session_state.vetted_prompts = load_vetted_prompts(st.session_state.default_favorites_file)
 
             with st.container(border=True):
                 st.markdown('### Your Personalized Report')
