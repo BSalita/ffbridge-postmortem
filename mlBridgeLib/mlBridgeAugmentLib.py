@@ -635,10 +635,11 @@ def perform_hand_augmentations(df,hrs_d,sd_productions=40,progress=None):
     print(f"create_contract_types: time:{time.time()-t} seconds")
 
     t = time.time()
-    # todo: replace dicts with generic direction conversion
-    declarer_to_LHO_d = {'N':'E','E':'S','S':'W','W':'N'}
-    declarer_to_dummy_d = {'N':'S','E':'W','S':'N','W':'E'}
-    declarer_to_RHO_d = {'N':'W','E':'N','S':'E','W':'S'}
+    # todo: replace dicts with generic direction conversion?
+    # ACBL assigns Declarer_Direction of 'N' if PASS. We've changed it to None above.
+    declarer_to_LHO_d = {None:None,'N':'E','E':'S','S':'W','W':'N'}
+    declarer_to_dummy_d = {None:None,'N':'S','E':'W','S':'N','W':'E'}
+    declarer_to_RHO_d = {None:None,'N':'W','E':'N','S':'E','W':'S'}
     df = df.with_columns(
         pl.col('Declarer_Direction').replace_strict(declarer_to_LHO_d).alias('LHO_Direction'),
         pl.col('Declarer_Direction').replace_strict(declarer_to_dummy_d).alias('Dummy_Direction'),
@@ -876,40 +877,42 @@ def PerformMatchPointAndPercentAugmentations(df):
     #    return df
 
     if 'Expanded_Scores_List' not in df.columns:
-        print('PerformMatchPointAndPercentAugmentations: Expanded_Scores_List not found. skipping.')
-        return df
-    else:
-        discrete_score_columns = ['DDScore_NS','ParScore_NS','EV_NS_Max'] # todo: EV needs {Vul} replacement. Use NV for now.'
-        dd_score_columns = [f'DDScore_{l}{s}_{d}' for d in 'NESW' for s in 'SHDCN' for l in range(1,8)]
-        # EV_{pd}_{dd}_{s}_[1-7]_{v}
-        ev_score_columns = [f'EV_{pd}_{d}_{s}_{l}' for pd in ['NS','EW'] for d in pd for s in 'SHDCN' for l in range(1,8)]
-        df = calculate_matchpoint_scores_ns(df,discrete_score_columns+dd_score_columns+ev_score_columns)
+        print('PerformMatchPointAndPercentAugmentations: Creating Expanded_Scores_List column.')
+        expanded_scores_df = df.group_by('Board').agg(pl.col('Score_NS').sort(descending=True).alias('Expanded_Scores_List'))
+        # Join the expanded scores back to the original DataFrame
+        df = df.join(expanded_scores_df, on='Board')
+        
+    discrete_score_columns = ['DDScore_NS','ParScore_NS','EV_NS_Max'] # todo: EV needs {Vul} replacement. Use NV for now.'
+    dd_score_columns = [f'DDScore_{l}{s}_{d}' for d in 'NESW' for s in 'SHDCN' for l in range(1,8)]
+    # EV_{pd}_{dd}_{s}_[1-7]_{v}
+    ev_score_columns = [f'EV_{pd}_{d}_{s}_{l}' for pd in ['NS','EW'] for d in pd for s in 'SHDCN' for l in range(1,8)]
+    df = calculate_matchpoint_scores_ns(df,discrete_score_columns+dd_score_columns+ev_score_columns)
 
-        for col_ns in discrete_score_columns:
-            col_ew = col_ns.replace('NS','EW')
-            df = df.with_columns(
-                (pl.col('MP_Top')-pl.col(f'MP_{col_ns}')).alias(f'MP_{col_ew}')
-            )
-            df = df.with_columns(
-                (pl.col(f'MP_{col_ns}')/pl.col('MP_Top')).alias(col_ns.replace('_NS','_Pct_NS')),
-                (pl.col(f'MP_{col_ew}')/pl.col('MP_Top')).alias(col_ew.replace('_EW','_Pct_EW')),
-            )
+    for col_ns in discrete_score_columns:
+        col_ew = col_ns.replace('NS','EW')
+        df = df.with_columns(
+            (pl.col('MP_Top')-pl.col(f'MP_{col_ns}')).alias(f'MP_{col_ew}')
+        )
+        df = df.with_columns(
+            (pl.col(f'MP_{col_ns}')/pl.col('MP_Top')).alias(col_ns.replace('_NS','_Pct_NS')),
+            (pl.col(f'MP_{col_ew}')/pl.col('MP_Top')).alias(col_ew.replace('_EW','_Pct_EW')),
+        )
 
-        df = df.with_columns([
-            (1-pl.col('ParScore_Pct_NS')).alias('ParScore_Pct_EW'),
-        ])
-        df = df.with_columns([
-            pl.max_horizontal(f'^MP_DDScore_[1-7][SHDCN]_[NS]$').alias(f'MP_DDScore_NS_Max'),
-        ])
-        df = df.with_columns([
-            pl.max_horizontal(f'^MP_DDScore_[1-7][SHDCN]_[EW]$').alias(f'MP_DDScore_EW_Max'),
-        ])
-        df = df.with_columns([
-            pl.max_horizontal(f'^MP_EV_NS_[NS]_[SHDCN]_[1-7]$').alias(f'MP_EV_NS_Max'),
-        ])
-        df = df.with_columns([
-            pl.max_horizontal(f'^MP_EV_EW_[EW]_[SHDCN]_[1-7]$').alias(f'MP_EV_EW_Max'),
-        ])
+    df = df.with_columns([
+        (1-pl.col('ParScore_Pct_NS')).alias('ParScore_Pct_EW'),
+    ])
+    df = df.with_columns([
+        pl.max_horizontal(f'^MP_DDScore_[1-7][SHDCN]_[NS]$').alias(f'MP_DDScore_NS_Max'),
+    ])
+    df = df.with_columns([
+        pl.max_horizontal(f'^MP_DDScore_[1-7][SHDCN]_[EW]$').alias(f'MP_DDScore_EW_Max'),
+    ])
+    df = df.with_columns([
+        pl.max_horizontal(f'^MP_EV_NS_[NS]_[SHDCN]_[1-7]$').alias(f'MP_EV_NS_Max'),
+    ])
+    df = df.with_columns([
+        pl.max_horizontal(f'^MP_EV_EW_[EW]_[SHDCN]_[1-7]$').alias(f'MP_EV_EW_Max'),
+    ])
 
     df = df.with_columns([
         (pl.col('MP_DDScore_NS_Max')/pl.col('MP_Top')).alias('DDScore_Pct_NS_Max'),

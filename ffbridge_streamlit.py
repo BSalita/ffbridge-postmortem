@@ -540,13 +540,12 @@ if __name__ == '__main__':
             st.session_state.debug_favorites_file = pathlib.Path(
                 'favorites/debug.favorites.json')
             read_favorites()
+            st.session_state.vetted_prompts = load_vetted_prompts(st.session_state.default_favorites_file)
 
             pdf_assets = []
             pdf_assets.append(f"# Bridge Game Postmortem Report Personalized for {st.session_state.player_id}")
             pdf_assets.append(f"### Created by https://ffbridge.postmortem.chat")
             pdf_assets.append(f"## Game Date:? Session:{st.session_state.session_id} Player:{st.session_state.player_id} Partner:{st.session_state.partner_id}")
-
-            st.session_state.vetted_prompts = load_vetted_prompts(st.session_state.default_favorites_file)
 
             with st.container(border=True):
                 st.markdown('### Your Personalized Report')
