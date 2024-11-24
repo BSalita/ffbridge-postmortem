@@ -94,9 +94,6 @@ def Augment_Metric_By_Suits(metrics,metric,dtype=pl.UInt8):
 
 # calculate dict of contract result scores. each column contains (non-vul,vul) scores for each trick taken. sets are always penalty doubled.
 def calculate_scores():
-    global scores_d
-    global all_scores_d
-    global scores_df
 
     scores_d = {}
     all_scores_d = {}
@@ -1511,6 +1508,8 @@ def Perform_DD_SD_Augmentations(df):
     )
 
     # board result columns
+    # todo: this func call returns static data but duplicated here. should only be called once. but streamlit misbehaves on globals.
+    all_scores_d, scores_d, scores_df = calculate_scores() # todo: this func call returns static data but is duplicated here.
     df = df.with_columns(
         # word to the wise: map_elements() is requires every column to be specified in pl.struct() and return_dtype must be compatible.
         # SDScore is the SD score of the declarer's contract.
