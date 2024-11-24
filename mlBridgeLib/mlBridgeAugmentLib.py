@@ -1484,17 +1484,73 @@ def Perform_DD_SD_Augmentations(df):
         .alias('ParScore_Declarer'), # todo: rename to 'Declarer_ParScore'?
         ((pl.col('Pair_Declarer_Direction').eq('NS') & pl.col('Vul_NS')) | (pl.col('Pair_Declarer_Direction').eq('EW') & pl.col('Vul_EW'))).alias('Declarer_Vul'),
     )
+    # position columns
+    df = df.with_columns(
+        pl.col('Declarer_Direction').replace_strict(mlBridgeLib.PlayerDirectionToPairDirection).alias('Pair_Declarer_Direction'),
+        pl.col('Declarer_Direction').replace_strict(mlBridgeLib.NextPosition).alias('Direction_OnLead'),
+    )
+    df = df.with_columns(
+        pl.col('Pair_Declarer_Direction').replace_strict(mlBridgeLib.PairDirectionToOpponentPairDirection).alias('Opponent_Pair_Direction'),
+        pl.struct(['Pair_Declarer_Direction', 'Score_NS', 'Score_EW']).map_elements(lambda r: r[f'Score_{r["Pair_Declarer_Direction"]}'],return_dtype=pl.Int16).alias('Score_Declarer'),
+        pl.col('Direction_OnLead').replace_strict(mlBridgeLib.NextPosition).alias('Direction_Dummy'),
+        pl.struct(['Direction_OnLead', 'Player_ID_N', 'Player_ID_E', 'Player_ID_S', 'Player_ID_W']).map_elements(lambda r: r[f'Player_ID_{r["Direction_OnLead"]}'],return_dtype=pl.String).alias('OnLead'),
+    )
+    df = df.with_columns(
+        pl.col('Direction_Dummy').replace_strict(mlBridgeLib.NextPosition).alias('Direction_NotOnLead'),
+        pl.struct(['Direction_Dummy', 'Player_ID_N', 'Player_ID_E', 'Player_ID_S', 'Player_ID_W']).map_elements(lambda r: r[f'Player_ID_{r["Direction_Dummy"]}'],return_dtype=pl.String).alias('Dummy'),
+        pl.col('Score_Declarer').le(pl.col('ParScore_Declarer')).alias('Defender_ParScore_GE')
+    )
+    df = df.with_columns(
+        pl.struct(['Direction_NotOnLead', 'Player_ID_N', 'Player_ID_E', 'Player_ID_S', 'Player_ID_W']).map_elements(lambda r: r[f'Player_ID_{r["Direction_NotOnLead"]}'],return_dtype=pl.String).alias('NotOnLead'),
+        pl.struct(['Pair_Declarer_Direction', 'Vul_NS', 'Vul_EW']).map_elements(lambda r: r[f'Vul_{r["Pair_Declarer_Direction"]}'],return_dtype=pl.Boolean).alias('Vul_Declarer'),
+        pl.struct(['Pair_Declarer_Direction', 'Pct_NS', 'Pct_EW']).map_elements(lambda r: r[f'Pct_{r["Pair_Declarer_Direction"]}'],return_dtype=pl.Float32).alias('Pct_Declarer'),
+        pl.struct(['Pair_Declarer_Direction', 'Pair_Number_NS', 'Pair_Number_EW']).map_elements(lambda r: r[f'Pair_Number_{r["Pair_Declarer_Direction"]}'],return_dtype=pl.UInt32).alias('Pair_Number_Declarer'),
+        pl.struct(['Opponent_Pair_Direction', 'Pair_Number_NS', 'Pair_Number_EW']).map_elements(lambda r: r[f'Pair_Number_{r["Opponent_Pair_Direction"]}'],return_dtype=pl.UInt32).alias('Pair_Number_Defender'),
+        pl.struct(['Declarer_Direction', 'Player_ID_N', 'Player_ID_E', 'Player_ID_S', 'Player_ID_W']).map_elements(lambda r: r[f'Player_ID_{r["Declarer_Direction"]}'],return_dtype=pl.String).alias('Number_Declarer'),
+        pl.struct(['Declarer_Direction', 'Player_Name_N', 'Player_Name_E', 'Player_Name_S', 'Player_Name_W']).map_elements(lambda r: r[f'Player_Name_{r["Declarer_Direction"]}'],return_dtype=pl.String).alias('Name_Declarer'),
+    )
+
+    # board result columns
     df = df.with_columns(
         # word to the wise: map_elements() is requires every column to be specified in pl.struct() and return_dtype must be compatible.
         # SDScore is the SD score of the declarer's contract.
         # note: cool example of dereferencing a column of column names into a column of values
         pl.struct(['Declarer_SDContract','^EV_(NS|EW)_[NESW]_[SHDCN]_[1-7]$'])
-        .map_elements(lambda x: x[x['Declarer_SDContract']],return_dtype=pl.Float32).alias('SDScore'),
+            .map_elements(lambda x: x[x['Declarer_SDContract']],return_dtype=pl.Float32).alias('SDScore'),
         # Computed_Score_Declarer is the computed score of the declarer's contract.
         # note: cool example of calling dict having keys that are tuples
         pl.struct(['BidLvl', 'BidSuit', 'Tricks', 'Declarer_Vul', 'Dbl'])
-        .map_elements(lambda x: all_scores_d.get(tuple(x.values()), 0),return_dtype=pl.Int16)
-        .alias('Computed_Score_Declarer')
+            .map_elements(lambda x: all_scores_d.get(tuple(x.values()), 0),return_dtype=pl.Int16)
+            .alias('Computed_Score_Declarer'),
+        pl.struct(['Contract', 'Result', 'Score_NS', 'BidLvl', 'BidSuit', 'Declarer_Direction', 'Vul_Declarer']).map_elements(
+            lambda r: 0 if r['Contract'] == 'PASS' else r['Score_NS'] if r['Result'] is None else mlBridgeLib.score(
+                r['BidLvl'] - 1, 'CDHSN'.index(r['BidSuit']), len(r['Dbl']), 'NESW'.index(r['Declarer_Direction']),
+                r['Vul_Declarer'], r['Result'], True),return_dtype=pl.Int16).alias('Computed_Score_Declarer2'),
     )
+    # todo: can remove df['Computed_Score_Declarer2'] after assert has proven equality
+    assert df['Computed_Score_Declarer'].eq(df['Computed_Score_Declarer2']).all()
+
+    df = df.with_columns(
+        (pl.col('Result') > 0).alias('OverTricks'),
+        (pl.col('Result') == 0).alias('JustMade'),
+        (pl.col('Result') < 0).alias('UnderTricks'),
+        # todo: duplicate of 'Computed_Score_Declarer' so can be removed after asserting equal.
+       pl.col('Tricks').alias('Tricks_Declarer'),
+        (pl.col('Tricks') - pl.col('DDTricks')).alias('Tricks_DD_Diff_Declarer'),
+    )
+
+    # Grouped calculation columns
+    declarer_rating = df.group_by('Number_Declarer').agg(
+        pl.col('Tricks_DD_Diff_Declarer').mean().alias('Declarer_Rating')
+    )
+    df = df.join(declarer_rating, on='Number_Declarer')
+    onlead_rating = df.group_by('OnLead').agg(
+        pl.col('Defender_ParScore_GE').cast(pl.Float32).mean().alias('Defender_OnLead_Rating')
+    )
+    df = df.join(onlead_rating, on='OnLead')
+    notonlead_rating = df.group_by('NotOnLead').agg(
+        pl.col('Defender_ParScore_GE').cast(pl.Float32).mean().alias('Defender_NotOnLead_Rating')
+    )
+    df = df.join(notonlead_rating, on='NotOnLead')
 
     return df
