@@ -694,47 +694,6 @@ def perform_hand_augmentations(df,hrs_d,sd_productions=40,progress=None):
         )
         print(f"convert_score_to_score: time:{time.time()-t} seconds")
 
-    # todo: not right. some overlap with code in ffbridgelib.convert_ffdf_to_mldf()
-    t = time.time()
-    if 'MP_Top' not in df.columns:
-        # calculate top score (number of board scores - 1)
-        df = df.with_columns(
-            pl.col('Score').count().over(['session_id', 'Board']).sub(1).alias('MP_Top'),
-        )
-        print(f"create MP_Top: time:{time.time()-t} seconds")
-
-    # todo: not right. some overlap with code in ffbridgelib.convert_ffdf_to_mldf()
-    t = time.time()
-    if 'MP_NS' not in df.columns:
-        # Calculate matchpoints
-        df = df.with_columns([
-            # calculate top score which is number of scores in each group - 1
-            # calculate matchpoints using rank() and average method
-            # assumes 'Score' column contains all scores for the session. if not, _to_mldf() needs to be updated.
-            pl.col('Score').rank(method='average', descending=False).sub(1).over(['session_id', 'Board']).alias('MP_NS'),
-            pl.col('Score').rank(method='average', descending=True).sub(1).over(['session_id', 'Board']).alias('MP_EW'),
-        ])
-        print(f"calculate matchpoints: time:{time.time()-t} seconds")
-
-    # todo: not right. some overlap with code in ffbridgelib.convert_ffdf_to_mldf()
-    t = time.time()
-    if 'Pct_NS' not in df.columns:
-        # Calculate percentages using (n-1) as the top
-        df = df.with_columns([
-            (pl.col('MP_NS') / pl.col('MP_Top')).alias('Pct_NS'),
-            (pl.col('MP_EW') / pl.col('MP_Top')).alias('Pct_EW')
-        ])
-        print(f"calculate matchpoints percentages: time:{time.time()-t} seconds")
-
-    t = time.time()
-    if 'Declarer_Pct' not in df.columns:
-        df = df.with_columns(
-            pl.when(pl.col('Declarer_Direction').is_in(['N','S']))
-            .then('Pct_NS')
-            .otherwise('Pct_EW')
-            .alias('Declarer_Pct'),
-        )
-        print(f"create Declarer_Pct: time:{time.time()-t} seconds")
     
     # create EV Max and MaxCol with consideration to vulnerability
     t = time.time()
@@ -866,25 +825,70 @@ def calculate_matchpoint_scores_ns(df,score_columns):
 
 def PerformMatchPointAndPercentAugmentations(df):
 
-    # todo: probably wrong test. 
+    # todo: not right. some overlap with code in ffbridgelib.convert_ffdf_to_mldf()
+
     t = time.time()
+    if 'MP_Top' not in df.columns:
+        # calculate top score (number of board scores - 1)
+        df = df.with_columns(
+            pl.col('Score').count().over(['session_id','PBN','Board']).sub(1).alias('MP_Top'),
+        )
+        print(f"create MP_Top: time:{time.time()-t} seconds")
 
-    #if 'MP_NS' in df.columns and 'MP_EW' in df.columns and 'MP_Top' in df.columns:
-    #    print('PerformMatchPointAndPercentAugmentations: MP_NS, MP_EW, MP_Top exist but code is not implemented to use them. skipping.')
-    #    return df
+    # todo: check if there's overlap with code in ffbridgelib.convert_ffdf_to_mldf()?
+    t = time.time()
+    if 'MP_NS' not in df.columns:
+        # Calculate matchpoints
+        df = df.with_columns([
+                # calculate top score which is number of scores in each group - 1
+                # calculate matchpoints using rank() and average method
+                # assumes 'Score' column contains all scores for the session. if not, _to_mldf() needs to be updated.
+                pl.col('Score_NS').rank(method='average', descending=False).sub(1).over(['session_id', 'PBN', 'Board']).alias('MP_NS'),
+                pl.col('Score_EW').rank(method='average', descending=False).sub(1).over(['session_id', 'PBN', 'Board']).alias('MP_EW'),
+        ])
+        print(f"calculate matchpoints MP_(NS|EW): time:{time.time()-t} seconds")
 
-    if 'Expanded_Scores_List' not in df.columns:
-        print('PerformMatchPointAndPercentAugmentations: Creating Expanded_Scores_List column.')
-        expanded_scores_df = df.group_by('Board').agg(pl.col('Score_NS').sort(descending=True).alias('Expanded_Scores_List'))
-        # Join the expanded scores back to the original DataFrame
-        df = df.join(expanded_scores_df, on='Board')
-        
+    t = time.time()
+    if 'Pct_NS' not in df.columns:
+        # Calculate percentages using (n-1) as the top
+        df = df.with_columns([
+            (pl.col('MP_NS') / pl.col('MP_Top')).alias('Pct_NS'),
+            (pl.col('MP_EW') / pl.col('MP_Top')).alias('Pct_EW')
+        ])
+        print(f"calculate matchpoints percentages MP_(NS|EW): time:{time.time()-t} seconds")
+
+    t = time.time()
+    if 'Declarer_Pct' not in df.columns:
+        df = df.with_columns(
+            pl.when(pl.col('Declarer_Direction').is_in(['N','S']))
+            .then('Pct_NS')
+            .otherwise('Pct_EW')
+            .alias('Declarer_Pct'),
+        )
+        print(f"create Declarer_Pct: time:{time.time()-t} seconds")
+
     discrete_score_columns = ['DDScore_NS','ParScore_NS','EV_NS_Max'] # todo: EV needs {Vul} replacement. Use NV for now.'
     dd_score_columns = [f'DDScore_{l}{s}_{d}' for d in 'NESW' for s in 'SHDCN' for l in range(1,8)]
     # EV_{pd}_{dd}_{s}_[1-7]_{v}
     ev_score_columns = [f'EV_{pd}_{d}_{s}_{l}' for pd in ['NS','EW'] for d in pd for s in 'SHDCN' for l in range(1,8)]
-    df = calculate_matchpoint_scores_ns(df,discrete_score_columns+dd_score_columns+ev_score_columns)
+    all_score_columns = discrete_score_columns+dd_score_columns+ev_score_columns
+    if 'Expanded_Scores_List' in df.columns: # ffbridge only
+        print('Calculate matchpoints for existing Expanded_Scores_List column.')
+        df = calculate_matchpoint_scores_ns(df,all_score_columns)
+    else:
+        print('Calculate matchpoints for session, PBN, and Board.')
+        for col in all_score_columns:
+            if 'MP_'+col not in df.columns:
+                # Calculate matchpoints
+                df = df.with_columns([
+                        # calculate top score which is number of scores in each group - 1
+                        # calculate matchpoints using rank() and average method
+                        # assumes 'Score' column contains all scores for the session. if not, _to_mldf() needs to be updated.
+                        pl.col('Score_NS').rank(method='average', descending=False).sub(1).over(['session_id', 'PBN', 'Board']).alias('MP_'+col)
+                ])
+    print(f"calculate matchpoints all_score_columns: time:{time.time()-t} seconds")
 
+    t = time.time()
     for col_ns in discrete_score_columns:
         col_ew = col_ns.replace('NS','EW')
         df = df.with_columns(
