@@ -277,7 +277,9 @@ def get_team_and_scores_from_url():
 
     try:
 
-        st.session_state.game_url = st.sidebar.text_input('Enter ffbridge results url',value='https://ffbridge.fr/competitions/results/groups/7878/sessions/107118/pairs/3976783',key='ffbridge_url')
+        #default_game_url = 'https://ffbridge.fr/competitions/results/groups/7878/sessions/107118/pairs/3976783'
+        default_game_url = 'https://ffbridge.fr/competitions/results/groups/7878/sessions/140342/pairs/5989257'
+        st.session_state.game_url = st.sidebar.text_input('Enter ffbridge results url',value=default_game_url,key='ffbridge_url')
         #print(f"st.session_state.game_url:{st.session_state.game_url}")
         st.sidebar.link_button('Open results page',url=st.session_state.game_url)
 
@@ -502,7 +504,7 @@ if __name__ == '__main__':
         # Create connection
         st.session_state.con = duckdb.connect()
 
-    if 'df' in st.session_state:
+    if False: #'df' in st.session_state:
         create_sidebar()
     else:
         with st.spinner("Loading Game Data..."):
@@ -528,7 +530,7 @@ if __name__ == '__main__':
             # personalize to player, partner, opponents, etc.
             st.session_state.df = filter_dataframe(df, st.session_state.group_id, st.session_state.session_id, st.session_state.player_id, st.session_state.partner_id)
 
-            # Register DataFrame as 'results' view
+            # Register DataFrame as 'self' view
             st.session_state.con.register('self', st.session_state.df)
 
             # ShowDataFrameTable(df, key='everything_df', query='SELECT Board, Pct_NS, Pct_EW, MP_NS, MP_EW FROM self')

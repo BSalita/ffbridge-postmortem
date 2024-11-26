@@ -1,6 +1,6 @@
 # todo:
-# rename Pct_NS to MP_Pct_NS?
-# is MP_Top always same for both NS and EW?
+# we're reading just one url which contains only the player's results. Need to read all urls to get all board results.
+# rename columns
 
 import polars as pl
 from collections import defaultdict
@@ -804,18 +804,26 @@ def calculate_matchpoint_scores_ns(df,score_columns):
     mp_columns = defaultdict(list)
     for r in df.iter_rows(named=True):
         scores_list = r['Expanded_Scores_List'] # todo: make 'Expanded_Scores_List' sorted and with a 'Score_NS' removed?
+        if scores_list is None:
+            # todo: kludge: apparently Expanded_Scores_List can be null if director's adjustment.
+            # matchpoints can't be computed because there's no list of scores. we only have scores at player's table, not all tables.
+            # The fix is to download all table's results to replace a null Expanded_Scores_List.
+            print(f"Expanded_Scores_List is null: Score_NS:{r['Score_NS']} MP_NS:{r['MP_NS']}. Skipping.")
+            for col in score_columns:
+                mp_columns['MP_'+col].append(0.5)
+            continue
         scores_list.remove(r['Score_NS'])
         
         for col in score_columns:
             # Calculate rank for each DD score
             rank = 0.0
             new_score = r[col]
-            
-            for score in scores_list:
-                if new_score > score:
-                    rank += 1.0
-                elif new_score == score:
-                    rank += 0.5
+            if scores_list:
+                for score in scores_list:
+                    if new_score > score:
+                        rank += 1.0
+                    elif new_score == score:
+                        rank += 0.5
                     
             mp_columns['MP_'+col].append(rank)
     
