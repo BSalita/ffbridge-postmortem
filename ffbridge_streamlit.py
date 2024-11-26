@@ -277,8 +277,8 @@ def get_team_and_scores_from_url():
 
     try:
 
-        #default_game_url = 'https://ffbridge.fr/competitions/results/groups/7878/sessions/107118/pairs/3976783'
-        default_game_url = 'https://ffbridge.fr/competitions/results/groups/7878/sessions/140342/pairs/5989257'
+        default_game_url = 'https://ffbridge.fr/competitions/results/groups/7878/sessions/107118/pairs/3976783'
+        #default_game_url = 'https://ffbridge.fr/competitions/results/groups/7878/sessions/140342/pairs/5989257'
         st.session_state.game_url = st.sidebar.text_input('Enter ffbridge results url',value=default_game_url,key='ffbridge_url')
         #print(f"st.session_state.game_url:{st.session_state.game_url}")
         st.sidebar.link_button('Open results page',url=st.session_state.game_url)
