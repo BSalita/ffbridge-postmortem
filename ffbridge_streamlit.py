@@ -303,7 +303,11 @@ def get_ffbridge_data_using_url():
         
         # get team data
         api_team_url = f'http://localhost:8000/ffbridge.fr/competitions/results/groups/{extracted_group_id}/sessions/{extracted_session_id}/pairs/{extracted_pair_id}'
-        #print(f"api_team_url:{api_team_url}")
+        #api_team_url = "https://ffbridge.fr/competitions/results/groups/7878/sessions/107118/pairs/3976783"
+        #api_team_url = f"https://api-lancelot.ffbridge.fr/results/teams/{extracted_pair_id}/session/{extracted_session_id}/scores"
+        #api_team_url = f'http://api-lancelot.ffbridge.fr/competitions/results/groups/{extracted_group_id}/sessions/{extracted_session_id}/pairs/{extracted_pair_id}'
+        #api_team_url = "https://api-lancelot.ffbridge.fr/results/teams/3976783"
+        print(f"api_team_url:{api_team_url}")
         #print(f"api_scores_url:{api_scores_url}")
         request = requests.get(api_team_url)
         request.raise_for_status()
@@ -315,6 +319,9 @@ def get_ffbridge_data_using_url():
             df = pl.DataFrame(response_json['data'])
         else:
             raise ValueError(f"API request failed: {response_json}")
+
+        # no postmortem api
+        #df = pl.DataFrame(response_json)
 
         # Print the structure to debug
         print("DataFrame columns:", df.columns)
