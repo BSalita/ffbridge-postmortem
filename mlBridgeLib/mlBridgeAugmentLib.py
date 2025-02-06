@@ -96,7 +96,7 @@ def Augment_Metric_By_Suits(metrics,metric,dtype=pl.UInt8):
 def calculate_scores():
 
     scores_d = {}
-    all_scores_d = {}
+    all_scores_d = {(None,None,None,None,None):0} # PASS
 
     suit_to_denom = [Denom.clubs, Denom.diamonds, Denom.hearts, Denom.spades, Denom.nt]
     for suit_char in 'SHDCN':
@@ -1097,6 +1097,7 @@ def calculate_LoTT(df):
     return df
 
 
+# todo: refactor. Most of PerformResultAugmentations should be in hand record augmentation, not result augmentation.
 def PerformResultAugmentations(df,hrs_d):
 
     # create column of Hands expressed in binary.
@@ -1204,7 +1205,6 @@ def PerformResultAugmentations(df,hrs_d):
     if 'DP_N_C' in df.columns:
         print('DP_N_C already exists. skipping...')
     else:
-        # takes 4m30s
         t = time.time()
         dp_columns = [
             pl.when(pl.col(f"SL_{direction}_{suit}") == 0).then(3)
@@ -1227,6 +1227,32 @@ def PerformResultAugmentations(df,hrs_d):
             (pl.col('DP_E')+pl.col('DP_W')).alias('DP_EW'),
         )
         print(f"Time to create DP_[NESW]_[SHDC] DP_[NESW] DP_(NS|EW): {time.time()-t} seconds")
+
+    # Calculate total points from HCP and DP.
+    if 'Total_Points_N_C' in df.columns:
+        print('Total_Points_N_C already exists. skipping...')
+    else:
+        print(f"Todo: Don't forget to adjust Total_Points for singleton king and doubleton queen.")
+        t = time.time()
+        df = df.with_columns(
+            (
+                # adjust points for singleton king and doubleton queen. pl.when(min(hcp,dp)) or just subtract 1?
+                (pl.col(f'HCP_{direction}_{suit}')+pl.col(f'DP_{direction}_{suit}')).alias(f'Total_Points_{direction}_{suit}')
+                for direction in 'NESW'
+                for suit in 'SHDC'
+            )
+        )
+        df = df.with_columns(
+            (
+                (pl.col(f'Total_Points_{direction}_S')+pl.col(f'Total_Points_{direction}_H')+pl.col(f'Total_Points_{direction}_D')+pl.col(f'Total_Points_{direction}_C')).alias(f'Total_Points_{direction}')
+                for direction in 'NESW'
+            )
+        )
+        df = df.with_columns(
+            (pl.col('Total_Points_N')+pl.col('Total_Points_S')).alias('Total_Points_NS'),
+            (pl.col('Total_Points_E')+pl.col('Total_Points_W')).alias('Total_Points_EW'),
+        )
+        print(f"Time to create Total_Points_[NESW]_[SHDC] Total_Points_[NESW] Total_Points_(NS|EW): {time.time()-t} seconds")
 
     if 'SL_Max_NS' in df.columns:
         print('SL_Max_NS already exists. skipping...')
@@ -1378,6 +1404,64 @@ def PerformResultAugmentations(df,hrs_d):
         )
         print(f"Time to create Vul_(NS|EW): {time.time()-t} seconds")
 
+    t = time.time()
+    # Define the criteria for each series type
+    suit_quality_criteria = {
+        "Biddable": lambda sl, hcp: sl.ge(5) | (sl.eq(4) & hcp.ge(3)),
+        "Rebiddable": lambda sl, hcp: sl.ge(6) | (sl.eq(5) & hcp.ge(3)),
+        "Twice_Rebiddable": lambda sl, hcp: sl.ge(7) | (sl.eq(6) & hcp.ge(3)),
+        "Strong_Rebiddable": lambda sl, hcp: sl.ge(6) & hcp.ge(9),
+        "Solid": lambda sl, hcp: hcp.ge(9),  # todo: 6 card requires ten
+    }
+
+    # Stopper criteria from worst to best
+    stopper_criteria = {
+        "At_Best_Partial_Stop_In": lambda sl, hcp: (sl + hcp).lt(4),  # todo: seems wrong
+        "Partial_Stop_In": lambda sl, hcp: (sl + hcp).ge(4),
+        "Likely_Stop_In": lambda sl, hcp: (sl + hcp).ge(5),
+        "Stop_In": lambda sl, hcp: hcp.ge(4) | (sl + hcp).ge(6),
+        "At_Best_Stop_In": lambda sl, hcp: (sl + hcp).ge(7),
+        "Two_Stops_In": lambda sl, hcp: (sl + hcp).ge(8),
+    }
+
+    # Create all series expressions
+    series_expressions = [
+        pl.Series(
+            f"{series_type}_{direction}_{suit}",
+            criteria(
+                df[f"SL_{direction}_{suit}"],
+                df[f"HCP_{direction}_{suit}"]
+            ),
+            pl.Boolean
+        )
+        for direction in "NESW"
+        for suit in "SHDC"
+        for series_type, criteria in {**suit_quality_criteria, **stopper_criteria}.items()
+    ]
+
+    # Apply all expressions at once
+    df = df.with_columns(series_expressions)
+
+    df = df.with_columns(
+        pl.lit(False).alias(f"Forcing_One_Round"), # todo
+        pl.lit(False).alias(f"Opponents_Cannot_Play_Undoubled_Below_2N"), # todo
+        pl.lit(False).alias(f"Forcing_To_2N"), # todo
+        pl.lit(False).alias(f"Forcing_To_3N"), # todo
+    )
+
+    # Create balanced hand indicators for each direction
+    # A hand is considered balanced if it has one of these distributions:
+    # - 4-3-3-3 
+    # - 4-4-3-2
+    # - 5-3-3-2 (only if the 5-card suit is clubs or diamonds)
+    # - 5-4-2-2 (only if the 5-card suit is clubs or diamonds)
+    df = df.with_columns(
+        pl.Series(f"Balanced_{direction}",df[f"SL_{direction}_ML_SJ"].is_in(['4-3-3-3','4-4-3-2'])
+            | (df[f"SL_{direction}_ML_SJ"].is_in(['5-3-3-2','5-4-2-2']) & (df[f"SL_{direction}_C"].eq(5) | df[f"SL_{direction}_D"].eq(5))),pl.Boolean)
+        for direction in 'NESW'
+    )
+    print(f"Time to create misc: {time.time()-t} seconds")
+
     return df
 
 # additional augmentations for ACBL hand records
@@ -1500,46 +1584,50 @@ def Perform_DD_SD_Augmentations(df):
     )
     df = df.with_columns(
         pl.col('Pair_Declarer_Direction').replace_strict(mlBridgeLib.PairDirectionToOpponentPairDirection).alias('Opponent_Pair_Direction'),
-        pl.struct(['Pair_Declarer_Direction', 'Score_NS', 'Score_EW']).map_elements(lambda r: r[f'Score_{r["Pair_Declarer_Direction"]}'],return_dtype=pl.Int16).alias('Score_Declarer'),
+        pl.struct(['Pair_Declarer_Direction', 'Score_NS', 'Score_EW']).map_elements(lambda r: None if r['Pair_Declarer_Direction'] is None else r[f'Score_{r["Pair_Declarer_Direction"]}'],return_dtype=pl.Int16).alias('Score_Declarer'),
         pl.col('Direction_OnLead').replace_strict(mlBridgeLib.NextPosition).alias('Direction_Dummy'),
-        pl.struct(['Direction_OnLead', 'Player_ID_N', 'Player_ID_E', 'Player_ID_S', 'Player_ID_W']).map_elements(lambda r: r[f'Player_ID_{r["Direction_OnLead"]}'],return_dtype=pl.String).alias('OnLead'),
+        pl.struct(['Direction_OnLead', 'Player_ID_N', 'Player_ID_E', 'Player_ID_S', 'Player_ID_W']).map_elements(lambda r: None if r['Direction_OnLead'] is None else r[f'Player_ID_{r["Direction_OnLead"]}'],return_dtype=pl.String).alias('OnLead'),
     )
     df = df.with_columns(
         pl.col('Direction_Dummy').replace_strict(mlBridgeLib.NextPosition).alias('Direction_NotOnLead'),
-        pl.struct(['Direction_Dummy', 'Player_ID_N', 'Player_ID_E', 'Player_ID_S', 'Player_ID_W']).map_elements(lambda r: r[f'Player_ID_{r["Direction_Dummy"]}'],return_dtype=pl.String).alias('Dummy'),
+        pl.struct(['Direction_Dummy', 'Player_ID_N', 'Player_ID_E', 'Player_ID_S', 'Player_ID_W']).map_elements(lambda r: None if r['Direction_Dummy'] is None else r[f'Player_ID_{r["Direction_Dummy"]}'],return_dtype=pl.String).alias('Dummy'),
         pl.col('Score_Declarer').le(pl.col('ParScore_Declarer')).alias('Defender_ParScore_GE')
     )
     df = df.with_columns(
-        pl.struct(['Direction_NotOnLead', 'Player_ID_N', 'Player_ID_E', 'Player_ID_S', 'Player_ID_W']).map_elements(lambda r: r[f'Player_ID_{r["Direction_NotOnLead"]}'],return_dtype=pl.String).alias('NotOnLead'),
-        pl.struct(['Pair_Declarer_Direction', 'Vul_NS', 'Vul_EW']).map_elements(lambda r: r[f'Vul_{r["Pair_Declarer_Direction"]}'],return_dtype=pl.Boolean).alias('Vul_Declarer'),
-        pl.struct(['Pair_Declarer_Direction', 'Pct_NS', 'Pct_EW']).map_elements(lambda r: r[f'Pct_{r["Pair_Declarer_Direction"]}'],return_dtype=pl.Float32).alias('Pct_Declarer'),
-        pl.struct(['Pair_Declarer_Direction', 'Pair_Number_NS', 'Pair_Number_EW']).map_elements(lambda r: r[f'Pair_Number_{r["Pair_Declarer_Direction"]}'],return_dtype=pl.UInt32).alias('Pair_Number_Declarer'),
-        pl.struct(['Opponent_Pair_Direction', 'Pair_Number_NS', 'Pair_Number_EW']).map_elements(lambda r: r[f'Pair_Number_{r["Opponent_Pair_Direction"]}'],return_dtype=pl.UInt32).alias('Pair_Number_Defender'),
-        pl.struct(['Declarer_Direction', 'Player_ID_N', 'Player_ID_E', 'Player_ID_S', 'Player_ID_W']).map_elements(lambda r: r[f'Player_ID_{r["Declarer_Direction"]}'],return_dtype=pl.String).alias('Number_Declarer'),
-        pl.struct(['Declarer_Direction', 'Player_Name_N', 'Player_Name_E', 'Player_Name_S', 'Player_Name_W']).map_elements(lambda r: r[f'Player_Name_{r["Declarer_Direction"]}'],return_dtype=pl.String).alias('Name_Declarer'),
+        pl.struct(['Direction_NotOnLead', 'Player_ID_N', 'Player_ID_E', 'Player_ID_S', 'Player_ID_W']).map_elements(lambda r: None if r['Direction_NotOnLead'] is None else r[f'Player_ID_{r["Direction_NotOnLead"]}'],return_dtype=pl.String).alias('NotOnLead'),
+        pl.struct(['Pair_Declarer_Direction', 'Vul_NS', 'Vul_EW']).map_elements(lambda r: None if r['Pair_Declarer_Direction'] is None else r[f'Vul_{r["Pair_Declarer_Direction"]}'],return_dtype=pl.Boolean).alias('Vul_Declarer'),
+        pl.struct(['Pair_Declarer_Direction', 'Pct_NS', 'Pct_EW']).map_elements(lambda r: None if r['Pair_Declarer_Direction'] is None else r[f'Pct_{r["Pair_Declarer_Direction"]}'],return_dtype=pl.Float32).alias('Pct_Declarer'),
+        pl.struct(['Pair_Declarer_Direction', 'Pair_Number_NS', 'Pair_Number_EW']).map_elements(lambda r: None if r['Pair_Declarer_Direction'] is None else r[f'Pair_Number_{r["Pair_Declarer_Direction"]}'],return_dtype=pl.UInt32).alias('Pair_Number_Declarer'),
+        pl.struct(['Opponent_Pair_Direction', 'Pair_Number_NS', 'Pair_Number_EW']).map_elements(lambda r: None if r['Opponent_Pair_Direction'] is None else r[f'Pair_Number_{r["Opponent_Pair_Direction"]}'],return_dtype=pl.UInt32).alias('Pair_Number_Defender'),
+        pl.struct(['Declarer_Direction', 'Player_ID_N', 'Player_ID_E', 'Player_ID_S', 'Player_ID_W']).map_elements(lambda r: None if r['Declarer_Direction'] is None else r[f'Player_ID_{r["Declarer_Direction"]}'],return_dtype=pl.String).alias('Number_Declarer'),
+        pl.struct(['Declarer_Direction', 'Player_Name_N', 'Player_Name_E', 'Player_Name_S', 'Player_Name_W']).map_elements(lambda r: None if r['Declarer_Direction'] is None else r[f'Player_Name_{r["Declarer_Direction"]}'],return_dtype=pl.String).alias('Name_Declarer'),
     )
 
     # board result columns
     # todo: this func call returns static data but duplicated here. should only be called once. but streamlit misbehaves on globals.
+    print(df.filter(pl.col('Result').is_null() | pl.col('Tricks').is_null())['Contract','Declarer_Direction','Declarer_Vul','Vul_Declarer','iVul','Score_NS','BidLvl','Result','Tricks'])
     all_scores_d, scores_d, scores_df = calculate_scores() # todo: this func call returns static data but is duplicated here.
     df = df.with_columns(
-        # word to the wise: map_elements() is requires every column to be specified in pl.struct() and return_dtype must be compatible.
+        # word to the wise: map_elements() requires every column to be specified in pl.struct() and return_dtype must be compatible.
         # SDScore is the SD score of the declarer's contract.
         # note: cool example of dereferencing a column of column names into a column of values
         pl.struct(['Declarer_SDContract','^EV_(NS|EW)_[NESW]_[SHDCN]_[1-7]$'])
-            .map_elements(lambda x: x[x['Declarer_SDContract']],return_dtype=pl.Float32).alias('SDScore'),
+            .map_elements(lambda x: None if x['Declarer_SDContract'] is None else x[x['Declarer_SDContract']],return_dtype=pl.Float32).alias('SDScore'),
         # Computed_Score_Declarer is the computed score of the declarer's contract.
         # note: cool example of calling dict having keys that are tuples
-        pl.struct(['BidLvl', 'BidSuit', 'Tricks', 'Declarer_Vul', 'Dbl'])
-            .map_elements(lambda x: all_scores_d.get(tuple(x.values()), 0),return_dtype=pl.Int16)
+        pl.struct(['BidLvl', 'BidSuit', 'Tricks', 'Vul_Declarer', 'Dbl'])
+            .map_elements(lambda x: all_scores_d.get(tuple(x.values()),None),return_dtype=pl.Int16)
             .alias('Computed_Score_Declarer'),
-        pl.struct(['Contract', 'Result', 'Score_NS', 'BidLvl', 'BidSuit', 'Declarer_Direction', 'Vul_Declarer']).map_elements(
+
+        pl.struct(['Contract', 'Result', 'Score_NS', 'BidLvl', 'BidSuit', 'Dbl','Declarer_Direction', 'Vul_Declarer']).map_elements(
             lambda r: 0 if r['Contract'] == 'PASS' else r['Score_NS'] if r['Result'] is None else mlBridgeLib.score(
                 r['BidLvl'] - 1, 'CDHSN'.index(r['BidSuit']), len(r['Dbl']), 'NESW'.index(r['Declarer_Direction']),
                 r['Vul_Declarer'], r['Result'], True),return_dtype=pl.Int16).alias('Computed_Score_Declarer2'),
     )
     # todo: can remove df['Computed_Score_Declarer2'] after assert has proven equality
+    # if asserts, may be due to Result or Tricks having nulls.
     assert df['Computed_Score_Declarer'].eq(df['Computed_Score_Declarer2']).all()
+
 
     df = df.with_columns(
         (pl.col('Result') > 0).alias('OverTricks'),
@@ -1550,18 +1638,24 @@ def Perform_DD_SD_Augmentations(df):
         (pl.col('Tricks') - pl.col('DDTricks')).alias('Tricks_DD_Diff_Declarer'),
     )
 
-    # Grouped calculation columns
-    declarer_rating = df.group_by('Number_Declarer').agg(
-        pl.col('Tricks_DD_Diff_Declarer').mean().alias('Declarer_Rating')
-    )
-    df = df.join(declarer_rating, on='Number_Declarer')
-    onlead_rating = df.group_by('OnLead').agg(
-        pl.col('Defender_ParScore_GE').cast(pl.Float32).mean().alias('Defender_OnLead_Rating')
-    )
-    df = df.join(onlead_rating, on='OnLead')
-    notonlead_rating = df.group_by('NotOnLead').agg(
-        pl.col('Defender_ParScore_GE').cast(pl.Float32).mean().alias('Defender_NotOnLead_Rating')
-    )
-    df = df.join(notonlead_rating, on='NotOnLead')
+    # Grouped calculation columns using over()
+    df = df.with_columns([
+        pl.col('Tricks_DD_Diff_Declarer')
+        .mean()
+        .over('Number_Declarer')
+        .alias('Declarer_Rating'),
+
+        pl.col('Defender_ParScore_GE')
+        .cast(pl.Float32)
+        .mean()
+        .over('OnLead')
+        .alias('Defender_OnLead_Rating'),
+
+        pl.col('Defender_ParScore_GE')
+        .cast(pl.Float32)
+        .mean()
+        .over('NotOnLead')
+        .alias('Defender_NotOnLead_Rating')
+    ])
 
     return df

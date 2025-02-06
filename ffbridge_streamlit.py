@@ -1,10 +1,12 @@
  
-# streamlit program to display Bridge game deal statistics.
+# streamlit program to display French Bridge (ffbridge) game results and statistics.
 # Invoke from system prompt using: streamlit run ffbridge_streamlit.py
 
 # todo showstoppers:
-# fix EV stuff. lot's wrong. NV vs V, column naming, are they even correctly calculated and displayed?
+# download all board results and not just the player's table. this will provide proper data for all columns e.g. matchpoints, comparisions to other tables results
 # game date? do we have to get a new URL?
+# there's errors in dd calculations when page is refreshed in middle of dd calculations. must be a global variable issue or re-init of dll.
+# missing spinners when entering a new game url. this may just be moving code to re run area.
 
 # todo lower priority:
 # do something with packages/version/authors stuff at top of page.
@@ -269,7 +271,7 @@ def get_scores_data(scores_json, group_id, session_id, team_id):
     return df
 
 
-def get_team_and_scores_from_url():
+def get_ffbridge_data_using_url():
 
     # https://ffbridge.fr/competitions/results/groups/7878/sessions/107118/ranking
     # https://ffbridge.fr/competitions/results/groups/7878/sessions/107118/pairs/3976783
@@ -300,55 +302,34 @@ def get_team_and_scores_from_url():
         #print(f"extracted_group_id:{extracted_group_id} extracted_session_id:{extracted_session_id} extracted_pair_id:{extracted_pair_id}")
         
         # get team data
-        api_team_url = f'https://api-lancelot.ffbridge.fr/results/teams/{extracted_pair_id}'
+        api_team_url = f'http://localhost:8000/ffbridge.fr/competitions/results/groups/{extracted_group_id}/sessions/{extracted_session_id}/pairs/{extracted_pair_id}'
         #print(f"api_team_url:{api_team_url}")
-        request = requests.get(api_team_url)
-        #print(f"request:{request}")
-        request.raise_for_status()
-        team_json = request.json()
-        #print(f"got team_json")
-        team_df = create_dataframe(team_json)
-        #print(f"team_df")
-        #ShowDataFrameTable(team_df, key='team_df')
-        #print(f"showedteam_df")
-        player1_id = team_json['player1']['id']
-        player2_id = team_json['player2']['id']
-        pair_direction = team_json['orientation']
-        opponent_pair_direction = 'NS' if pair_direction == 'EW' else 'EW'
-        #print(f"player1_id:{player1_id} player2_id:{player2_id} pair_direction:{pair_direction} opponent_pair_direction:{opponent_pair_direction}")
-
-        api_scores_url = f'https://api-lancelot.ffbridge.fr/results/teams/{extracted_pair_id}/session/{extracted_session_id}/scores'
         #print(f"api_scores_url:{api_scores_url}")
-        request = requests.get(api_scores_url)
-        #print(f"request:{request}")
+        request = requests.get(api_team_url)
         request.raise_for_status()
-        scores_json = request.json() # todo: extract data and use instead of historical data.
- 
-        df = get_scores_data(scores_json, extracted_group_id, extracted_session_id, extracted_pair_id)
+        response_json = request.json()
 
-        # initialize columns which are needed for SQL queries.
-        # todo: should these be initialized in ffbridgelib.convert_ffdf_to_mldf()?
-        df = df.with_columns(pl.lit(extracted_group_id).cast(pl.UInt32).alias('group_id'))
-        df = df.with_columns(pl.lit(extracted_session_id).cast(pl.UInt32).alias('session_id'))
-        df = df.with_columns(pl.lit(extracted_pair_id).cast(pl.UInt32).alias('team_id'))
-        # from 'team', add useful columns. e.g. section, startTableNumber, orientation columns
-        df = df.with_columns(pl.lit(team_df['section'].first()).cast(pl.String).alias('section'))
-        df = df.with_columns(pl.lit(team_df['startTableNumber'].first()).cast(pl.UInt16).alias('startTableNumber'))
-        df = df.with_columns(pl.lit(team_df['orientation'].first()).cast(pl.String).alias('orientation'))
-        df = df.with_columns(pl.struct([pl.col('team_id'),pl.col('session_id')]).alias('team_session_id'))
-        df = df.select([pl.col('group_id','team_session_id','session_id','team_id'),pl.all().exclude('group_id','team_session_id','session_id','team_id')])
+        # Check if the request was successful and extract the data
+        if response_json.get('success'):
+            # Create DataFrame from the 'data' field
+            df = pl.DataFrame(response_json['data'])
+        else:
+            raise ValueError(f"API request failed: {response_json}")
+
+        # Print the structure to debug
+        print("DataFrame columns:", df.columns)
         #ShowDataFrameTable(df, key='team_and_session_df')
 
         # Update the session state
         st.session_state.group_id = extracted_group_id
         st.session_state.session_id = extracted_session_id
         st.session_state.pair_id = extracted_pair_id
-        st.session_state.player_id = player1_id
-        st.session_state.partner_id = player2_id
-        st.session_state.pair_direction = pair_direction
-        st.session_state.player_direction = pair_direction[0]
-        st.session_state.partner_direction = pair_direction[1]
-        st.session_state.opponent_pair_direction = opponent_pair_direction
+        st.session_state.player_id = df['player1_id'][0]
+        st.session_state.partner_id = df['player2_id'][0]
+        st.session_state.pair_direction = df['orientation'][0]
+        st.session_state.player_direction = st.session_state.pair_direction[0]
+        st.session_state.partner_direction = st.session_state.pair_direction[1]
+        st.session_state.opponent_pair_direction = 'EW' if st.session_state.pair_direction == 'NS' else 'NS' # opposite of pair_direction
         print(f"st.session_state.group_id:{st.session_state.group_id} st.session_state.session_id:{st.session_state.session_id} st.session_state.pair_id:{st.session_state.pair_id} st.session_state.player_id:{st.session_state.player_id} st.session_state.partner_id:{st.session_state.partner_id} st.session_state.player_direction:{st.session_state.player_direction} st.session_state.partner_direction:{st.session_state.partner_direction} st.session_state.opponent_pair_direction:{st.session_state.opponent_pair_direction}")
 
     except Exception as e:
@@ -455,8 +436,8 @@ if __name__ == '__main__':
         # Add this auto-scroll code
         streamlitlib.widen_scrollbars()
 
-        st.session_state.assistant_logo = 'https://github.com/BSalita/Bridge_Game_Postmortem_Chatbot/blob/main/assets/logo_assistant.gif?raw=true' # 🥸 todo: put into config. must have raw=true for github url.
-        st.session_state.guru_logo = 'https://github.com/BSalita/Bridge_Game_Postmortem_Chatbot/blob/main/assets/logo_guru.png?raw=true' # 🥷todo: put into config file. must have raw=true for github url.
+        st.session_state.assistant_logo = 'https://github.com/BSalita/ffbridge-postmortem/blob/master/assets/logo_assistant.gif?raw=true' # 🥸 todo: put into config. must have raw=true for github url.
+        st.session_state.guru_logo = 'https://github.com/BSalita/ffbridge-postmortem/blob/master/assets/logo_guru.png?raw=true' # 🥷todo: put into config file. must have raw=true for github url.
 
         # todo: put filenames into a .json or .toml file?
         st.session_state.rootPath = pathlib.Path('e:/bridge/data')
@@ -469,7 +450,7 @@ if __name__ == '__main__':
         app_info()
         streamlit_chat.message(f"Morty: Hi. I'm Morty, your bridge game postmortem expert.", key=f'morty_hi', logo=st.session_state.assistant_logo)
         streamlit_chat.message(f"Morty: I'm preparing a postmortem report on your game. I only understand pair games using a Mitchell movement.", key=f'morty_restrictions', logo=st.session_state.assistant_logo)
-        streamlit_chat.message(f"Morty: Takes me a full minute to download and analyze your game. Please wait until report is fully rendered.", key=f'morty_in_a_minute', logo=st.session_state.assistant_logo)
+        streamlit_chat.message(f"Morty: Takes me two minutes to download and analyze your game. Please wait until report is fully rendered.", key=f'morty_in_a_minute', logo=st.session_state.assistant_logo)
 
         single_dummy_sample_count_default = 40 #2  # number of random deals to generate for calculating single dummy probabilities. Use smaller number for testing.
         st.session_state.single_dummy_sample_count = single_dummy_sample_count_default
@@ -504,7 +485,7 @@ if __name__ == '__main__':
         # Create connection
         st.session_state.con = duckdb.connect()
 
-    if False: #'df' in st.session_state:
+    if 'df' in st.session_state:
         create_sidebar()
     else:
         with st.spinner("Loading Game Data..."):
@@ -512,26 +493,34 @@ if __name__ == '__main__':
             # if st.session_state.use_historical_data:
             #     df = load_historical_data()
             # else:
-                df = get_team_and_scores_from_url()
+                df = get_ffbridge_data_using_url()
+ 
                 create_sidebar() # update sidebar using url's parsed parameters
 
-        with st.spinner('Looking deeply into game data...'):
+        if df is not None:
 
             if not st.session_state.use_historical_data: # historical data is already fully augmented so skip past augmentations
-                df = ffbridgelib.convert_ffdf_to_mldf(df)
-                df = mlBridgeAugmentLib.perform_hand_augmentations(df,{},sd_productions=st.session_state.single_dummy_sample_count)
-                df = mlBridgeAugmentLib.PerformMatchPointAndPercentAugmentations(df)
-                df = mlBridgeAugmentLib.PerformResultAugmentations(df,{})
-                df = mlBridgeAugmentLib.Perform_DD_SD_Augmentations(df)
-                with open('df_columns.txt','w') as f:
-                    for col in sorted(df.columns):
-                        f.write(col+'\n')
+                with st.spinner('Creating ffbridge data to dataframe...'):
+                    df = ffbridgelib.convert_ffdf_to_mldf(df) # warning: drops columns from df.
+                with st.spinner('Creating hand data. Takes 1 to 2 minutes...'):
+                    df = mlBridgeAugmentLib.perform_hand_augmentations(df,{},sd_productions=st.session_state.single_dummy_sample_count)
+                with st.spinner('Augmenting with matchpoints and percentages data...'):
+                    df = mlBridgeAugmentLib.PerformMatchPointAndPercentAugmentations(df)
+                with st.spinner('Augmenting with result data...'):
+                    df = mlBridgeAugmentLib.PerformResultAugmentations(df,{})
+                with st.spinner('Augmenting with DD and SD data...'):
+                    df = mlBridgeAugmentLib.Perform_DD_SD_Augmentations(df)
+                with st.spinner('Writing column names to file...'):
+                    with open('df_columns.txt','w') as f:
+                        for col in sorted(df.columns):
+                            f.write(col+'\n')
 
             # personalize to player, partner, opponents, etc.
             st.session_state.df = filter_dataframe(df, st.session_state.group_id, st.session_state.session_id, st.session_state.player_id, st.session_state.partner_id)
 
             # Register DataFrame as 'self' view
             st.session_state.con.register('self', st.session_state.df)
+            print(f"st.session_state.df:{st.session_state.df.columns}")
 
             # ShowDataFrameTable(df, key='everything_df', query='SELECT Board, Pct_NS, Pct_EW, MP_NS, MP_EW FROM self')
 
@@ -572,8 +561,9 @@ if __name__ == '__main__':
                     mime='application/octet-stream'):
                 st.warning('Personalized report downloaded.')
 
-    if st.session_state.show_sql_query:
-        with st.container():
-            with bottom():
-                st.chat_input('Enter a SQL query e.g. SELECT PBN, Contract, Result, N, S, E, W', key='main_prompt_chat_input', on_submit=chat_input_on_submit)
+    if 'df' in st.session_state:
+        if st.session_state.show_sql_query:
+            with st.container():
+                with bottom():
+                    st.chat_input('Enter a SQL query e.g. SELECT PBN, Contract, Result, N, S, E, W', key='main_prompt_chat_input', on_submit=chat_input_on_submit)
 
