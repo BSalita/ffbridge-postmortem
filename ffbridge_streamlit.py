@@ -507,16 +507,28 @@ if __name__ == '__main__':
         if df is not None:
 
             if not st.session_state.use_historical_data: # historical data is already fully augmented so skip past augmentations
-                with st.spinner('Creating ffbridge data to dataframe...'):
-                    df = ffbridgelib.convert_ffdf_to_mldf(df) # warning: drops columns from df.
-                with st.spinner('Creating hand data. Takes 1 to 2 minutes...'):
-                    df = mlBridgeAugmentLib.perform_hand_augmentations(df,{},sd_productions=st.session_state.single_dummy_sample_count)
-                with st.spinner('Augmenting with matchpoints and percentages data...'):
-                    df = mlBridgeAugmentLib.PerformMatchPointAndPercentAugmentations(df)
-                with st.spinner('Augmenting with result data...'):
-                    df = mlBridgeAugmentLib.PerformResultAugmentations(df,{})
-                with st.spinner('Augmenting with DD and SD data...'):
-                    df = mlBridgeAugmentLib.Perform_DD_SD_Augmentations(df)
+                ffbridge_session_player_cache_df_filename = f'cache/df-{st.session_state.session_id}-{st.session_state.player_id}.parquet'
+                ffbridge_session_player_cache_df_file = pathlib.Path(ffbridge_session_player_cache_df_filename)
+                if ffbridge_session_player_cache_df_file.exists():
+                    df = pl.read_parquet(ffbridge_session_player_cache_df_file)
+                    print(f"Loaded {ffbridge_session_player_cache_df_filename}: shape:{df.shape} size:{ffbridge_session_player_cache_df_file.stat().st_size}")
+                else:
+                    with st.spinner('Creating ffbridge data to dataframe...'):
+                        df = ffbridgelib.convert_ffdf_to_mldf(df) # warning: drops columns from df.
+                    with st.spinner('Creating hand data. Takes 1 to 2 minutes...'):
+                        df = mlBridgeAugmentLib.perform_hand_augmentations(df,{},sd_productions=st.session_state.single_dummy_sample_count)
+                    with st.spinner('Augmenting with matchpoints and percentages data...'):
+                        df = mlBridgeAugmentLib.PerformMatchPointAndPercentAugmentations(df)
+                    with st.spinner('Augmenting with result data...'):
+                        df = mlBridgeAugmentLib.PerformResultAugmentations(df,{})
+                    with st.spinner('Augmenting with DD and SD data...'):
+                        df = mlBridgeAugmentLib.Perform_DD_SD_Augmentations(df)
+                    ffbridge_session_player_cache_dir = pathlib.Path('cache')
+                    ffbridge_session_player_cache_dir.mkdir(exist_ok=True)  # Creates directory if it doesn't exist
+                    ffbridge_session_player_cache_df_filename = f'cache/df-{st.session_state.session_id}-{st.session_state.player_id}.parquet'
+                    ffbridge_session_player_cache_df_file = pathlib.Path(ffbridge_session_player_cache_df_filename)
+                    df.write_parquet(ffbridge_session_player_cache_df_file)
+                    print(f"Saved {ffbridge_session_player_cache_df_filename}: shape:{df.shape} size:{ffbridge_session_player_cache_df_file.stat().st_size}")
                 with st.spinner('Writing column names to file...'):
                     with open('df_columns.txt','w') as f:
                         for col in sorted(df.columns):
