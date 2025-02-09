@@ -443,9 +443,9 @@ def safe_resource():
 def augment_df(df):
     with st.spinner('Creating ffbridge data to dataframe...'):
         df = ffbridgelib.convert_ffdf_to_mldf(df) # warning: drops columns from df.
-    with safe_resource(): # perform_hand_augmentations() requires a lock because of double dummy solver dll
-        # todo: break apart perform_hand_augmentations into dd and sd augmentations to speed up and stqdm()
-        with st.spinner('Creating hand data. Takes 1 to 2 minutes...'):
+    with st.spinner('Creating hand data. Takes 1 to 2 minutes...'):
+        with safe_resource(): # perform_hand_augmentations() requires a lock because of double dummy solver dll
+            # todo: break apart perform_hand_augmentations into dd and sd augmentations to speed up and stqdm()
             df = mlBridgeAugmentLib.perform_hand_augmentations(df,{},sd_productions=st.session_state.single_dummy_sample_count)
     with st.spinner('Augmenting with matchpoints and percentages data...'):
         df = mlBridgeAugmentLib.PerformMatchPointAndPercentAugmentations(df)
