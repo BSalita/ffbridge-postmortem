@@ -433,6 +433,29 @@ def show_dfs(vetted_prompts, pdf_assets):
         #break
 
 
+import threading
+from contextlib import contextmanager
+
+@st.cache_resource
+def safe_resource():
+    return threading.Lock()
+
+def augment_df(df):
+    with st.spinner('Creating ffbridge data to dataframe...'):
+        df = ffbridgelib.convert_ffdf_to_mldf(df) # warning: drops columns from df.
+    with safe_resource(): # perform_hand_augmentations() requires a lock because of double dummy solver dll
+        # todo: break apart perform_hand_augmentations into dd and sd augmentations to speed up and stqdm()
+        with st.spinner('Creating hand data. Takes 1 to 2 minutes...'):
+            df = mlBridgeAugmentLib.perform_hand_augmentations(df,{},sd_productions=st.session_state.single_dummy_sample_count)
+    with st.spinner('Augmenting with matchpoints and percentages data...'):
+        df = mlBridgeAugmentLib.PerformMatchPointAndPercentAugmentations(df)
+    with st.spinner('Augmenting with result data...'):
+        df = mlBridgeAugmentLib.PerformResultAugmentations(df,{})
+    with st.spinner('Augmenting with DD and SD data...'):
+        df = mlBridgeAugmentLib.Perform_DD_SD_Augmentations(df)
+    return df
+
+
 if __name__ == '__main__':
 
     # first time only defaults
@@ -461,6 +484,7 @@ if __name__ == '__main__':
 
         single_dummy_sample_count_default = 40 #2  # number of random deals to generate for calculating single dummy probabilities. Use smaller number for testing.
         st.session_state.single_dummy_sample_count = single_dummy_sample_count_default
+        st.session_state.do_not_cache_df = True
         st.session_state.show_sql_query_default = True
         st.session_state.show_sql_query = st.session_state.show_sql_query_default
 
@@ -489,6 +513,8 @@ if __name__ == '__main__':
         st.session_state.game_date = st.session_state.game_date_default
         st.session_state.use_historical_data = False # use historical data from file or get from url
 
+        st.session_state.cache_df = False
+
         # Create connection
         st.session_state.con = duckdb.connect()
 
@@ -507,28 +533,24 @@ if __name__ == '__main__':
         if df is not None:
 
             if not st.session_state.use_historical_data: # historical data is already fully augmented so skip past augmentations
-                ffbridge_session_player_cache_df_filename = f'cache/df-{st.session_state.session_id}-{st.session_state.player_id}.parquet'
-                ffbridge_session_player_cache_df_file = pathlib.Path(ffbridge_session_player_cache_df_filename)
-                if ffbridge_session_player_cache_df_file.exists():
-                    df = pl.read_parquet(ffbridge_session_player_cache_df_file)
-                    print(f"Loaded {ffbridge_session_player_cache_df_filename}: shape:{df.shape} size:{ffbridge_session_player_cache_df_file.stat().st_size}")
+                if st.session_state.do_not_cache_df:
+                    df = augment_df(df)
                 else:
-                    with st.spinner('Creating ffbridge data to dataframe...'):
-                        df = ffbridgelib.convert_ffdf_to_mldf(df) # warning: drops columns from df.
-                    with st.spinner('Creating hand data. Takes 1 to 2 minutes...'):
-                        df = mlBridgeAugmentLib.perform_hand_augmentations(df,{},sd_productions=st.session_state.single_dummy_sample_count)
-                    with st.spinner('Augmenting with matchpoints and percentages data...'):
-                        df = mlBridgeAugmentLib.PerformMatchPointAndPercentAugmentations(df)
-                    with st.spinner('Augmenting with result data...'):
-                        df = mlBridgeAugmentLib.PerformResultAugmentations(df,{})
-                    with st.spinner('Augmenting with DD and SD data...'):
-                        df = mlBridgeAugmentLib.Perform_DD_SD_Augmentations(df)
-                    ffbridge_session_player_cache_dir = pathlib.Path('cache')
-                    ffbridge_session_player_cache_dir.mkdir(exist_ok=True)  # Creates directory if it doesn't exist
                     ffbridge_session_player_cache_df_filename = f'cache/df-{st.session_state.session_id}-{st.session_state.player_id}.parquet'
                     ffbridge_session_player_cache_df_file = pathlib.Path(ffbridge_session_player_cache_df_filename)
-                    df.write_parquet(ffbridge_session_player_cache_df_file)
-                    print(f"Saved {ffbridge_session_player_cache_df_filename}: shape:{df.shape} size:{ffbridge_session_player_cache_df_file.stat().st_size}")
+                    if ffbridge_session_player_cache_df_file.exists():
+                        df = pl.read_parquet(ffbridge_session_player_cache_df_file)
+                        print(f"Loaded {ffbridge_session_player_cache_df_filename}: shape:{df.shape} size:{ffbridge_session_player_cache_df_file.stat().st_size}")
+                    else:
+                        df = augment_df(df)
+                        if df is not None:
+                            st.rerun() # todo: not sure what is needed to recover frome error:
+                        ffbridge_session_player_cache_dir = pathlib.Path('cache')
+                        ffbridge_session_player_cache_dir.mkdir(exist_ok=True)  # Creates directory if it doesn't exist
+                        ffbridge_session_player_cache_df_filename = f'cache/df-{st.session_state.session_id}-{st.session_state.player_id}.parquet'
+                        ffbridge_session_player_cache_df_file = pathlib.Path(ffbridge_session_player_cache_df_filename)
+                        df.write_parquet(ffbridge_session_player_cache_df_file)
+                        print(f"Saved {ffbridge_session_player_cache_df_filename}: shape:{df.shape} size:{ffbridge_session_player_cache_df_file.stat().st_size}")
                 with st.spinner('Writing column names to file...'):
                     with open('df_columns.txt','w') as f:
                         for col in sorted(df.columns):
