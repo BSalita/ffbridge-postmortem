@@ -434,25 +434,55 @@ def show_dfs(vetted_prompts, pdf_assets):
 
 
 import threading
-from contextlib import contextmanager
+import time
 
 @st.cache_resource
 def safe_resource():
     return threading.Lock()
 
+
+def perform_hand_augmentations(df):
+    # Create an empty placeholder for status messages
+    status_placeholder = st.empty()
+    status_placeholder.info("Hand augmentation process is queued for execution. Please wait...")
+
+    acquired = False
+    mutex = safe_resource()
+    while not acquired:
+        acquired = mutex.acquire(timeout=2)
+        if not acquired:
+            status_placeholder.info("Still queued... waiting for your turn.")
+            time.sleep(1)
+    try:
+        status_placeholder.empty()
+        progress = st.progress(0) # pass progress bar to augmenter to show progress of long running operations
+        augmenter = mlBridgeAugmentLib.HandAugmenter(df,{},sd_productions=st.session_state.single_dummy_sample_count,progress=progress)
+        df = augmenter.perform_hand_augmentations()
+    finally:
+        mutex.release()
+
+    return df
+
+
 def augment_df(df):
     with st.spinner('Creating ffbridge data to dataframe...'):
         df = ffbridgelib.convert_ffdf_to_mldf(df) # warning: drops columns from df.
     with st.spinner('Creating hand data. Takes 1 to 2 minutes...'):
-        with safe_resource(): # perform_hand_augmentations() requires a lock because of double dummy solver dll
-            # todo: break apart perform_hand_augmentations into dd and sd augmentations to speed up and stqdm()
-            df = mlBridgeAugmentLib.perform_hand_augmentations(df,{},sd_productions=st.session_state.single_dummy_sample_count)
+        # with safe_resource(): # perform_hand_augmentations() requires a lock because of double dummy solver dll
+        #     # todo: break apart perform_hand_augmentations into dd and sd augmentations to speed up and stqdm()\
+        #     progress = st.progress(0) # pass progress bar to augmenter to show progress of long running operations
+        #     augmenter = mlBridgeAugmentLib.HandAugmenter(df,{},sd_productions=st.session_state.single_dummy_sample_count,progress=progress)
+        #     df = augmenter.perform_hand_augmentations()
+        df = perform_hand_augmentations(df)
     with st.spinner('Augmenting with matchpoints and percentages data...'):
-        df = mlBridgeAugmentLib.PerformMatchPointAndPercentAugmentations(df)
+        augmenter = mlBridgeAugmentLib.MatchPointAugmenter(df)
+        df = augmenter.perform_matchpoint_augmentations()
     with st.spinner('Augmenting with result data...'):
-        df = mlBridgeAugmentLib.PerformResultAugmentations(df,{})
+        augmenter = mlBridgeAugmentLib.ResultAugmenter(df,{})
+        df = augmenter.perform_result_augmentations()
     with st.spinner('Augmenting with DD and SD data...'):
-        df = mlBridgeAugmentLib.Perform_DD_SD_Augmentations(df)
+        augmenter = mlBridgeAugmentLib.DDSDAugmenter(df)
+        df = augmenter.perform_dd_sd_augmentations()
     return df
 
 
