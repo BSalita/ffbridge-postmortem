@@ -147,19 +147,21 @@ def calc_double_dummy_deals(deals, batch_size=40, output_progress=False, progres
         if output_progress:
             if progress:
                 percent_complete = int(i*100/len(deals))
-                progress.progress(percent_complete,f"{percent_complete}%: {i} of {len(deals)} double dummies calculated.")
+                progress.progress(percent_complete,f"{percent_complete}%: Double dummies calculated for {i} of {len(deals)} unique deals.")
             else:
                 if i % 1000 == 0:
                     percent_complete = int(i*100/len(deals))
-                    print(f"{percent_complete}%: {i} of {len(deals)} double dummies calculated")
+                    print(f"{percent_complete}%: Double dummies calculated for {i} of {len(deals)} unique deals.")
         result_tables = calc_all_tables(deals[b:b+batch_size])
         all_result_tables.extend(result_tables)
     if output_progress: 
+
         if progress:
-            progress.progress(100,f"100%: {len(deals)} of {len(deals)} double dummies calculated.")
+            progress.progress(100,f"100%: Double dummies calculated for {len(deals)} unique deals.")
         else:
-            print(f"100%: {len(deals)} of {len(deals)} double dummies calculated.")
+            print(f"100%: Double dummies calculated for {len(deals)} unique deals.")
     return all_result_tables
+
 
 
 def calculate_ddtricks_par_scores(df, hrs_d, scores_d, output_progress=True, progress=None):
@@ -302,11 +304,11 @@ def calculate_sd_probs(df, hrs_d, sd_productions=100, progress=None):
     for i,pbn in enumerate(unique_pbns):
         if progress:
             percent_complete = int(i*100/len(unique_pbns))
-            progress.progress(percent_complete,f"{percent_complete}%: {i} of {len(unique_pbns)} single dummies calculated using {sd_productions} samples")
+            progress.progress(percent_complete,f"{percent_complete}%: Single dummies calculated for {i} of {len(unique_pbns)} unique deals using {sd_productions} samples per deal.")
         else:
             if i < 10 or i % 10000 == 0:
                 percent_complete = int(i*100/len(unique_pbns))
-                print(f"{percent_complete}%: {i} of {len(unique_pbns)} single dummies calculated using {sd_productions} samples")
+                print(f"{percent_complete}%: Single dummies calculated for {i} of {len(unique_pbns)} unique deals using {sd_productions} samples per deal.")
         if pbn not in hrs_d:
             hrs_d[pbn] = {}
         if 'SD' not in hrs_d[pbn]:
@@ -318,9 +320,9 @@ def calculate_sd_probs(df, hrs_d, sd_productions=100, progress=None):
                 print(f"calculate_single_dummy_probabilities: time:{time.time()-t} seconds")
             #error
     if progress:
-        progress.progress(100,f"100%: {len(unique_pbns)} of {len(unique_pbns)} single dummies calculated.")
+        progress.progress(100,f"100%: Single dummies calculated for {len(unique_pbns)} of {len(unique_pbns)} unique deals using {sd_productions} samples per deal.")
     else:
-        print(f"100%: {len(unique_pbns)} of {len(unique_pbns)} single dummies calculated.")
+        print(f"100%: Single dummies calculated for {len(unique_pbns)} of {len(unique_pbns)} unique deals using {sd_productions} samples per deal.")
 
     # create single dummy trick taking probability distribution columns
     sd_probs_d = defaultdict(list)

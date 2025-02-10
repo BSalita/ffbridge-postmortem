@@ -444,14 +444,13 @@ def safe_resource():
 def perform_hand_augmentations(df):
     # Create an empty placeholder for status messages
     status_placeholder = st.empty()
-    status_placeholder.info("Hand augmentation process is queued for execution. Please wait...")
 
     acquired = False
     mutex = safe_resource()
     while not acquired:
         acquired = mutex.acquire(timeout=2)
         if not acquired:
-            status_placeholder.info("Still queued... waiting for your turn.")
+            status_placeholder.info("Hand analysis is queued for processing. Please wait...")
             time.sleep(1)
     try:
         status_placeholder.empty()
