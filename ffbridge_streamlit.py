@@ -403,7 +403,7 @@ def initialize_session_state():
         'single_dummy_sample_count_default': 40,
         'show_sql_query_default': False,
         'use_historical_data': False,
-        'do_not_cache_df': False, # todo: set to True for production
+        'do_not_cache_df': True, # todo: set to True for production
         'sidebar_loaded': False,
         'analysis_started': False,   # new flag for analysis sidebar rewrite
         'vetted_prompts': [],
