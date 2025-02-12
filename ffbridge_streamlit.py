@@ -41,13 +41,13 @@ import endplay # for __version__
 
 # assumes symlinks are created in current directory.
 sys.path.append(str(pathlib.Path.cwd().joinpath('streamlitlib')))  # global
-sys.path.append(str(pathlib.Path.cwd().joinpath('mlBridgeLib')))  # global
+sys.path.append(str(pathlib.Path.cwd().joinpath('mlBridgeLib')))  # global # Requires "./mlBridgeLib" be in extraPaths in .vscode/settings.json
 sys.path.append(str(pathlib.Path.cwd().joinpath('ffbridgelib')))  # global
 
 import ffbridgelib
 import streamlitlib
 #import mlBridgeLib
-import mlBridgeAugmentLib
+import mlBridgeAugmentLib # Requires "./mlBridgeLib" be in extraPaths in .vscode/settings.json
 #import mlBridgeEndplayLib
 
 
@@ -93,6 +93,10 @@ def app_info():
     st.caption(f"Project lead is Robert Salita research@AiPolice.org. Code written in Python. UI written in streamlit. Data engine is polars. Query engine is duckdb. Bridge lib is endplay. Self hosted using Cloudflare Tunnel. Repo:https://github.com/BSalita/ffbridge-postmortem")
     st.caption(
         f"App:{st.session_state.app_datetime} Python:{'.'.join(map(str, sys.version_info[:3]))} Streamlit:{st.__version__} Pandas:{pd.__version__} polars:{pl.__version__} endplay:{endplay.__version__} Query Params:{st.query_params.to_dict()}")
+
+
+def game_url_on_change():
+    st.session_state.game_url = st.session_state.create_sidebar_game_url_on_change
 
 
 def chat_input_on_submit():
@@ -357,6 +361,8 @@ def create_sidebar():
 
     st.sidebar.caption('Build:'+st.session_state.app_datetime)
 
+    st.sidebar.text_input(
+        "Enter the game URL in the left sidebar.", on_change=get_ffbridge_data_using_url, placeholder=st.session_state.game_url_default, key='game_url_input')
     st.session_state.group_id = st.sidebar.number_input('Group ID',value=st.session_state.group_id,key='create_sidebar_group_id_on_change',on_change=group_id_on_change,help='Enter ffbridge group id. e.g. 7878 for Bridge Club St. Honore')
     st.session_state.session_id = st.sidebar.number_input('Session ID',value=st.session_state.session_id,key='create_sidebar_session_id_on_change',on_change=session_id_on_change,help='Enter ffbridge session id. e.g. 107118')
     st.session_state.player_id = st.sidebar.number_input('Player ID',value=st.session_state.player_id,key='create_sidebar_player_id_on_change',on_change=player_id_on_change,help='Enter ffbridge player id. e.g. 246273 for Robert Salita')
@@ -433,34 +439,23 @@ def show_dfs(vetted_prompts, pdf_assets):
         #break
 
 
-import threading
-import time
-
-@st.cache_resource
-def safe_resource():
-    return threading.Lock()
-
-
-def perform_hand_augmentations(df):
-    # Create an empty placeholder for status messages
-    status_placeholder = st.empty()
-
-    acquired = False
-    mutex = safe_resource()
-    while not acquired:
-        acquired = mutex.acquire(timeout=2)
-        if not acquired:
-            status_placeholder.info("Hand analysis is queued for processing. Please wait...")
-            time.sleep(1)
-    try:
-        status_placeholder.empty()
-        progress = st.progress(0) # pass progress bar to augmenter to show progress of long running operations
-        augmenter = mlBridgeAugmentLib.HandAugmenter(df,{},sd_productions=st.session_state.single_dummy_sample_count,progress=progress)
-        df = augmenter.perform_hand_augmentations()
-    finally:
-        mutex.release()
-
-    return df
+def perform_hand_augmentations(df, sd_productions):
+    """Wrapper for backward compatibility"""
+    def hand_augmentation_work(df, progress, **kwargs):
+        augmenter = mlBridgeAugmentLib.HandAugmenter(
+            df, 
+            {}, 
+            sd_productions=kwargs.get('sd_productions'),
+            progress=progress
+        )
+        return augmenter.perform_hand_augmentations()
+    
+    return streamlitlib.perform_queued_work(
+        df, 
+        hand_augmentation_work, 
+        work_description="Hand analysis",
+        sd_productions=sd_productions
+    )
 
 
 def augment_df(df):
@@ -472,7 +467,7 @@ def augment_df(df):
         #     progress = st.progress(0) # pass progress bar to augmenter to show progress of long running operations
         #     augmenter = mlBridgeAugmentLib.HandAugmenter(df,{},sd_productions=st.session_state.single_dummy_sample_count,progress=progress)
         #     df = augmenter.perform_hand_augmentations()
-        df = perform_hand_augmentations(df)
+        df = perform_hand_augmentations(df,st.session_state.single_dummy_sample_count)
     with st.spinner('Augmenting with matchpoints and percentages data...'):
         augmenter = mlBridgeAugmentLib.MatchPointAugmenter(df)
         df = augmenter.perform_matchpoint_augmentations()
@@ -550,6 +545,37 @@ if __name__ == '__main__':
     if 'df' in st.session_state:
         create_sidebar()
     else:
+        if st.session_state.player_id is None:
+            st.sidebar.caption(f"App:{st.session_state.app_datetime}")
+            if False:
+                streamlit_chat.message(
+                    "Hi. I'm Morty. Your friendly postmortem chatbot.", key='vacation_message_1', logo=st.session_state.assistant_logo)
+                streamlit_chat.message(
+                    "I'm on a well deserved vacation while my overlord swaps out my chat API for something more economically sustainable. Should be back in a week or so. Meanwhile, happy prompting.", key='vacation_message_2', logo=st.session_state.assistant_logo)
+                app_info()
+                st.stop()
+            streamlit_chat.message(
+                "Hi. I'm Morty. Your friendly postmortem chatbot. I only want to chat about ffbridge pair matchpoint games using a Mitchell movement and not shuffled.", key='intro_message_1', logo=st.session_state.assistant_logo)
+            streamlit_chat.message(
+                "I'm optimized for large screen devices such as a notebook or monitor. Do not use a smartphone.", key='intro_message_2', logo=st.session_state.assistant_logo)
+            streamlit_chat.message(
+                "To start our postmortem chat, I'll need the URL of your ffbridge game. It will be the subject of our chat.", key='intro_message_3', logo=st.session_state.assistant_logo)
+            streamlit_chat.message(
+                "Enter the game URL in the left sidebar.", key='intro_message_4', logo=st.session_state.assistant_logo)
+            streamlit_chat.message(
+                "I'm just a Proof of Concept so don't double me.", key='intro_message_5', logo=st.session_state.assistant_logo)
+            app_info()
+
+        else:
+
+            pass
+            
+            #create_sidebar()
+
+            #create_tab_bar()
+
+            #create_main_section()
+        
         with st.spinner("Loading Game Data..."):
 
             # if st.session_state.use_historical_data:
