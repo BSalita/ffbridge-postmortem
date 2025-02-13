@@ -401,10 +401,10 @@ def initialize_session_state():
         'partner_direction_default': 'S',
         'opponent_pair_direction_default': 'EW',
         'single_dummy_sample_count_default': 40,
-        'show_sql_query_default': False,
+        'show_sql_query_default': True,
         'use_historical_data': False,
         'do_not_cache_df': True, # todo: set to True for production
-        'sidebar_loaded': False,
+        #'sidebar_loaded': False,
         'analysis_started': False,   # new flag for analysis sidebar rewrite
         'vetted_prompts': [],
         'pdf_assets': {}
@@ -520,12 +520,12 @@ def on_analyze_game_request():
 
         st.session_state.df = df
 
-        if 'df' in st.session_state:
-            if st.session_state.show_sql_query:
-                with st.container():
-                    with bottom():
-                        st.chat_input('Enter a SQL query e.g. SELECT PBN, Contract, Result, N, S, E, W', key='main_prompt_chat_input', on_submit=chat_input_on_submit)
-        st.session_state.sidebar_loaded = True
+    if 'df' in st.session_state:
+        if st.session_state.show_sql_query:
+            with st.container():
+                with bottom():
+                    st.chat_input('Enter a SQL query e.g. SELECT PBN, Contract, Result, N, S, E, W', key='main_prompt_chat_input', on_submit=chat_input_on_submit)
+    #st.session_state.sidebar_loaded = True
     return False
 
 
@@ -567,51 +567,50 @@ def create_sidebar():
 
 
     # When the full sidebar is to be shown:
-    if True: # st.session_state.sidebar_loaded:
-        # --- Check if the "Analyze Game" button has been hit ---
-        #if not st.session_state.analysis_started:
-            st.sidebar.link_button('View Game Webpage', url=st.session_state.game_url)
-            st.sidebar.markdown("#### Game Retrival Settings")
-            st.session_state.group_id = st.sidebar.number_input(
-                'Group ID',
-                value=st.session_state.group_id,
-                key='sidebar_group_id',
-                on_change=group_id_on_change,
-                help='Enter ffbridge group id. e.g. 7878 for Bridge Club St. Honore'
-            )
-            st.session_state.session_id = st.sidebar.number_input(
-                'Session ID',
-                value=st.session_state.session_id,
-                key='sidebar_session_id',
-                on_change=session_id_on_change,
-                help='Enter ffbridge session id. e.g. 107118'
-            )
-            st.session_state.player_id = st.sidebar.number_input(
-                'Player ID',
-                value=st.session_state.player_id,
-                key='sidebar_player_id',
-                on_change=player_id_on_change,
-                help='Enter ffbridge player id. e.g. 246273'
-            )
-            st.session_state.partner_id = st.sidebar.number_input(
-                'Partner ID',
-                value=st.session_state.partner_id,
-                key='sidebar_partner_id',
-                on_change=partner_id_on_change,
-                help='Enter ffbridge partner id. e.g. 246273'
-            )
-            st.session_state.single_dummy_sample_count = st.sidebar.number_input(
-                'Single Dummy Samples Count',
-                value=st.session_state.single_dummy_sample_count,
-                key='sidebar_dummy_count'
-            )
-            st.sidebar.checkbox(
-                'Show SQL Query',
-                value=st.session_state.show_sql_query_default,
-                key='sidebar_show_sql_query',
-                on_change=sql_query_on_change,
-                help='Show SQL used to query dataframes.'
-            )
+    # --- Check if the "Analyze Game" button has been hit ---
+    #if not st.session_state.analysis_started:
+    st.sidebar.link_button('View Game Webpage', url=st.session_state.game_url)
+    st.sidebar.markdown("#### Game Retrival Settings")
+    st.session_state.group_id = st.sidebar.number_input(
+        'Group ID',
+        value=st.session_state.group_id,
+        key='sidebar_group_id',
+        on_change=group_id_on_change,
+        help='Enter ffbridge group id. e.g. 7878 for Bridge Club St. Honore'
+    )
+    st.session_state.session_id = st.sidebar.number_input(
+        'Session ID',
+        value=st.session_state.session_id,
+        key='sidebar_session_id',
+        on_change=session_id_on_change,
+        help='Enter ffbridge session id. e.g. 107118'
+    )
+    st.session_state.player_id = st.sidebar.number_input(
+        'Player ID',
+        value=st.session_state.player_id,
+        key='sidebar_player_id',
+        on_change=player_id_on_change,
+        help='Enter ffbridge player id. e.g. 246273'
+    )
+    st.session_state.partner_id = st.sidebar.number_input(
+        'Partner ID',
+        value=st.session_state.partner_id,
+        key='sidebar_partner_id',
+        on_change=partner_id_on_change,
+        help='Enter ffbridge partner id. e.g. 246273'
+    )
+    st.session_state.single_dummy_sample_count = st.sidebar.number_input(
+        'Single Dummy Samples Count',
+        value=st.session_state.single_dummy_sample_count,
+        key='sidebar_dummy_count'
+    )
+    st.sidebar.checkbox(
+        'Show SQL Query',
+        value=st.session_state.show_sql_query_default,
+        key='sidebar_show_sql_query',
+        on_change=sql_query_on_change,
+        help='Show SQL used to query dataframes.'
+    )
 
 
 def read_favorites():
