@@ -438,7 +438,7 @@ def initialize_session_state():
 
 def on_analyze_game_request():
 
-    with st.spinner('Prepaing Game Analysis. Takes 1 to 2 minutes...'):
+    with st.spinner('Preparing Game Analysis. Takes 1 to 2 minutes...'):
         # Use the entered URL or fallback to default.
         st.session_state.game_url = st.session_state.game_url_input.strip()
         if st.session_state.game_url is None or st.session_state.game_url.strip() == "":
