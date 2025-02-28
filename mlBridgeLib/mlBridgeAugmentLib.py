@@ -300,7 +300,7 @@ def calculate_sd_probs(df, hrs_d, sd_productions=100, progress=None):
     for i,pbn in enumerate(unique_pbns):
         if progress:
             percent_complete = int(i*100/len(unique_pbns))
-            progress.progress(percent_complete,f"{percent_complete}%: Single dummies calculated for {i} of {len(unique_pbns)} unique deals using {sd_productions} samples per deal. Takes 1 minute...")
+            progress.progress(percent_complete,f"{percent_complete}%: Single dummies calculated for {i} of {len(unique_pbns)} unique deals using {sd_productions} samples per deal. This step takes 1 minute...")
         else:
             if i < 10 or i % 10000 == 0:
                 percent_complete = int(i*100/len(unique_pbns))
