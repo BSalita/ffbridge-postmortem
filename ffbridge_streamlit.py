@@ -449,6 +449,8 @@ def on_analyze_game_request():
 
         if not st.session_state.use_historical_data: # historical data is already fully augmented so skip past augmentations
             if st.session_state.do_not_cache_df:
+                with st.spinner('Creating ffbridge data to dataframe...'):
+                    df = ffbridgelib.convert_ffdf_to_mldf(df) # warning: drops columns from df.
                 df = augment_df(df)
             else:
                 ffbridge_session_player_cache_df_filename = f'cache/df-{st.session_state.session_id}-{st.session_state.player_id}.parquet'
@@ -457,9 +459,11 @@ def on_analyze_game_request():
                     df = pl.read_parquet(ffbridge_session_player_cache_df_file)
                     print(f"Loaded {ffbridge_session_player_cache_df_filename}: shape:{df.shape} size:{ffbridge_session_player_cache_df_file.stat().st_size}")
                 else:
+                    with st.spinner('Creating ffbridge data to dataframe...'):
+                        df = ffbridgelib.convert_ffdf_to_mldf(df) # warning: drops columns from df.
                     df = augment_df(df)
                     if df is not None:
-                        st.rerun() # todo: not sure what is needed to recover frome error:
+                        st.rerun() # todo: not sure what is needed to recover from error:
                     ffbridge_session_player_cache_dir = pathlib.Path('cache')
                     ffbridge_session_player_cache_dir.mkdir(exist_ok=True)  # Creates directory if it doesn't exist
                     ffbridge_session_player_cache_df_filename = f'cache/df-{st.session_state.session_id}-{st.session_state.player_id}.parquet'
@@ -713,25 +717,24 @@ def perform_hand_augmentations(df, sd_productions):
 
 
 def augment_df(df):
-    with st.spinner('Creating ffbridge data to dataframe...'):
-        df = ffbridgelib.convert_ffdf_to_mldf(df) # warning: drops columns from df.
-    with st.spinner('Creating hand data. Takes 1 to 2 minutes...'):
+    with st.spinner('Creating hand data...'):
         # with safe_resource(): # perform_hand_augmentations() requires a lock because of double dummy solver dll
         #     # todo: break apart perform_hand_augmentations into dd and sd augmentations to speed up and stqdm()\
         #     progress = st.progress(0) # pass progress bar to augmenter to show progress of long running operations
         #     augmenter = mlBridgeAugmentLib.HandAugmenter(df,{},sd_productions=st.session_state.single_dummy_sample_count,progress=progress)
         #     df = augmenter.perform_hand_augmentations()
-        df = perform_hand_augmentations(df,st.session_state.single_dummy_sample_count)
-    with st.spinner('Augmenting with matchpoints and percentages data...'):
-        augmenter = mlBridgeAugmentLib.MatchPointAugmenter(df)
-        df = augmenter.perform_matchpoint_augmentations()
+        df = perform_hand_augmentations(df, st.session_state.single_dummy_sample_count)
     with st.spinner('Augmenting with result data...'):
         augmenter = mlBridgeAugmentLib.ResultAugmenter(df,{})
         df = augmenter.perform_result_augmentations()
     with st.spinner('Augmenting with DD and SD data...'):
         augmenter = mlBridgeAugmentLib.DDSDAugmenter(df)
         df = augmenter.perform_dd_sd_augmentations()
+    with st.spinner('Augmenting with matchpoints and percentages data...'):
+        augmenter = mlBridgeAugmentLib.MatchPointAugmenter(df)
+        df = augmenter.perform_matchpoint_augmentations()
     return df
+
 
 
 def main():
