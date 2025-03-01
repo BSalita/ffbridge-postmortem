@@ -2,6 +2,11 @@
 # contains functions to augment df with additional columns
 # mostly polars functions
 
+# todo:
+# assert that column names don't exist in df.columns for all column creation functions.
+# refactor: HandAugmenter -> TableAugmenter -> ContractAugmenter -> DD_SD_Augmenter -> ResultAugmenter -> MatchpointAugmenter
+# refactor when should *_Dcl columns be created? At end of each func, class, class of it's own?
+
 import polars as pl
 from collections import defaultdict
 import sys
@@ -811,6 +816,22 @@ class HandAugmenter:
         self.df = self._time_operation("create_suit_nesw_columns", create_suit_nesw_columns, self.df)
         self.df = self._time_operation("create_hands_lists_column", create_hands_lists_column, self.df)
 
+    def _create_dealer(self):
+        if 'Dealer' not in self.df.columns:
+            def board_number_to_dealer(bn):
+                return 'NESW'[(bn-1) & 3]
+            
+            self.df = self._time_operation(
+                "create Dealer",
+                lambda df: df.with_columns(
+                    pl.col('board_number')
+                    .map_elements(board_number_to_dealer, return_dtype=pl.String)
+                    .alias('Dealer')
+                ),
+                self.df
+            )
+
+    # todo: move following to contract established class
     def _process_scores_and_tricks(self):
         all_scores_d, scores_d, scores_df = self._time_operation("calculate_scores", calculate_scores)
         DD_Tricks_df, par_df, dd_score_df = self._time_operation(
@@ -836,14 +857,8 @@ class HandAugmenter:
         )
         return scores_df
 
+    # todo: move following to contract established class
     def _process_contract_columns(self):
-        if 'Player_Name_N' in self.df.columns:
-            self.df = self._time_operation(
-                "rename_players",
-                lambda df: df.rename({'Player_Name_N':'N','Player_Name_E':'E','Player_Name_S':'S','Player_Name_W':'W'}),
-                self.df
-            )
-
         self.df = self._time_operation(
             "convert_contract_to_contract",
             lambda df: df.with_columns(
@@ -852,6 +867,7 @@ class HandAugmenter:
             self.df
         )
 
+        # todo: move this section to contract established class
         self.df = self._time_operation(
             "convert_contract_parts",
             lambda df: df.with_columns([
@@ -863,6 +879,32 @@ class HandAugmenter:
             self.df
         )
 
+        # todo: move this to table established class? to_ml() func?
+        assert 'LHO_Direction' not in self.df.columns
+        assert 'Dummy_Direction' not in self.df.columns
+        assert 'RHO_Direction' not in self.df.columns
+        self.df = self._time_operation(
+            "convert_declarer_to_directions",
+            lambda df: df.with_columns([
+                pl.col('Declarer_Direction').replace_strict(self.declarer_to_LHO_d).alias('LHO_Direction'),
+                pl.col('Declarer_Direction').replace_strict(self.declarer_to_dummy_d).alias('Dummy_Direction'),
+                pl.col('Declarer_Direction').replace_strict(self.declarer_to_RHO_d).alias('RHO_Direction'),
+            ]),
+                self.df
+            )
+
+        # todo: move this to table established class? to_ml() func?
+        assert 'N' not in self.df.columns
+        assert 'E' not in self.df.columns
+        assert 'S' not in self.df.columns
+        assert 'W' not in self.df.columns
+        self.df = self._time_operation(
+                "rename_players",
+                lambda df: df.rename({'Player_Name_N':'N','Player_Name_E':'E','Player_Name_S':'S','Player_Name_W':'W'}),
+                self.df
+            )
+
+    # todo: move this to contract established class
     def _create_contract_types(self):
         self.df = self._time_operation(
             "create_contract_types",
@@ -879,17 +921,7 @@ class HandAugmenter:
             self.df
         )
 
-    def _create_direction_columns(self):
-        self.df = self._time_operation(
-            "convert_contract_to_directions",
-            lambda df: df.with_columns([
-                pl.col('Declarer_Direction').replace_strict(self.declarer_to_LHO_d).alias('LHO_Direction'),
-                pl.col('Declarer_Direction').replace_strict(self.declarer_to_dummy_d).alias('Dummy_Direction'),
-                pl.col('Declarer_Direction').replace_strict(self.declarer_to_RHO_d).alias('RHO_Direction'),
-            ]),
-            self.df
-        )
-
+    # todo: move this to contract established class
     def _create_declarer_columns(self):
         self.df = self._time_operation(
             "convert_declarer_columns",
@@ -900,6 +932,7 @@ class HandAugmenter:
             self.df
         )
 
+    # todo: move this to contract established class
     def _create_result_columns(self):
         if 'Result' not in self.df.columns:
             assert 'Contract' in self.df.columns, 'Contract column is required to create Result column.'
@@ -920,6 +953,7 @@ class HandAugmenter:
                 self.df
             )
 
+    # todo: move this to contract established class
     def _create_dd_columns(self):
         if 'DD_Tricks' not in self.df.columns:
             self.df = self._time_operation(
@@ -938,6 +972,7 @@ class HandAugmenter:
                 self.df
             )
 
+    # todo: move this to contract established class
     def _create_score_columns(self):
         if 'Score_NS' not in self.df.columns:
             self.df = self._time_operation(
@@ -949,6 +984,7 @@ class HandAugmenter:
                 self.df
             )
 
+    # todo: move this to contract established class
     def _create_ev_columns(self):
         max_expressions = []
         for pd in ['NS', 'EW']:
@@ -964,6 +1000,7 @@ class HandAugmenter:
             self.df
         )
 
+    # todo: move this to contract established class
     def _create_ev_expressions_for_pair(self, pd):
         expressions = []
         expressions.extend(self._create_basic_ev_expressions(pd))
@@ -979,6 +1016,7 @@ class HandAugmenter:
         
         return expressions
 
+    # todo: move this to contract established class
     def _create_basic_ev_expressions(self, pd):
         return [
             pl.when(self.vul_conditions[pd])
@@ -991,6 +1029,7 @@ class HandAugmenter:
               .alias(f'EV_Max_Col_{pd}')
         ]
 
+    # todo: move this to contract established class
     def _create_declarer_ev_expressions(self, pd, dd):
         return [
             pl.when(self.vul_conditions[pd])
@@ -1003,6 +1042,7 @@ class HandAugmenter:
               .alias(f'EV_{pd}_{dd}_Max_Col')
         ]
 
+    # todo: move this to contract established class
     def _create_strain_ev_expressions(self, pd, dd, s):
         return [
             pl.when(self.vul_conditions[pd])
@@ -1015,6 +1055,7 @@ class HandAugmenter:
               .alias(f'EV_{pd}_{dd}_{s}_Max_Col')
         ]
 
+    # todo: move this to contract established class
     def _create_level_ev_expressions(self, pd, dd, s, l):
         return [
             pl.when(self.vul_conditions[pd])
@@ -1023,6 +1064,7 @@ class HandAugmenter:
             .alias(f'EV_{pd}_{dd}_{s}_{l}')
         ]
 
+    # todo: move this to contract established class
     def _create_diff_columns(self):
         # First create the initial diff columns
         self.df = self._time_operation(
@@ -1050,10 +1092,11 @@ class HandAugmenter:
         """Main method to perform all hand augmentations"""
         self._add_default_columns()
         self._create_hand_columns()
-        scores_df = self._process_scores_and_tricks()
+        self._create_dealer()
+        # todo: move following to contract established class
+        self._process_scores_and_tricks()
         self._process_contract_columns()
         self._create_contract_types()
-        self._create_direction_columns()
         self._create_declarer_columns()
         self._create_result_columns()
         self._create_dd_columns()
@@ -1251,21 +1294,6 @@ class ResultAugmenter:
                 self.df
             )
 
-    def _create_dealer(self):
-        if 'Dealer' not in self.df.columns:
-            def board_number_to_dealer(bn):
-                return 'NESW'[(bn-1) & 3]
-            
-            self.df = self._time_operation(
-                "create Dealer",
-                lambda df: df.with_columns(
-                    pl.col('board_boardNumber')
-                    .map_elements(board_number_to_dealer, return_dtype=pl.String)
-                    .alias('Dealer')
-                ),
-                self.df
-            )
-
     def _create_vulnerability(self):
         if 'iVul' not in self.df.columns:
             if 'Vul' in self.df.columns:
@@ -1377,7 +1405,6 @@ class ResultAugmenter:
         self._create_lott()
         self._create_contract_types()
         self._create_contract_type_booleans()
-        self._create_dealer()
         self._create_vulnerability()
         self._create_quality_indicators()
         self._create_balanced_indicators()
@@ -1400,6 +1427,7 @@ class DDSDAugmenter:
             self.df
         )
 
+    # todo: remove this once NN predictions are implemented
     def _create_fake_predictions(self):
         self.df = self._time_operation(
             "create fake predictions",
@@ -1407,10 +1435,27 @@ class DDSDAugmenter:
             self.df
         )
 
-    def _create_declarer_columns(self):
+
+    def _create_position_columns(self):
+        assert 'Direction_OnLead' not in self.df.columns
+        assert 'Opponent_Pair_Direction' not in self.df.columns
+        assert 'Score_Declarer' not in self.df.columns
+        assert 'Direction_Dummy' not in self.df.columns
+        assert 'OnLead' not in self.df.columns
+        assert 'Direction_NotOnLead' not in self.df.columns
+        assert 'Dummy' not in self.df.columns
+        assert 'Defender_Par_GE' not in self.df.columns
+        assert 'EV_Score_Col_Declarer' not in self.df.columns
+        assert 'Score_Declarer' not in self.df.columns
+        assert 'Par_Declarer' not in self.df.columns
+        assert 'Vul_Declarer' not in self.df.columns
+
         self.df = self._time_operation(
-            "create declarer columns",
+            "create position columns",
             lambda df: df.with_columns([
+                pl.col('Declarer_Direction').replace_strict(mlBridgeLib.NextPosition).alias('Direction_OnLead'),
+            ])
+            .with_columns([
                 pl.concat_str([
                     pl.lit('EV'),
                     pl.col('Declarer_Pair_Direction'),
@@ -1419,10 +1464,15 @@ class DDSDAugmenter:
                     pl.col('BidLvl').cast(pl.String),
                 ], separator='_').alias('EV_Score_Col_Declarer'),
                 
-                pl.when(pl.col('Declarer_Pair_Direction').eq(pl.lit('NS')))
-                .then(pl.col('Score_NS'))
-                .otherwise(pl.col('Score_EW'))
-                .alias('Score_Declarer'),
+                # pl.when(pl.col('Declarer_Pair_Direction').eq(pl.lit('NS')))
+                # .then(pl.col('Score_NS'))
+                # .otherwise(pl.col('Score_EW'))
+                # .alias('Score_Declarer'),
+
+                pl.struct(['Contract','Declarer_Pair_Direction', 'Score_NS', 'Score_EW']).map_elements(
+                    lambda r: 0 if r['Contract'] == 'PASS' else None if r['Declarer_Pair_Direction'] is None else r[f'Score_{r["Declarer_Pair_Direction"]}'],
+                    return_dtype=pl.Int16
+                ).alias('Score_Declarer'),
                 
                 pl.when(pl.col('Declarer_Pair_Direction').eq(pl.lit('NS')))
                 .then(pl.col('Par_NS'))
@@ -1431,7 +1481,7 @@ class DDSDAugmenter:
                 
                 ((pl.col('Declarer_Pair_Direction').eq('NS') & pl.col('Vul_NS')) | 
                  (pl.col('Declarer_Pair_Direction').eq('EW') & pl.col('Vul_EW')))
-                .alias('Declarer_Vul'),
+                .alias('Vul_Declarer'),
                 
                 *[
                     # Note: this is how to create a column name to dynamically choose a value from multiple columns on a row-by-row basis.
@@ -1451,22 +1501,9 @@ class DDSDAugmenter:
                     ).alias(f'Prob_Taking_{t}') # todo: short form of 'Declarer_SD_Probs_Taking_{t}'
                     for t in range(14)
                 ]
-            ]),
-            self.df
-        )
-
-    def _create_position_columns(self):
-        self.df = self._time_operation(
-            "create position columns",
-            lambda df: df.with_columns([
-                pl.col('Declarer_Direction').replace_strict(mlBridgeLib.NextPosition).alias('Direction_OnLead'),
             ])
             .with_columns([
                 pl.col('Declarer_Pair_Direction').replace_strict(mlBridgeLib.PairDirectionToOpponentPairDirection).alias('Opponent_Pair_Direction'),
-                pl.struct(['Declarer_Pair_Direction', 'Score_NS', 'Score_EW']).map_elements(
-                    lambda r: None if r['Declarer_Pair_Direction'] is None else r[f'Score_{r["Declarer_Pair_Direction"]}'],
-                    return_dtype=pl.Int16
-                ).alias('Score_Declarer'),
                 pl.col('Direction_OnLead').replace_strict(mlBridgeLib.NextPosition).alias('Direction_Dummy'),
                 pl.struct(['Direction_OnLead', 'Player_ID_N', 'Player_ID_E', 'Player_ID_S', 'Player_ID_W']).map_elements(
                     lambda r: None if r['Direction_OnLead'] is None else r[f'Player_ID_{r["Direction_OnLead"]}'],
@@ -1480,32 +1517,27 @@ class DDSDAugmenter:
                     return_dtype=pl.String
                 ).alias('Dummy'),
                 pl.col('Score_Declarer').le(pl.col('Par_Declarer')).alias('Defender_Par_GE')
-            ]),
-            self.df
-        )
-
-    def _create_additional_columns(self):
-        self.df = self._time_operation(
-            "create additional columns",
-            lambda df: df.with_columns([
+            ])
+            .with_columns([
                 pl.struct(['Direction_NotOnLead', 'Player_ID_N', 'Player_ID_E', 'Player_ID_S', 'Player_ID_W']).map_elements(
                     lambda r: None if r['Direction_NotOnLead'] is None else r[f"Player_ID_{r["Direction_NotOnLead"]}"],
                     return_dtype=pl.String
                 ).alias('NotOnLead'),
+            ])
+            .with_columns([
                 pl.struct(['Declarer_Pair_Direction', 'Vul_NS', 'Vul_EW']).map_elements(
                     lambda r: None if r['Declarer_Pair_Direction'] is None else r[f'Vul_{r["Declarer_Pair_Direction"]}'],
-                    return_dtype=pl.Boolean
-                ).alias('Vul_Declarer'),
-                # ... (remaining struct mappings)
-            ]),
+                        return_dtype=pl.Boolean
+                    ).alias('Vul_Declarer'),
+                ]),
             self.df
         )
 
     def _create_board_result_columns(self):
         print(self.df.filter(pl.col('Result').is_null() | pl.col('Tricks').is_null())
-              ['Contract','Declarer_Direction','Declarer_Vul','Vul_Declarer','iVul','Score_NS','BidLvl','Result','Tricks'])
+              ['Contract','Declarer_Direction', 'Vul_Declarer','iVul','Score_NS','BidLvl','Result','Tricks'])
         
-        all_scores_d, scores_d, scores_df = calculate_scores()
+        all_scores_d, scores_d, scores_df = calculate_scores() # todo: put this in __init__?
         
         self.df = self._time_operation(
             "create board result columns",
@@ -1570,9 +1602,7 @@ class DDSDAugmenter:
         """Main method to perform all DD and SD augmentations"""
         self._perform_legacy_renames()
         self._create_fake_predictions()
-        self._create_declarer_columns()
-        self._create_position_columns()  # This is failing because it needs Pair_Declarer_Direction
-        self._create_additional_columns()
+        self._create_position_columns()
         self._create_board_result_columns()
         self._create_trick_columns()
         self._create_rating_columns()
@@ -1649,8 +1679,8 @@ class MatchPointAugmenter:
         #if score_ns_values.is_null().sum() > 0:
         #    print(f"Warning: Null values in score_ns_values: {score_ns_values.is_null().sum()}")
         # todo: is there a more proper way to handle null values in col_values and score_ns_values?
-        score_ns_values = score_ns_values.fill_null(0.0) # todo: why do some have nulls? sitout?
-        col_values = col_values.fill_null(0.0) # todo: why do some have nulls? sitout?
+        score_ns_values = score_ns_values.fill_null(0.0) # todo: why do some have nulls? sitout? adjusted score?
+        col_values = col_values.fill_null(0.0) # todo: why do some have nulls? sitout? adjusted score?
         return pl.Series([
             sum(1.0 if val > score else 0.5 if val == score else 0.0 
                 for score in score_ns_values)

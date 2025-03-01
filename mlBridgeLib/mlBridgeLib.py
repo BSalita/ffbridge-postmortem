@@ -656,7 +656,7 @@ def ContractToScores(df,direction='Declarer_Direction',cache={}):
     scores_l = []
     for bidlvl,bidsuit,direction,ivul,dbl in df[['BidLvl','BidSuit',direction,'iVul','Dbl']].to_numpy(): # rows: # convert df to list of tuples
         if np.isnan(bidlvl) or bidlvl is None or bidlvl == 0: # Contract of 'PASS' in which case BidSuit and Dbl are nulls.
-            scores = [[0]*14]
+            scores = [None]*14
         elif (bidlvl,bidsuit,direction,ivul,dbl) in cache:
 
             scores = cache[(bidlvl,bidsuit,direction,ivul,dbl)]
