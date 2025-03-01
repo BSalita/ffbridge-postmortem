@@ -1764,12 +1764,12 @@ class MatchPointAugmenter:
                 #pl.col('EV_Pct_Max_EW').alias('SD_Pct_EW'),
                 #pl.col('EV_Pct_Max_NS').alias('SD_Pct_Max_NS'),
                 #pl.col('EV_Pct_Max_EW').alias('SD_Pct_Max_EW'),
-                (pl.col('EV_Pct_Max_NS')-pl.col('Pct_NS')).alias('EV_Pct_Max_Diff_NS'),
-                (pl.col('EV_Pct_Max_EW')-pl.col('Pct_EW')).alias('EV_Pct_Max_Diff_EW'),
-                (pl.col('Par_Pct_NS')-pl.col('Pct_NS')).alias('EV_Par_Pct_Diff_NS'),
-                (pl.col('Par_Pct_EW')-pl.col('Pct_EW')).alias('EV_Par_Pct_Diff_EW'),
-                (pl.col('Par_Pct_NS')-pl.col('Pct_NS')).alias('EV_Par_Pct_Max_Diff_NS'),
-                (pl.col('Par_Pct_EW')-pl.col('Pct_EW')).alias('EV_Par_Pct_Max_Diff_EW'),
+                (pl.col('Pct_NS')-pl.col('EV_Pct_Max_NS')).alias('EV_Pct_Max_Diff_NS'),
+                (pl.col('Pct_EW')-pl.col('EV_Pct_Max_EW')).alias('EV_Pct_Max_Diff_EW'),
+                (pl.col('Pct_NS')-pl.col('Par_Pct_NS')).alias('EV_Par_Pct_Diff_NS'),
+                (pl.col('Pct_EW')-pl.col('Par_Pct_EW')).alias('EV_Par_Pct_Diff_EW'),
+                (pl.col('Pct_NS')-pl.col('Par_Pct_NS')).alias('EV_Par_Pct_Max_Diff_NS'),
+                (pl.col('Pct_EW')-pl.col('Par_Pct_EW')).alias('EV_Par_Pct_Max_Diff_EW'),
             ])
         ]
 
