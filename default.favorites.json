@@ -198,7 +198,7 @@
 				"help": "**Showing boards we declared which underperformed Expected Value (EV).**",
 				"prompts": [
 					{
-						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Par_{Pair_Direction}, Pct_{Pair_Direction}, Par_Pct_{Pair_Direction}, EV_Max_Col, EV_Max_{Pair_Direction}, EV_Pct_Max_{Pair_Direction}, EV_Max_Diff_{Pair_Direction}, EV_Max_Diff_{Pair_Direction}, EV_Pct_Max_Diff_{Pair_Direction}, EV_Pct_Max_Diff_{Pair_Direction}, EV_Pct_Max_Diff_{Pair_Direction}, EV_Par_Pct_Max_Diff_{Pair_Direction} FROM self WHERE Boards_We_Declared = True AND (Score_{Pair_Direction} < EV_Score_Declarer OR Score_{Pair_Direction} < EV_Max_Declarer) ORDER BY Board"
+						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Par_{Pair_Direction}, Pct_{Pair_Direction}, Par_Pct_{Pair_Direction}, EV_Max_Col, EV_Max_{Pair_Direction}, EV_Pct_Max_{Pair_Direction}, EV_Max_Diff_{Pair_Direction}, EV_Pct_Max_Diff_{Pair_Direction}, EV_Par_Pct_Max_Diff_{Pair_Direction} FROM self WHERE Boards_We_Declared = True AND (Score_{Pair_Direction} < EV_Score_Declarer OR Score_{Pair_Direction} < EV_Max_Declarer) ORDER BY Board"
 					}
 				]
 			},
@@ -269,7 +269,7 @@
 			},
 			"Opponent_Underbid": {
 				"title": "Opponent Underbid",
-				"help": "**Showing boards your opponent either underbid, arrived at inferior contract or should have penalty doubled.**",
+				"help": "**Showing boards your opponent either underbid, arrived at inferior contract or should have penalty doubled. Boards shown from opponents perspective.**",
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, Par, sd score, sd score max, sd contract max. Show those boards opponent declared and score > 0 and score < Par and score < sd score.",
@@ -353,7 +353,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, ev max pct diff, contract, score, Par, pct, Par pct, sd pct, dd tricks, sd Par pct diff, sd score, sd probs taking_* sort by sd pct diff descending. Show those boards we played.",
-						"sql": "SELECT Board, EV_Pct_Max_Diff_{Pair_Direction}, Contract, Score_{Pair_Direction}, Par_{Pair_Direction}, Pct_{Pair_Direction}, Par_Pct_{Pair_Direction}, section_name, Pair_Number_NS, Pair_Number_EW, EV_Pct_Max_{Pair_Direction}, DD_Tricks, EV_Pct_Max_Diff_{Pair_Direction}, EV_Max_{Pair_Direction}, Prob_Taking_0, Prob_Taking_1, Prob_Taking_2, Prob_Taking_3, Prob_Taking_4, Prob_Taking_5, Prob_Taking_6, Prob_Taking_7, Prob_Taking_8, Prob_Taking_9, Prob_Taking_10, Prob_Taking_11, Prob_Taking_12, Prob_Taking_13 FROM self WHERE Boards_We_Played = True ORDER BY EV_Pct_Max_Diff_{Pair_Direction} DESC"
+						"sql": "SELECT Board, EV_Pct_Max_Diff_{Pair_Direction}, Contract, Score_{Pair_Direction}, Par_{Pair_Direction}, Pct_{Pair_Direction}, Par_Pct_{Pair_Direction}, section_name, Pair_Number_NS, Pair_Number_EW, EV_Pct_Max_{Pair_Direction}, DD_Tricks, EV_Max_{Pair_Direction}, Prob_Taking_0, Prob_Taking_1, Prob_Taking_2, Prob_Taking_3, Prob_Taking_4, Prob_Taking_5, Prob_Taking_6, Prob_Taking_7, Prob_Taking_8, Prob_Taking_9, Prob_Taking_10, Prob_Taking_11, Prob_Taking_12, Prob_Taking_13 FROM self WHERE Boards_We_Played = True ORDER BY EV_Pct_Max_Diff_{Pair_Direction} DESC"
 					}
 				]
 			},
