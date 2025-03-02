@@ -628,16 +628,22 @@ def read_configs():
             favorites = json.load(f)
         st.session_state.favorites = favorites
         #st.session_state.vetted_prompts = get_vetted_prompts_from_favorites(favorites)
+    else:
+        st.session_state.favorites = None
 
     if st.session_state.player_id_custom_favorites_file.exists():
         with open(st.session_state.player_id_custom_favorites_file, 'r') as f:
             player_id_favorites = json.load(f)
         st.session_state.player_id_favorites = player_id_favorites
+    else:
+        st.session_state.player_id_favorites = None
 
     if st.session_state.debug_favorites_file.exists():
         with open(st.session_state.debug_favorites_file, 'r') as f:
             debug_favorites = json.load(f)
         st.session_state.debug_favorites = debug_favorites
+    else:
+        st.session_state.debug_favorites = None
 
     # display missing prompts in favorites
     if 'missing_in_summarize' not in st.session_state:
