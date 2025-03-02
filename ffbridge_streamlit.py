@@ -30,13 +30,24 @@ import polars as pl
 import requests
 import duckdb
 import json
-from datetime import datetime, timezone
 import sys
+import os
+import platform
+from datetime import datetime, timezone
+#from dotenv import load_dotenv
 
 from urllib.parse import urlparse
 from typing import Dict, Any, List
 
 import endplay # for __version__
+
+# Only declared to display version information
+#import fastai
+import numpy as np
+import pandas as pd
+#import safetensors
+#import sklearn
+#import torch
 
 # assumes symlinks are created in current directory.
 sys.path.append(str(pathlib.Path.cwd().joinpath('streamlitlib')))  # global
@@ -88,55 +99,61 @@ def ShowDataFrameTable(df, key, query='SELECT * FROM self', show_sql_query=True)
     return result_df
 
 
-def app_info():
-    st.caption(f"Project lead is Robert Salita research@AiPolice.org. Code written in Python. UI written in streamlit. Data engine is polars. Query engine is duckdb. Bridge lib is endplay. Self hosted using Cloudflare Tunnel. Repo:https://github.com/BSalita/ffbridge-postmortem")
-    st.caption(
-        f"App:{st.session_state.app_datetime} Python:{'.'.join(map(str, sys.version_info[:3]))} Streamlit:{st.__version__} Pandas:{pd.__version__} polars:{pl.__version__} endplay:{endplay.__version__} Query Params:{st.query_params.to_dict()}")
-
-
 def game_url_on_change():
-    #st.session_state.game_url = st.session_state.create_sidebar_game_url_on_change
-    pass
+    st.session_state.game_url = st.session_state.create_sidebar_game_url_on_change
+    st.session_state.sql_query_mode = False
 
 
 def chat_input_on_submit():
     prompt = st.session_state.main_prompt_chat_input
     sql_query = process_prompt_macros(prompt)
-    ShowDataFrameTable(st.session_state.df, query=sql_query, key='user_query_main_doit')
+    if not st.session_state.sql_query_mode:
+        st.session_state.sql_query_mode = True
+        st.session_state.sql_queries.clear()
+    st.session_state.sql_queries.append((prompt,sql_query))
+    st.session_state.main_section_container = st.empty()
+    st.session_state.main_section_container = st.container()
+    with st.session_state.main_section_container:
+        for i, (prompt,sql_query) in enumerate(st.session_state.sql_queries):
+            ShowDataFrameTable(st.session_state.df, query=sql_query, key=f'user_query_main_doit_{i}')
 
 
-def sample_count_on_change():
-    pass #st.session_state.single_dummy_sample_count = st.session_state.create_sidebar_single_dummy_sample_count_on_change
-    # if 'df' in st.session_state: # todo: is this still needed?
-    #     st.session_state.df = load_historical_data()
+def single_dummy_sample_count_changed():
+    st.session_state.single_dummy_sample_count = st.session_state.single_dummy_sample_count_number_input
+    change_game_state(st.session_state.player_id, st.session_state.session_id)
 
 
 def sql_query_on_change():
-    pass #st.session_state.show_sql_query = st.session_state.create_sidebar_show_sql_query_checkbox
+    st.session_state.sql_query_mode = False
+    #st.session_state.show_sql_query = st.session_state.create_sidebar_show_sql_query_checkbox
     # if 'df' in st.session_state: # todo: is this still needed?
     #     st.session_state.df = load_historical_data()
 
 
 def group_id_on_change():
-    pass #st.session_state.group_id = st.session_state.create_sidebar_group_id
+    st.session_state.sql_query_mode = False
+    #st.session_state.group_id = st.session_state.create_sidebar_group_id
     # if 'df' in st.session_state: # todo: is this still needed?
     #     st.session_state.df = load_historical_data()
 
 
 def session_id_on_change():
-    pass #st.session_state.session_id = st.session_state.create_sidebar_session_id
+    st.session_state.sql_query_mode = False
+    #st.session_state.session_id = st.session_state.create_sidebar_session_id
     # if 'df' in st.session_state: # todo: is this still needed?
     #     st.session_state.df = load_historical_data()
 
 
 def player_id_on_change():
-    pass #st.session_state.group_id = st.session_state.create_sidebar_player_id
+    st.session_state.sql_query_mode = False
+    #st.session_state.group_id = st.session_state.create_sidebar_player_id
     # if 'df' in st.session_state: # todo: is this still needed?
     #     st.session_state.df = load_historical_data()
 
 
 def partner_id_on_change():
-    pass #st.session_state.partner_id = st.session_state.create_sidebar_partner_id
+    st.session_state.sql_query_mode = False
+    #st.session_state.partner_id = st.session_state.create_sidebar_partner_id
     # if 'df' in st.session_state: # todo: is this still needed?
     #     st.session_state.df = load_historical_data()
 
@@ -210,7 +227,6 @@ def filter_dataframe(df, group_id, session_id, player_id, partner_id):
     )
 
     return df
-
 
 
 def flatten_json(nested_json: Dict) -> Dict:
@@ -307,6 +323,7 @@ def extract_group_id_session_id_pair_id():
     #print(f"extracted_group_id:{extracted_group_id} extracted_session_id:{extracted_session_id} extracted_pair_id:{extracted_pair_id}")
     return False
 
+
 def get_ffbridge_data_using_url():
 
     st.session_state.game_url = st.session_state.game_url_input
@@ -368,75 +385,8 @@ def get_ffbridge_data_using_url():
     #st.session_state.df = df
     return df
 
-def initialize_session_state():
-    st.set_page_config(layout="wide")
-    # Add this auto-scroll code
-    streamlitlib.widen_scrollbars()
 
-    st.session_state.assistant_logo = 'https://github.com/BSalita/ffbridge-postmortem/blob/master/assets/logo_assistant.gif?raw=true' # 🥸 todo: put into config. must have raw=true for github url.
-    st.session_state.guru_logo = 'https://github.com/BSalita/ffbridge-postmortem/blob/master/assets/logo_guru.png?raw=true' # 🥷todo: put into config file. must have raw=true for github url.
-
-    # todo: put filenames into a .json or .toml file?
-    st.session_state.rootPath = pathlib.Path('e:/bridge/data')
-    st.session_state.ffbridgePath = st.session_state.rootPath.joinpath('ffbridge')
-    #st.session_state.favoritesPath = pathlib.joinpath('favorites')
-    st.session_state.dataPath = st.session_state.ffbridgePath.joinpath('data')
-
-    from datetime import datetime
-
-    st.session_state.app_datetime = datetime.fromtimestamp(pathlib.Path(__file__).stat().st_mtime, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S %Z')
-
-    current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    # Default values for session state variables
-    defaults = {
-        'app_datetime': current_datetime,
-        'game_url_default': 'https://ffbridge.fr/competitions/results/groups/7878/sessions/107118/pairs/3976783',
-        'group_id_default': 0,
-        'session_id_default': 0,
-        'pair_id_default': 0,
-        'player_id_default': 0,
-        'partner_id_default': 0,
-        'player_direction_default': 'N',
-        'partner_direction_default': 'S',
-        'opponent_pair_direction_default': 'EW',
-        'single_dummy_sample_count_default': 40,
-        'show_sql_query_default': True,
-        'use_historical_data': False,
-        'do_not_cache_df': True, # todo: set to True for production
-        #'sidebar_loaded': False,
-        'analysis_started': False,   # new flag for analysis sidebar rewrite
-        'vetted_prompts': [],
-        'pdf_assets': {}
-    }
-    
-    # Initialize default values if not already set
-    for key, value in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
-    
-    # Initialize additional session state variables that depend on defaults.
-    session_vars = {
-        'con': duckdb.connect(),
-        'df': None,
-        'game_url': st.session_state.game_url_default,
-        'group_id': st.session_state.group_id_default,
-        'session_id': st.session_state.session_id_default,
-        'pair_id': st.session_state.pair_id_default,
-        'player_id': st.session_state.player_id_default,
-        'partner_id': st.session_state.partner_id_default,
-        'player_direction': st.session_state.player_direction_default,
-        'partner_direction': st.session_state.partner_direction_default,
-        'opponent_pair_direction': st.session_state.opponent_pair_direction_default,
-        'single_dummy_sample_count': st.session_state.single_dummy_sample_count_default,
-        'show_sql_query': st.session_state.show_sql_query_default,
-    }
-    
-    for key, value in session_vars.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
-
-def on_analyze_game_request():
+def change_game_state():
 
     with st.spinner('Preparing Game Analysis. Takes 2 minutes total...'):
         # Use the entered URL or fallback to default.
@@ -482,65 +432,19 @@ def on_analyze_game_request():
             st.session_state.con.register('self', st.session_state.df)
             print(f"st.session_state.df:{st.session_state.df.columns}")
 
-            # ShowDataFrameTable(df, key='everything_df', query='SELECT Board, Pct_NS, Pct_EW, MP_NS, MP_EW FROM self')
-
-            st.session_state.default_favorites_file = pathlib.Path(
-                'default.favorites.json')
-            st.session_state.player_id_custom_favorites_file = pathlib.Path(
-                f'favorites/{st.session_state.player_id}.favorites.json')
-            st.session_state.debug_favorites_file = pathlib.Path(
-                'favorites/debug.favorites.json')
-            read_favorites()
-            st.session_state.vetted_prompts = load_vetted_prompts(st.session_state.default_favorites_file)
-
-            pdf_assets = []
-            pdf_assets.append(f"# Bridge Game Postmortem Report Personalized for {st.session_state.player_id}")
-            pdf_assets.append(f"### Created by https://ffbridge.postmortem.chat")
-            pdf_assets.append(f"## Game Date:? Session:{st.session_state.session_id} Player:{st.session_state.player_id} Partner:{st.session_state.partner_id}")
-
-            with st.container(border=True):
-                st.markdown('### Your Personalized Report')
-                st.text(f'Game Date:? Session:{st.session_state.session_id} Player:{st.session_state.player_id} Partner:{st.session_state.partner_id}')
-                show_dfs(st.session_state.vetted_prompts, pdf_assets)
-
-                # As a text link
-                #st.markdown('[Back to Top](#your-personalized-report)')
-
-                # As an html button (needs styling added)
-                # can't use link_button() restarts page rendering. markdown() will correctly jump to href.
-                # st.link_button('Go to top of report',url='#your-personalized-report')
-                st.markdown(''' <a target="_self" href="#your-personalized-report">
-                                    <button>
-                                        Go to top of report
-                                    </button>
-                                </a>''', unsafe_allow_html=True)
-
-            if st.sidebar.download_button(label="Download Personalized Report",
-                    data=streamlitlib.create_pdf(pdf_assets, title=f"Bridge Game Postmortem Report Personalized for {st.session_state.player_id}"),
-                    file_name = f"{st.session_state.session_id}-{st.session_state.player_id}-morty.pdf",
-                    mime='application/octet-stream'):
-                st.warning('Personalized report downloaded.')
-            st.session_state.analysis_started = True
-
-        st.session_state.df = df
-
-    if 'df' in st.session_state:
-        if st.session_state.show_sql_query:
-            with st.container():
-                with bottom():
-                    st.chat_input('Enter a SQL query e.g. SELECT PBN, Contract, Result, N, S, E, W', key='main_prompt_chat_input', on_submit=chat_input_on_submit)
-    #st.session_state.sidebar_loaded = True
     return False
 
 
 def on_game_url_input_change():
     st.session_state.game_url = st.session_state.game_url_input
-    on_analyze_game_request()
+    change_game_state()
 
 
 def create_sidebar():
     st.sidebar.caption(f"App:{st.session_state.app_datetime}") # Display application information.
     
+    read_configs()
+
     st.session_state.game_url = st.sidebar.text_input(
         "Enter the game URL.",
         value=st.session_state.game_url_default,
@@ -554,7 +458,8 @@ def create_sidebar():
 
     # Provide a "Load Game URL" button.
     if st.sidebar.button("Analyze Game"):
-        on_analyze_game_request()
+        st.session_state.sql_query_mode = False
+        change_game_state()
     # else:
     #     st.session_state.single_dummy_sample_count = st.sidebar.number_input(
     #         'Single Dummy Samples Count',
@@ -574,6 +479,7 @@ def create_sidebar():
     # --- Check if the "Analyze Game" button has been hit ---
     #if not st.session_state.analysis_started:
     st.sidebar.link_button('View Game Webpage', url=st.session_state.game_url)
+    st.session_state.pdf_link = st.sidebar.empty()
     st.sidebar.markdown("#### Game Retrival Settings")
     st.session_state.group_id = st.sidebar.number_input(
         'Group ID',
@@ -603,98 +509,70 @@ def create_sidebar():
         on_change=partner_id_on_change,
         help='Enter ffbridge partner id. e.g. 246273'
     )
-    st.session_state.single_dummy_sample_count = st.sidebar.number_input(
-        'Single Dummy Samples Count',
-        value=st.session_state.single_dummy_sample_count,
-        key='sidebar_dummy_count'
+
+    with st.sidebar.expander('Developer Settings', False):
+
+        st.sidebar.checkbox(
+            'Show SQL Query',
+            value=st.session_state.show_sql_query,
+            key='sidebar_show_sql_query',
+            on_change=sql_query_on_change,
+            help='Show SQL used to query dataframes.'
+        )
+
+        st.session_state.single_dummy_sample_count = st.sidebar.number_input(
+            'Single Dummy Samples Count',
+            min_value=1,
+            max_value=100,
+            value=st.session_state.single_dummy_sample_count,
+            on_change=single_dummy_sample_count_changed,
+            key='sidebar_dummy_count'
+        )
+    return
+
+
+def initialize_website_specific():
+
+    st.session_state.assistant_logo = 'https://github.com/BSalita/ffbridge-postmortem/blob/master/assets/logo_assistant.gif?raw=true', # 🥸 todo: put into config. must have raw=true for github url.
+    st.session_state.guru_logo = 'https://github.com/BSalita/ffbridge-postmortem/blob/master/assets/logo_guru.png?raw=true', # 🥷todo: put into config file. must have raw=true for github url.
+    st.session_state.game_url_default = 'https://ffbridge.fr/competitions/results/groups/7878/sessions/107118/pairs/3976783'
+    st.session_state.game_name = 'ffbridge'
+    st.session_state.game_url = st.session_state.game_url_default
+    # todo: put filenames into a .json or .toml file?
+    st.session_state.rootPath = pathlib.Path('e:/bridge/data')
+    st.session_state.ffbridgePath = st.session_state.rootPath.joinpath('ffbridge')
+    #st.session_state.favoritesPath = pathlib.joinpath('favorites'),
+    st.session_state.savedModelsPath = st.session_state.rootPath.joinpath('SavedModels')
+
+    streamlit_chat.message(
+        "Hi. I'm Morty. Your friendly postmortem chatbot. I only want to chat about ffbridge pair matchpoint games using a Mitchell movement and not shuffled.",
+        key='intro_message_1',
+        logo=st.session_state.assistant_logo
     )
-    st.sidebar.checkbox(
-        'Show SQL Query',
-        value=st.session_state.show_sql_query_default,
-        key='sidebar_show_sql_query',
-        on_change=sql_query_on_change,
-        help='Show SQL used to query dataframes.'
+    streamlit_chat.message(
+        "I'm optimized for large screen devices such as a notebook or monitor. Do not use a smartphone.",
+        key='intro_message_2',
+        logo=st.session_state.assistant_logo
     )
+    streamlit_chat.message(
+        "To start our postmortem chat, I'll need the URL of your ffbridge game. It will be the subject of our chat.",
+        key='intro_message_3',
+        logo=st.session_state.assistant_logo
+    )
+    streamlit_chat.message(
+        "Enter the game URL in the left sidebar or just use the default game URL. Click the Analyze Game button to begin.",
+        key='intro_message_4',
+        logo=st.session_state.assistant_logo
+    )
+    streamlit_chat.message(
+        "I'm just a Proof of Concept so don't double me.",
+        key='intro_message_5',
+        logo=st.session_state.assistant_logo
+    )
+    return
 
 
-def read_favorites():
-
-    if st.session_state.default_favorites_file.exists():
-        with open(st.session_state.default_favorites_file, 'r') as f:
-            favorites = json.load(f)
-            st.session_state.favorites = favorites
-
-    if st.session_state.player_id_custom_favorites_file.exists():
-        with open(st.session_state.player_id_custom_favorites_file, 'r') as f:
-            player_id_favorites = json.load(f)
-            st.session_state.player_id_favorites = player_id_favorites
-
-    if st.session_state.debug_favorites_file.exists():
-        with open(st.session_state.debug_favorites_file, 'r') as f:
-            debug_favorites = json.load(f)
-            st.session_state.debug_favorites = debug_favorites
-    if st.session_state.default_favorites_file.exists():
-        with open(st.session_state.default_favorites_file, 'r') as f:
-            favorites = json.load(f)
-            st.session_state.favorites = favorites
-
-    if st.session_state.player_id_custom_favorites_file.exists():
-        with open(st.session_state.player_id_custom_favorites_file, 'r') as f:
-            player_id_favorites = json.load(f)
-            st.session_state.player_id_favorites = player_id_favorites
-
-    if st.session_state.debug_favorites_file.exists():
-        with open(st.session_state.debug_favorites_file, 'r') as f:
-            debug_favorites = json.load(f)
-            st.session_state.debug_favorites = debug_favorites
-
-
-def load_vetted_prompts(json_file):
-    sql_queries = []
-    if json_file.exists():
-        with open(json_file) as f:
-            json_data = json.load(f)
-        
-        # Navigate the JSON path to get the appropriate list of prompts
-        vetted_prompts = [json_data['SelectBoxes']['Vetted_Prompts'][p[1:]] for p in json_data["Buttons"]['Summarize']['prompts']]
-    
-    return vetted_prompts
-
-
-def process_prompt_macros(sql_query):
-    replacements = {
-        '{Player_Direction}': st.session_state.player_direction,
-        '{Partner_Direction}': st.session_state.partner_direction,
-        '{Pair_Direction}': st.session_state.pair_direction,
-        '{Opponent_Pair_Direction}': st.session_state.opponent_pair_direction
-    }
-    for old, new in replacements.items():
-        sql_query = sql_query.replace(old, new)
-    return sql_query
-
-
-def show_dfs(vetted_prompts, pdf_assets):
-    sql_query_count = 0
-
-    # bar_format='{l_bar}{bar}' isn't working in stqdm. no way to suppress r_bar without editing stqdm source code.
-    for category in stqdm(list(vetted_prompts), desc='Morty is analyzing your game...', bar_format='{l_bar}{bar}'): #[:-3]:
-        #print('category:',category)
-        if "prompts" in category:
-            for i,prompt in enumerate(category["prompts"]):
-                #print('prompt:',prompt) 
-                if "sql" in prompt and prompt["sql"]:
-                    if i == 0:
-                        streamlit_chat.message(f"Morty: {category['help']}", key=f'morty_sql_query_{sql_query_count}', logo=st.session_state.assistant_logo)
-                        pdf_assets.append(f"## {category['help']}")
-                    #print('sql:',prompt["sql"])
-                    prompt_sql = prompt['sql']
-                    sql_query = process_prompt_macros(prompt_sql)
-                    query_df = ShowDataFrameTable(st.session_state.df, query=sql_query, key=f'sql_query_{sql_query_count}')
-                    if query_df is not None:
-                        pdf_assets.append(query_df)
-                    sql_query_count += 1
-                    #break
-        #break
+# Everything below here is the standard mlBridge code.
 
 
 def perform_hand_augmentations(df, sd_productions):
@@ -736,46 +614,277 @@ def augment_df(df):
     return df
 
 
+def read_configs():
+
+    st.session_state.default_favorites_file = pathlib.Path(
+        'default.favorites.json')
+    st.session_state.player_id_custom_favorites_file = pathlib.Path(
+        f'favorites/{st.session_state.player_id}.favorites.json')
+    st.session_state.debug_favorites_file = pathlib.Path(
+        'favorites/debug.favorites.json')
+
+    if st.session_state.default_favorites_file.exists():
+        with open(st.session_state.default_favorites_file, 'r') as f:
+            favorites = json.load(f)
+        st.session_state.favorites = favorites
+        #st.session_state.vetted_prompts = get_vetted_prompts_from_favorites(favorites)
+
+    if st.session_state.player_id_custom_favorites_file.exists():
+        with open(st.session_state.player_id_custom_favorites_file, 'r') as f:
+            player_id_favorites = json.load(f)
+        st.session_state.player_id_favorites = player_id_favorites
+
+    if st.session_state.debug_favorites_file.exists():
+        with open(st.session_state.debug_favorites_file, 'r') as f:
+            debug_favorites = json.load(f)
+        st.session_state.debug_favorites = debug_favorites
+
+    # display missing prompts in favorites
+    if 'missing_in_summarize' not in st.session_state:
+        # Get the prompts from both locations
+        summarize_prompts = st.session_state.favorites['Buttons']['Summarize']['prompts']
+        vetted_prompts = st.session_state.favorites['SelectBoxes']['Vetted_Prompts']
+
+        # Process the keys to ignore leading '@'
+        st.session_state.summarize_keys = {p.lstrip('@') for p in summarize_prompts}
+        st.session_state.vetted_keys = set(vetted_prompts.keys())
+
+        # Find items in summarize_prompts but not in vetted_prompts. There should be none.
+        st.session_state.missing_in_vetted = st.session_state.summarize_keys - st.session_state.vetted_keys
+        assert len(st.session_state.missing_in_vetted) == 0, f"Oops. {st.session_state.missing_in_vetted} not in {st.session_state.vetted_keys}."
+
+        # Find items in vetted_prompts but not in summarize_prompts. ok if there's some missing.
+        st.session_state.missing_in_summarize = st.session_state.vetted_keys - st.session_state.summarize_keys
+
+        print("\nItems in Vetted_Prompts but not in Summarize.prompts:")
+        for item in st.session_state.missing_in_summarize:
+            print(f"- {item}: {vetted_prompts[item]['title']}")
+    return
+
+
+def process_prompt_macros(sql_query):
+    replacements = {
+        '{Player_Direction}': st.session_state.player_direction,
+        '{Partner_Direction}': st.session_state.partner_direction,
+        '{Pair_Direction}': st.session_state.pair_direction,
+        '{Opponent_Pair_Direction}': st.session_state.opponent_pair_direction
+    }
+    for old, new in replacements.items():
+        if new is None:
+            continue
+        sql_query = sql_query.replace(old, new)
+    return sql_query
+
+
+def write_report():
+    # bar_format='{l_bar}{bar}' isn't working in stqdm. no way to suppress r_bar without editing stqdm source code.
+    # todo: need to pass the Button title to the stqdm description. this is a hack until implemented.
+    st.session_state.main_section_container = st.container(border=True)
+    with st.session_state.main_section_container:
+        report_title = f"Bridge Game Postmortem Report Personalized for {st.session_state.player_name}" # can't use (st.session_state.player_id) because of href link below.
+        report_creator = f"Created by https://{st.session_state.game_name}.postmortem.chat"
+        report_event_info = f"{st.session_state.game_description} (event id {st.session_state.session_id})."
+        report_game_results_webpage = f"Results Page: {st.session_state.game_url}"
+        report_your_match_info = f"Your pair was {st.session_state.pair_id}{st.session_state.pair_direction} in section {st.session_state.section_name}. You played {st.session_state.player_direction}. Your partner was {st.session_state.partner_name} ({st.session_state.partner_id}) who played {st.session_state.partner_direction}."
+        st.markdown(f"### {report_title}")
+        st.markdown(f"##### {report_creator}")
+        st.markdown(f"#### {report_event_info}")
+        st.markdown(f"##### {report_game_results_webpage}")
+        st.markdown(f"#### {report_your_match_info}")
+        pdf_assets = st.session_state.pdf_assets
+        pdf_assets.clear()
+        pdf_assets.append(f"# {report_title}")
+        pdf_assets.append(f"#### {report_creator}")
+        pdf_assets.append(f"### {report_event_info}")
+        pdf_assets.append(f"#### {report_game_results_webpage}")
+        pdf_assets.append(f"### {report_your_match_info}")
+        st.session_state.button_title = 'Summarize' # todo: generalize to all buttons!
+        selected_button = st.session_state.favorites['Buttons'][st.session_state.button_title]
+        vetted_prompts = st.session_state.favorites['SelectBoxes']['Vetted_Prompts']
+        sql_query_count = 0
+        for stats in stqdm(selected_button['prompts'], desc='Creating personalized report...'):
+            assert stats[0] == '@', stats
+            stat = vetted_prompts[stats[1:]]
+            for i, prompt in enumerate(stat['prompts']):
+                if 'sql' in prompt and prompt['sql']:
+                    #print('sql:',prompt["sql"])
+                    if i == 0:
+                        streamlit_chat.message(f"Morty: {stat['help']}", key=f'morty_sql_query_{sql_query_count}', logo=st.session_state.assistant_logo)
+                        pdf_assets.append(f"### {stat['help']}")
+                    prompt_sql = prompt['sql']
+                    sql_query = process_prompt_macros(prompt_sql)
+                    query_df = ShowDataFrameTable(st.session_state.df, query=sql_query, key=f'sql_query_{sql_query_count}')
+                    if query_df is not None:
+                        pdf_assets.append(query_df)
+                    sql_query_count += 1
+
+        # As a text link
+        #st.markdown('[Back to Top](#your-personalized-report)')
+
+        # As an html button (needs styling added)
+        # can't use link_button() restarts page rendering. markdown() will correctly jump to href.
+        # st.link_button('Go to top of report',url='#your-personalized-report')\
+        report_title_anchor = report_title.replace(' ','-').lower()
+        st.markdown(f'<a target="_self" href="#{report_title_anchor}"><button>Go to top of report</button></a>', unsafe_allow_html=True)
+
+    if st.session_state.pdf_link.download_button(label="Download Personalized Report",
+            data=streamlitlib.create_pdf(st.session_state.pdf_assets, title=f"Bridge Game Postmortem Report Personalized for {st.session_state.player_id}"),
+            file_name = f"{st.session_state.session_id}-{st.session_state.player_id}-morty.pdf",
+            disabled = len(st.session_state.pdf_assets) == 0,
+            mime='application/octet-stream',
+            key='personalized_report_download_button'):
+        st.warning('Personalized report downloaded.')
+    return
+
+
+def ask_sql_query():
+
+    if st.session_state.show_sql_query:
+        with st.container():
+            with bottom():
+                st.chat_input('Enter a SQL query e.g. SELECT PBN, Contract, Result, N, S, E, W', key='main_prompt_chat_input', on_submit=chat_input_on_submit)
+
+
+def create_ui():
+    create_sidebar()
+    if not st.session_state.sql_query_mode:
+        #create_tab_bar()
+        if st.session_state.session_id is not None:
+            write_report()
+    ask_sql_query()
+
+
+def initialize_session_state():
+    st.set_page_config(layout="wide")
+    # Add this auto-scroll code
+    streamlitlib.widen_scrollbars()
+
+    if platform.system() == 'Windows': # ugh. this hack is required because torch somehow remembers the platform where the model was created. Must be a bug. Must lie to torch.
+        pathlib.PosixPath = pathlib.WindowsPath
+    else:
+        pathlib.WindowsPath = pathlib.PosixPath
+    
+    if 'player_id' in st.query_params:
+        player_id = st.query_params['player_id']
+        if not isinstance(player_id, str):
+            st.error(f'player_id must be a string {player_id}')
+            st.stop()
+        st.session_state.player_id = player_id
+    else:
+        st.session_state.player_id = None
+
+
+def initialize_session_state():
+    st.set_page_config(layout="wide")
+    # Add this auto-scroll code
+    streamlitlib.widen_scrollbars()
+
+    if platform.system() == 'Windows': # ugh. this hack is required because torch somehow remembers the platform where the model was created. Must be a bug. Must lie to torch.
+        pathlib.PosixPath = pathlib.WindowsPath
+    else:
+        pathlib.WindowsPath = pathlib.PosixPath
+    
+    if 'player_id' in st.query_params:
+        player_id = st.query_params['player_id']
+        if not isinstance(player_id, str):
+            st.error(f'player_id must be a string {player_id}')
+            st.stop()
+        st.session_state.player_id = player_id
+    else:
+        st.session_state.player_id = None
+
+    initialize_website_specific()
+    first_time_defaults = {
+        'first_time': True,
+        'single_dummy_sample_count': 10,
+        'show_sql_query': True, # os.getenv('STREAMLIT_ENV') == 'development',
+        'use_historical_data': False,
+        'do_not_cache_df': True, # todo: set to True for production
+        'con': duckdb.connect(),
+        'con_register_name': 'self',
+        'main_section_container': st.empty(),
+        'app_datetime': datetime.fromtimestamp(pathlib.Path(__file__).stat().st_mtime, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S %Z'),
+        'current_datetime': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    for key, value in first_time_defaults.items():
+        st.session_state[key] = value
+
+    reset_game_data()
+    return
+
+
+def reset_game_data():
+
+    # Default values for session state variables
+    reset_defaults = {
+        'game_description_default': None,
+        'group_id_default': None,
+        'session_id_default': None,
+        'section_name_default': None,
+        'player_id_default': None,
+        'partner_id_default': None,
+        'player_name_default': None,
+        'partner_name_default': None,
+        'player_direction_default': None,
+        'partner_direction_default': None,
+        'pair_id_default': None,
+        'pair_direction_default': None,
+        'opponent_pair_direction_default': None,
+    }
+    
+    # Initialize default values if not already set
+    for key, value in reset_defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+    
+    # Initialize additional session state variables that depend on defaults.
+    reset_session_vars = {
+        'df': None,
+        'game_description': st.session_state.game_description_default,
+        'group_id': st.session_state.group_id_default,
+        'session_id': st.session_state.session_id_default,
+        'section_name': st.session_state.section_name_default,
+        'player_id': st.session_state.player_id_default,
+        'partner_id': st.session_state.partner_id_default,
+        'player_name': st.session_state.player_name_default,
+        'partner_name': st.session_state.partner_name_default,
+        'player_direction': st.session_state.player_direction_default,
+        'partner_direction': st.session_state.partner_direction_default,
+        'pair_id': st.session_state.pair_id_default,
+        'pair_direction': st.session_state.pair_direction_default,
+        'opponent_pair_direction': st.session_state.opponent_pair_direction_default,
+        #'sidebar_loaded': False,
+        'analysis_started': False,   # new flag for analysis sidebar rewrite
+        'vetted_prompts': [],
+        'pdf_assets': [],
+        'sql_query_mode': False,
+        'sql_queries': [],
+        'game_urls_d': {},
+        'tournament_session_urls_d': {},
+    }
+    
+    for key, value in reset_session_vars.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+    return
+
+
+def app_info():
+    st.caption(f"Project lead is Robert Salita research@AiPolice.org. Code written in Python. UI written in streamlit. Data engine is polars. Query engine is duckdb. Bridge lib is endplay. Self hosted using Cloudflare Tunnel. Repo:https://github.com/BSalita/ffbridge-postmortem")
+    st.caption(
+        f"App:{st.session_state.app_datetime} Python:{'.'.join(map(str, sys.version_info[:3]))} Streamlit:{st.__version__} Pandas:{pd.__version__} polars:{pl.__version__} endplay:{endplay.__version__} Query Params:{st.query_params.to_dict()}")
+    return
+
 
 def main():
-    initialize_session_state()
-    create_sidebar()
+    if 'first_time' not in st.session_state:
+        initialize_session_state()
+        create_sidebar()
+    else:
+        create_ui()
+    return
 
-    # Create a persistent main_placeholder if not already created.
-    if 'main_placeholder' not in st.session_state:
-        st.session_state.main_placeholder = st.empty()
-    
-    main_placeholder = st.session_state.main_placeholder
-
-    if not st.session_state.analysis_started:
-        # Show the initial main content (chatbot messages and app information)
-        with main_placeholder.container():
-            streamlit_chat.message(
-                "Hi. I'm Morty. Your friendly postmortem chatbot. I only want to chat about ffbridge pair matchpoint games using a Mitchell movement and not shuffled.",
-                key='intro_message_1',
-                logo=st.session_state.assistant_logo
-            )
-            streamlit_chat.message(
-                "I'm optimized for large screen devices such as a notebook or monitor. Do not use a smartphone.",
-                key='intro_message_2',
-                logo=st.session_state.assistant_logo
-            )
-            streamlit_chat.message(
-                "To start our postmortem chat, I'll need the URL of your ffbridge game. It will be the subject of our chat.",
-                key='intro_message_3',
-                logo=st.session_state.assistant_logo
-            )
-            streamlit_chat.message(
-                "Enter the game URL in the left sidebar or just use the default game URL. Click the Analyze Game button to begin.",
-                key='intro_message_4',
-                logo=st.session_state.assistant_logo
-            )
-            streamlit_chat.message(
-                "I'm just a Proof of Concept so don't double me.",
-                key='intro_message_5',
-                logo=st.session_state.assistant_logo
-            )
-            app_info()  # Display application information.
 
 if __name__ == "__main__":
     main()
