@@ -359,9 +359,9 @@ def get_ffbridge_data_using_url():
         #ShowDataFrameTable(df, key='team_and_session_df')
 
         # Update the session state
-        st.session_state.group_id = st.session_state.group_id
-        st.session_state.session_id = st.session_state.session_id
-        st.session_state.pair_id = st.session_state.pair_id
+        #st.session_state.group_id = st.session_state.group_id # same
+        #st.session_state.session_id = st.session_state.session_id # same
+        #st.session_state.pair_id = st.session_state.pair_id # same
         st.session_state.player_id = df['player1_id'][0]
         st.session_state.partner_id = df['player2_id'][0]
         st.session_state.pair_direction = df['orientation'][0]
@@ -396,6 +396,10 @@ def change_game_state():
 
         # Fetch initial data using the URL.
         df = get_ffbridge_data_using_url()
+
+        if df['contract'].eq('').any():
+            st.error("Game data is missing contract data. Unable to continue.")
+            return True
 
         if not st.session_state.use_historical_data: # historical data is already fully augmented so skip past augmentations
             if st.session_state.do_not_cache_df:
@@ -437,7 +441,9 @@ def change_game_state():
 
 def on_game_url_input_change():
     st.session_state.game_url = st.session_state.game_url_input
-    change_game_state()
+    if change_game_state():
+        st.session_state.game_url_default = ''
+        reset_game_data()
 
 
 def create_sidebar():
@@ -459,7 +465,9 @@ def create_sidebar():
     # Provide a "Load Game URL" button.
     if st.sidebar.button("Analyze Game"):
         st.session_state.sql_query_mode = False
-        change_game_state()
+        if change_game_state():
+            st.session_state.game_url_default = ''
+            reset_game_data()
     # else:
     #     st.session_state.single_dummy_sample_count = st.sidebar.number_input(
     #         'Single Dummy Samples Count',
@@ -870,8 +878,8 @@ def reset_game_data():
     }
     
     for key, value in reset_session_vars.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
+        #if key not in st.session_state:
+        st.session_state[key] = value
 
     return
 
@@ -894,4 +902,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

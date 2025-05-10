@@ -122,8 +122,9 @@ def convert_ffdf_to_mldf(ffdf):
         pl.col('section_id_away')+pl.lit('_')+pl.col('Pair_Direction_Away')+pl.col('Pair_Number_Away').cast(pl.Utf8).alias('Pair_ID_EW'),
     )
     df = df.with_columns(
-        pl.struct(['Scores_List_NS', 'Scores_List_EW', 'Score_Freq_List'])\
-            .map_elements(lambda x: [int(score_ns) if len(score_ns) else int('-'+score_ew) for score_ns, score_ew, freq in zip(x['Scores_List_NS'], x['Scores_List_EW'], x['Score_Freq_List']) for _ in range(freq)],return_dtype=pl.List(pl.Int16))
+        pl.struct(['Scores_List_NS', 'Scores_List_EW', 'Score_Freq_List'])
+            # substitute None for adjusted scores (begin with %).
+            .map_elements(lambda x: [None if score_ns.startswith('%') else int(score_ns) if len(score_ns) else int('-'+score_ew) for score_ns, score_ew, freq in zip(x['Scores_List_NS'], x['Scores_List_EW'], x['Score_Freq_List']) for _ in range(freq)],return_dtype=pl.List(pl.Int16))
             .alias('Expanded_Scores_List')
     )
     df = df.with_columns(

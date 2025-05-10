@@ -1,4 +1,3 @@
-
 # contains functions to augment df with additional columns
 # mostly polars functions
 
@@ -10,6 +9,8 @@
 import polars as pl
 from collections import defaultdict
 import sys
+import pathlib
+import mlBridgeLib.mlBridgeLib as mlBridgeLib
 import time
 
 import endplay # for __version__
@@ -18,7 +19,13 @@ from endplay.types import Deal, Contract, Denom, Player, Penalty, Vul
 from endplay.dds import calc_dd_table, calc_all_tables, par
 from endplay.dealer import generate_deals
 
-import mlBridgeLib
+from mlBridgeLib.mlBridgeLib import (
+    NESW, SHDC, NS_EW,
+    PlayerDirectionToPairDirection,
+    NextPosition,
+    PairDirectionToOpponentPairDirection,
+    score
+)
 
 
 def create_hand_nesw_columns(df):    
@@ -66,10 +73,10 @@ def create_suit_nesw_columns(df):
 def OHE_Hands(hands_bin):
     handsbind = defaultdict(list)
     for h in hands_bin:
-        for direction,nesw in zip(mlBridgeLib.NESW,h):
+        for direction,nesw in zip(NESW,h):
             assert nesw[0] is not None and nesw[1] is not None
             handsbind['_'.join(['HB',direction])].append(nesw[0]) # todo: int(nesw[0],2)) # convert binary string to base 2 int
-            #for suit,shdc in zip(mlBridgeLib.SHDC,nesw[1]):
+            #for suit,shdc in zip(SHDC,nesw[1]):
             #    assert shdc is not None
             #    handsbind['_'.join(['HCP',direction,suit])].append(shdc)
     return handsbind
@@ -77,15 +84,15 @@ def OHE_Hands(hands_bin):
 
 # generic function to augment metrics by suits
 def Augment_Metric_By_Suits(metrics,metric,dtype=pl.UInt8):
-    for d,direction in enumerate(mlBridgeLib.NESW):
-        for s,suit in  enumerate(mlBridgeLib.SHDC):
+    for d,direction in enumerate(NESW):
+        for s,suit in  enumerate(SHDC):
             metrics = metrics.with_columns(
                 metrics[metric].map_elements(lambda x: x[1][d][0],return_dtype=dtype).alias('_'.join([metric,direction])),
                 metrics[metric].map_elements(lambda x: x[1][d][1][s],return_dtype=dtype).alias('_'.join([metric,direction,suit]))
             )
-    for direction in mlBridgeLib.NS_EW:
+    for direction in NS_EW:
         metrics = metrics.with_columns((metrics['_'.join([metric,direction[0]])]+metrics['_'.join([metric,direction[1]])]).cast(dtype).alias('_'.join([metric,direction])))
-        for s,suit in  enumerate(mlBridgeLib.SHDC):
+        for s,suit in  enumerate(SHDC):
             metrics = metrics.with_columns((metrics['_'.join([metric,direction[0],suit])]+metrics['_'.join([metric,direction[1],suit])]).cast(dtype).alias('_'.join([metric,direction,suit])))
     #display(metrics.describe())
     return metrics # why is it necessary to return metrics? Isn't it just df?
@@ -574,7 +581,7 @@ def Perform_Legacy_Renames(df):
         pl.col('W').alias('Player_Name_W'),
         pl.col('Declarer_Name').alias('Name_Declarer'),
         pl.col('Declarer_ID').alias('Number_Declarer'), #  todo: rename to 'Declarer_ID'?
-        pl.col('Declarer_Direction').replace_strict(mlBridgeLib.PlayerDirectionToPairDirection).alias('Declarer_Pair_Direction'),
+        pl.col('Declarer_Direction').replace_strict(PlayerDirectionToPairDirection).alias('Declarer_Pair_Direction'),
         pl.concat_list(['N', 'S']).alias('Player_Names_NS'),
         pl.concat_list(['E', 'W']).alias('Player_Names_EW'),
         # EV legacy renames
@@ -1244,8 +1251,8 @@ class ResultAugmenter:
 
     def _create_max_suit_lengths(self):
         if 'SL_Max_NS' not in self.df.columns:
-            sl_cols = [('_'.join(['SL_Max',d]), ['_'.join(['SL',d,s]) for s in mlBridgeLib.SHDC]) 
-                      for d in mlBridgeLib.NS_EW]
+            sl_cols = [('_'.join(['SL_Max',d]), ['_'.join(['SL',d,s]) for s in SHDC]) 
+                      for d in NS_EW]
             for d in sl_cols:
                 self.df = self._time_operation(
                     f"create {d[0]}",
@@ -1453,7 +1460,7 @@ class DDSDAugmenter:
         self.df = self._time_operation(
             "create position columns",
             lambda df: df.with_columns([
-                pl.col('Declarer_Direction').replace_strict(mlBridgeLib.NextPosition).alias('Direction_OnLead'),
+                pl.col('Declarer_Direction').replace_strict(NextPosition).alias('Direction_OnLead'),
             ])
             .with_columns([
                 pl.concat_str([
@@ -1503,15 +1510,15 @@ class DDSDAugmenter:
                 ]
             ])
             .with_columns([
-                pl.col('Declarer_Pair_Direction').replace_strict(mlBridgeLib.PairDirectionToOpponentPairDirection).alias('Opponent_Pair_Direction'),
-                pl.col('Direction_OnLead').replace_strict(mlBridgeLib.NextPosition).alias('Direction_Dummy'),
+                pl.col('Declarer_Pair_Direction').replace_strict(PairDirectionToOpponentPairDirection).alias('Opponent_Pair_Direction'),
+                pl.col('Direction_OnLead').replace_strict(NextPosition).alias('Direction_Dummy'),
                 pl.struct(['Direction_OnLead', 'Player_ID_N', 'Player_ID_E', 'Player_ID_S', 'Player_ID_W']).map_elements(
                     lambda r: None if r['Direction_OnLead'] is None else r[f'Player_ID_{r["Direction_OnLead"]}'],
                     return_dtype=pl.String
                 ).alias('OnLead'),
             ])
             .with_columns([
-                pl.col('Direction_Dummy').replace_strict(mlBridgeLib.NextPosition).alias('Direction_NotOnLead'),
+                pl.col('Direction_Dummy').replace_strict(NextPosition).alias('Direction_NotOnLead'),
                 pl.struct(['Direction_Dummy', 'Player_ID_N', 'Player_ID_E', 'Player_ID_S', 'Player_ID_W']).map_elements(
                     lambda r: None if r['Direction_Dummy'] is None else r[f'Player_ID_{r["Direction_Dummy"]}'],
                     return_dtype=pl.String
@@ -1551,7 +1558,7 @@ class DDSDAugmenter:
                     .alias('Computed_Score_Declarer'),
 
                 pl.struct(['Contract', 'Result', 'Score_NS', 'BidLvl', 'BidSuit', 'Dbl','Declarer_Direction', 'Vul_Declarer']).map_elements(
-                    lambda r: None if r['Contract'] is None else 0 if r['Contract'] == 'PASS' else r['Score_NS'] if r['Result'] is None else mlBridgeLib.score(
+                    lambda r: None if r['Contract'] is None else 0 if r['Contract'] == 'PASS' else r['Score_NS'] if r['Result'] is None else score(
                         r['BidLvl'] - 1, 'CDHSN'.index(r['BidSuit']), len(r['Dbl']), 'NESW'.index(r['Declarer_Direction']),
                         r['Vul_Declarer'], r['Result'], True),return_dtype=pl.Int16).alias('Computed_Score_Declarer2'),
             ]),

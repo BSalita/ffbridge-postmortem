@@ -77,30 +77,37 @@ declarer_direction_to_pair_direction = {'N':'NS','S':'NS','E':'EW','W':'EW'}
 # creates a dict all possible opening bids in auction order. key is npasses and values are opening bids.
 auction_order = [level+suit for level in '1234567' for suit in 'CDHSN']+['x','xx','p'] # todo: put into mlBridgeLib
 
+# Common direction mappings
 Direction_to_NESW_d = {
-    '0':'N',
-    '1':'E',
-    '2':'S',
-    '3':'W',
-    'north':'N',
-    'east':'E',
-    'south':'S',
-    'west':'W',
-    'North':'N',
-    'East':'E',
-    'South':'S',
-    'West':'W',
-    'N':'N',
-    'E':'E',
-    'S':'S',
-    'W':'W',
-    'n':'N',
-    'e':'E',
-    's':'S',
-    'w':'W',
-    None:None, # PASS
-    '':'' # PASS
+    'N': 'N',
+    'E': 'E',
+    'S': 'S',
+    'W': 'W',
+    'North': 'N',
+    'East': 'E',
+    'South': 'S',
+    'West': 'W',
+    'north': 'N',
+    'east': 'E',
+    'south': 'S',
+    'west': 'W', # only 'west' is used in ACBL data, not 'north', 'east', or 'south'. not sure why.
+    '': '', # passed-out so no declarer direction
 }
+
+# List of all possible contract strings
+contract_classes = [f"{level}{strain}{dbl}" for level in range(1,8) for strain in ['C','D','H','S','N'] for dbl in ['','X','XX']] + ['Pass']
+
+# List of all possible strains
+strain_classes = ['C', 'D', 'H', 'S', 'N']
+
+# List of all possible bid levels
+level_classes = list(range(1,8))
+
+# List of all possible double states
+dbl_classes = ['', 'X', 'XX']
+
+# List of all possible directions
+direction_classes = ['N', 'E', 'S', 'W']
 
 Strain_to_CDHSN_d = {
     'spades':'S',

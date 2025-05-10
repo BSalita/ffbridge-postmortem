@@ -1,8 +1,6 @@
-
 # Assume all ACBL double dummy and par calculations are wrong! Recompute both.
 
-import mlBridgeLib
-
+from mlBridgeLib.mlBridgeLib import NESW, vul_dds_d
 import dds
 import ctypes
 import functions
@@ -76,13 +74,13 @@ def Calculate_DD_Par(df, d):
             r = df[['PBN','Dealer','Vul']].row(grp_start+handno)
             pbn, dealer, vul = r
             # compute double dummy
-            assert dealer in mlBridgeLib.NESW, r
+            assert dealer in NESW, r
             assert vul in ['None','N_S','E_W','Both'], r
             par_result = ctypes.pointer(presmaster)
             dd_result = ctypes.pointer(tableRes.results[handno])
 
             # Par calculations are not multi-threading
-            res = dds.DealerParBin(dd_result, par_result, mlBridgeLib.NESW.index(dealer), mlBridgeLib.vul_dds_d[vul])
+            res = dds.DealerParBin(dd_result, par_result, NESW.index(dealer), vul_dds_d[vul])
             if res != dds.RETURN_NO_FAULT:
                 dds.ErrorMessage(res, line)
 
