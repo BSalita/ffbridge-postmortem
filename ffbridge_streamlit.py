@@ -362,24 +362,34 @@ def get_ffbridge_data_using_url():
         #st.session_state.group_id = st.session_state.group_id # same
         #st.session_state.session_id = st.session_state.session_id # same
         #st.session_state.pair_id = st.session_state.pair_id # same
+        # using [0] because all rows of team data have identical values.
         st.session_state.player_id = df['player1_id'][0]
         st.session_state.partner_id = df['player2_id'][0]
+        st.session_state.player_name = df['player1_firstName'][0] + ' ' + df['player1_lastName'][0]
+        st.session_state.partner_name = df['player2_firstName'][0] + ' ' + df['player2_lastName'][0]
         st.session_state.pair_direction = df['orientation'][0]
         st.session_state.player_direction = st.session_state.pair_direction[0]
         st.session_state.partner_direction = st.session_state.pair_direction[1]
         st.session_state.opponent_pair_direction = 'EW' if st.session_state.pair_direction == 'NS' else 'NS' # opposite of pair_direction
+        st.session_state.section_name = df['section'][0]
+        st.session_state.game_description = st.session_state.session_id # can't find a way to get the game description from the api so using session_id.
         print(f"st.session_state.group_id:{st.session_state.group_id} st.session_state.session_id:{st.session_state.session_id} st.session_state.pair_id:{st.session_state.pair_id} st.session_state.player_id:{st.session_state.player_id} st.session_state.partner_id:{st.session_state.partner_id} st.session_state.player_direction:{st.session_state.player_direction} st.session_state.partner_direction:{st.session_state.partner_direction} st.session_state.opponent_pair_direction:{st.session_state.opponent_pair_direction}")
 
     except Exception as e:
         st.error(f"Error getting team or scores data: {e}")
+        # todo: should be replying on reset_game_data() to set defaults.
         st.session_state.group_id = st.session_state.group_id_default
         st.session_state.session_id = st.session_state.session_id_default
         st.session_state.pair_id = st.session_state.pair_id_default
         st.session_state.player_id = st.session_state.player_id_default
         st.session_state.partner_id = st.session_state.partner_id_default
+        st.session_state.player_name = st.session_state.player_name_default
+        st.session_state.partner_name = st.session_state.partner_name_default
         st.session_state.player_direction = st.session_state.player_direction_default
         st.session_state.partner_direction = st.session_state.partner_direction_default
         st.session_state.opponent_pair_direction = st.session_state.opponent_pair_direction_default
+        st.session_state.section_name = st.session_state.section_name_default
+        st.session_state.game_description = st.session_state.game_description_default
         return None
 
     #st.session_state.df = df
@@ -503,6 +513,10 @@ def create_sidebar():
         on_change=session_id_on_change,
         help='Enter ffbridge session id. e.g. 107118'
     )
+
+    if st.session_state.player_id is None: # todo: not quite right. value is not updated with player_id if previously None. unsure why.
+        return
+    
     st.session_state.player_id = st.sidebar.number_input(
         'Player ID',
         value=st.session_state.player_id,
@@ -695,11 +709,11 @@ def write_report():
     # todo: need to pass the Button title to the stqdm description. this is a hack until implemented.
     st.session_state.main_section_container = st.container(border=True)
     with st.session_state.main_section_container:
-        report_title = f"Bridge Game Postmortem Report Personalized for {st.session_state.player_name}" # can't use (st.session_state.player_id) because of href link below.
+        report_title = f"Bridge Game Postmortem Report Personalized for {st.session_state.player_name} {st.session_state.player_id}" # can't use any of '():' because of href link below.
         report_creator = f"Created by https://{st.session_state.game_name}.postmortem.chat"
         report_event_info = f"{st.session_state.game_description} (event id {st.session_state.session_id})."
         report_game_results_webpage = f"Results Page: {st.session_state.game_url}"
-        report_your_match_info = f"Your pair was {st.session_state.pair_id}{st.session_state.pair_direction} in section {st.session_state.section_name}. You played {st.session_state.player_direction}. Your partner was {st.session_state.partner_name} ({st.session_state.partner_id}) who played {st.session_state.partner_direction}."
+        report_your_match_info = f"Your pair was {st.session_state.pair_id}{st.session_state.pair_direction} in section {st.session_state.section_name}. You played {st.session_state.player_direction}. Your partner was {st.session_state.partner_name} {st.session_state.partner_id} who played {st.session_state.partner_direction}."
         st.markdown(f"### {report_title}")
         st.markdown(f"##### {report_creator}")
         st.markdown(f"#### {report_event_info}")
@@ -766,26 +780,6 @@ def create_ui():
         if st.session_state.session_id is not None:
             write_report()
     ask_sql_query()
-
-
-def initialize_session_state():
-    st.set_page_config(layout="wide")
-    # Add this auto-scroll code
-    streamlitlib.widen_scrollbars()
-
-    if platform.system() == 'Windows': # ugh. this hack is required because torch somehow remembers the platform where the model was created. Must be a bug. Must lie to torch.
-        pathlib.PosixPath = pathlib.WindowsPath
-    else:
-        pathlib.WindowsPath = pathlib.PosixPath
-    
-    if 'player_id' in st.query_params:
-        player_id = st.query_params['player_id']
-        if not isinstance(player_id, str):
-            st.error(f'player_id must be a string {player_id}')
-            st.stop()
-        st.session_state.player_id = player_id
-    else:
-        st.session_state.player_id = None
 
 
 def initialize_session_state():
