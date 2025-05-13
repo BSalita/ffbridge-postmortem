@@ -144,18 +144,8 @@ def session_id_on_change():
     #     st.session_state.df = load_historical_data()
 
 
-def player_id_on_change():
+def team_id_on_change():
     st.session_state.sql_query_mode = False
-    #st.session_state.group_id = st.session_state.create_sidebar_player_id
-    # if 'df' in st.session_state: # todo: is this still needed?
-    #     st.session_state.df = load_historical_data()
-
-
-def partner_id_on_change():
-    st.session_state.sql_query_mode = False
-    #st.session_state.partner_id = st.session_state.create_sidebar_partner_id
-    # if 'df' in st.session_state: # todo: is this still needed?
-    #     st.session_state.df = load_historical_data()
 
 
 # def load_historical_data():
@@ -166,57 +156,15 @@ def partner_id_on_change():
 #     return df
 
 
-def filter_dataframe(df, group_id, session_id, player_id, partner_id):
-    # First filter for sessions containing player_id
+def filter_dataframe(df): #, group_id, session_id, player_id, partner_id):
 
-    df = df.filter(
-        pl.col('group_id').eq(group_id) &
-        pl.col('session_id').eq(session_id)
+    # Columns used for filtering to a specific player_id and partner_id. Needs multiple with_columns() to unnest overlapping columns.
+    full_directions_d = {'N':'north', 'E':'east', 'S':'south', 'W':'west'}
+    df = df.with_columns(
+        pl.col(f'lineup_{full_directions_d[st.session_state.player_direction]}Player_id').eq(pl.lit(st.session_state.player_id)).alias('Boards_I_Played'), # player_id could be numeric
+        pl.col('Declarer_ID').eq(pl.lit(str(st.session_state.player_id))).alias('Boards_I_Declared'), # player_id could be numeric
+        pl.col('Declarer_ID').eq(pl.lit(str(st.session_state.partner_id))).alias('Boards_Partner_Declared'), # partner_id could be numeric
     )
-    
-    # Set direction variables based on where player_id is found
-    player_direction = None
-    if player_id in df['Player_ID_N']:
-        player_direction = 'N'
-        partner_direction = 'S'
-        pair_direction = 'NS'
-        opponent_pair_direction = 'EW'
-    elif player_id in df['Player_ID_E']:
-        player_direction = 'E'
-        partner_direction = 'W'
-        pair_direction = 'EW'
-        opponent_pair_direction = 'NS'
-    elif player_id in df['Player_ID_S']:
-        player_direction = 'S'
-        partner_direction = 'N'
-        pair_direction = 'NS'
-        opponent_pair_direction = 'EW'
-    elif player_id in df['Player_ID_W']:
-        player_direction = 'W'
-        partner_direction = 'E'
-        pair_direction = 'EW'
-        opponent_pair_direction = 'NS'
-
-    # todo: not sure what to do here. pbns might not contain names or ids. endplay has names but not ids.
-    if player_direction is None:
-        df = df.with_columns(
-            pl.lit(True).alias('Boards_I_Played'), # player_id could be numeric
-            pl.lit(True).alias('Boards_I_Declared'), # player_id could be numeric
-            pl.lit(True).alias('Boards_Partner_Declared'), # partner_id could be numeric
-        )
-    else:
-        # Store in session state
-        st.session_state.player_direction = player_direction
-        st.session_state.partner_direction = partner_direction
-        st.session_state.pair_direction = pair_direction
-        st.session_state.opponent_pair_direction = opponent_pair_direction
-
-        # Columns used for filtering to a specific player_id and partner_id. Needs multiple with_columns() to unnest overlapping columns.
-        df = df.with_columns(
-            pl.col(f'Player_ID_{player_direction}').eq(pl.lit(str(player_id))).alias('Boards_I_Played'), # player_id could be numeric
-            pl.col('Declarer_ID').eq(pl.lit(str(player_id))).alias('Boards_I_Declared'), # player_id could be numeric
-            pl.col('Declarer_ID').eq(pl.lit(str(partner_id))).alias('Boards_Partner_Declared'), # partner_id could be numeric
-        )
     df = df.with_columns(
         pl.col('Boards_I_Played').alias('Boards_We_Played'),
         pl.col('Boards_I_Played').alias('Our_Boards'),
@@ -229,68 +177,7 @@ def filter_dataframe(df, group_id, session_id, player_id, partner_id):
     return df
 
 
-def flatten_json(nested_json: Dict) -> Dict:
-    """Flatten nested JSON structure into a single level dictionary"""
-    flat_dict = {}
-    
-    def flatten(x: Any, name: str = '') -> None:
-        #print(f"flattening {name}")
-        if isinstance(x, dict):
-            for key, value in x.items():
-                flatten(value, f"{name}_{key}" if name else key)
-        elif isinstance(x, list):
-            #for i, value in enumerate(x):
-            #    flatten(value, f"{name}_{i}")
-            flat_dict[name] = x
-        else:
-            flat_dict[name] = x
-            
-    flatten(nested_json)
-    return flat_dict
-
-def create_dataframe(data: List[Dict[str, Any]]) -> pl.DataFrame:
-    """Create a Polars DataFrame from flattened JSON data"""
-    try:
-        # Flatten each record in the dict or list
-        if isinstance(data, dict):
-            #print(f"flattening dict")
-            flattened_data = [flatten_json(data)]
-        elif isinstance(data, list):
-            #print(f"flattening list")
-            flattened_data = [flatten_json(record) for record in data]
-        else:
-            print(f"Unsupported data type: {type(data)}")
-            raise ValueError(f"Unsupported data type: {type(data)}")
-        
-        # Create DataFrame
-        df = pl.DataFrame(flattened_data)
-        return df
-        
-    except Exception as e:
-        print(f"Error creating DataFrame: {e}")
-        print(f"Data structure: {type(data)}")
-        print(f"First record: {json.dumps(data[0], indent=2) if data else 'Empty'}")
-        raise
-
-# obsolete?
-def get_scores_data(scores_json, group_id, session_id, team_id):
-    print(f"creating dataframe from scores_json")
-    df = create_dataframe(scores_json)
-    if df is None:
-        print(f"Couldn't make dataframe from scores_json for {team_id=} {session_id=}")
-        return None
-    if 'board_id' not in df.columns: # todo: find out why 'board_id' doesn't exist
-        print(f"No board_id for team_session_scores: {team_id} {session_id}")
-        return None
-    if df['lineup_segment_game_homeTeam_orientation'].ne('NS').any():
-        print(f"Not a Mitchell movement. homeTeam_orientations are not all NS. Skipping: {team_id} {session_id}")
-        return None
-    if df['lineup_segment_game_awayTeam_orientation'].ne('EW').any():
-        print(f"Not a Mitchell movement. awayTeam_orientations are not all EW. Skipping: {team_id} {session_id}")
-        return None
-    return df
-
-def extract_group_id_session_id_pair_id():
+def extract_group_id_session_id_team_id():
     parsed_url = urlparse(st.session_state.game_url)
     #print(f"parsed_url:{parsed_url}")
     path_parts = parsed_url.path.split('/')
@@ -316,12 +203,126 @@ def extract_group_id_session_id_pair_id():
     
     extracted_group_id = int(path_parts[group_index])
     extracted_session_id = int(path_parts[session_index])
-    extracted_pair_id = int(path_parts[pair_index])
+    extracted_team_id = int(path_parts[pair_index])
     st.session_state.group_id = extracted_group_id
     st.session_state.session_id = extracted_session_id
-    st.session_state.pair_id = extracted_pair_id
-    #print(f"extracted_group_id:{extracted_group_id} extracted_session_id:{extracted_session_id} extracted_pair_id:{extracted_pair_id}")
+    st.session_state.team_id = extracted_team_id
+    #print(f"extracted_group_id:{extracted_group_id} extracted_session_id:{extracted_session_id} extracted_team_id:{extracted_team_id}")
     return False
+
+
+def unnest_structs_recursive(df, prefix="", max_depth=10, current_depth=0):
+    """
+    Recursively unnest all struct columns in a DataFrame.
+    
+    Args:
+        df: Polars DataFrame
+        prefix: Prefix to add to column names
+        max_depth: Maximum recursion depth to prevent infinite loops
+        current_depth: Current recursion depth
+    
+    Returns:
+        DataFrame with all structs unnested
+    """
+    # Base case: stop if we reach maximum depth
+    if current_depth >= max_depth:
+        print(f"Warning: Reached maximum recursion depth ({max_depth})")
+        return df
+    
+    # Find all struct columns at current level
+    struct_cols = [col for col in df.columns if df[col].dtype == pl.Struct]
+    
+    # If no struct columns left, we're done
+    if not struct_cols:
+        return df
+    
+    # Process each struct column
+    for col in struct_cols:
+        # Get the fields in the struct
+        fields = df[col].struct.fields
+        
+        # Create new field names with the column name as prefix
+        col_prefix = f"{prefix}{col}_" if prefix else f"{col}_"
+        new_field_names = [f"{col_prefix}{field}" for field in fields]
+        
+        # Rename the struct fields
+        df = df.with_columns([
+            pl.col(col).struct.rename_fields(new_field_names)
+        ])
+    
+    # Unnest all struct columns at this level
+    df = df.unnest(struct_cols)
+    
+    # Recursively unnest any new struct columns that appeared after unnesting
+    return unnest_structs_recursive(df, prefix, max_depth, current_depth + 1)
+
+
+def create_df_of_dtypes(dfs):
+    # Assuming you have a dictionary of DataFrames called 'dfs'
+    # Create a DataFrame with dtype information
+
+    # First collect all unique column names from all DataFrames
+    all_columns = set()
+    for df_name, df in dfs.items():
+        all_columns.update(df.columns)
+
+    # Create rows for the dtype DataFrame
+    rows = []
+    for df_name, df in dfs.items():
+        # Create a dictionary for this DataFrame's dtypes
+        dtype_dict = {"df_name": df_name}
+        
+        # For each possible column, add its dtype or None if column doesn't exist
+        for col in all_columns:
+            if col in df.columns:
+                # Convert dtype to string for better display
+                dtype_dict[col] = str(df[col].dtype)
+            else:
+                dtype_dict[col] = None
+        
+        rows.append(dtype_dict)
+
+    # Create the dtypes DataFrame
+    dtypes_df = pl.DataFrame(rows)
+
+    # Optionally sort columns for better readability
+    sorted_cols = ["df_name"] + sorted(list(all_columns))
+    dtypes_df = dtypes_df.select(sorted_cols)
+    return dtypes_df
+
+
+def flatten_json(nested_json, prefix=''):
+    """Flatten a nested json into a flat dictionary with dot notation for keys."""
+    flattened = {}
+    
+    for key, value in nested_json.items():
+        # Handle None values
+        if value is None:
+            flattened[f"{prefix}{key}"] = None
+        
+        # Handle dictionaries (nested objects)
+        elif isinstance(value, dict):
+            nested_flattened = flatten_json(value, prefix=f"{prefix}{key}_")
+            flattened.update(nested_flattened)
+        
+        # Handle lists
+        elif isinstance(value, list):
+            # For simplicity, we'll just join list items as strings
+            # You could handle this differently based on your needs
+            if all(isinstance(item, dict) for item in value):
+                # If list of dicts, flatten each one
+                for i, item in enumerate(value):
+                    nested_flattened = flatten_json(item, prefix=f"{prefix}{key}_{i}_")
+                    flattened.update(nested_flattened)
+            else:
+                # For simple lists, convert to string
+                flattened[f"{prefix}{key}"] = str(value)
+        
+        # Handle basic types (strings, numbers, etc.)
+        else:
+            flattened[f"{prefix}{key}"] = value
+    
+    return flattened
 
 
 def get_ffbridge_data_using_url():
@@ -331,56 +332,171 @@ def get_ffbridge_data_using_url():
 
     try:
 
-        extract_group_id_session_id_pair_id()
-        # get team data
-        api_team_url = f'http://localhost:8000/ffbridge.fr/competitions/results/groups/{st.session_state.group_id}/sessions/{st.session_state.session_id}/pairs/{st.session_state.pair_id}'
-        #api_team_url = "https://ffbridge.fr/competitions/results/groups/7878/sessions/107118/pairs/3976783"
-        #api_team_url = f"https://api-lancelot.ffbridge.fr/results/teams/{extracted_pair_id}/session/{extracted_session_id}/scores"
-        #api_team_url = f'http://api-lancelot.ffbridge.fr/competitions/results/groups/{extracted_group_id}/sessions/{extracted_session_id}/pairs/{extracted_pair_id}'
-        #api_team_url = "https://api-lancelot.ffbridge.fr/results/teams/3976783"
-        print(f"api_team_url:{api_team_url}")
-        #print(f"api_scores_url:{api_scores_url}")
-        request = requests.get(api_team_url)
-        request.raise_for_status()
-        response_json = request.json()
+        extract_group_id_session_id_team_id()
+        api_urls = {
+            'group_url': f"https://api-lancelot.ffbridge.fr/competitions/groups/{st.session_state.group_id}?context%5B%5D=result_status&context%5B%5D=result_data", # gets group data but no results
+            #'team_url': f"https://api-lancelot.ffbridge.fr/results/teams/{st.session_state.team_id}", # gets team data but no results
+            'session_url': f"https://api-lancelot.ffbridge.fr/competitions/sessions/{st.session_state.session_id}", # gets session data but no results
+            'ranking_url': f"https://api-lancelot.ffbridge.fr/results/sessions/{st.session_state.session_id}/ranking", # gets ranking data but no results
+        }
+        #api_url = f"https://api-lancelot.ffbridge.fr/results/teams/{extracted_team_id}/session/{extracted_session_id}/scores"
+        #api_url = f'https://api-lancelot.ffbridge.fr/competitions/results/groups/{extracted_group_id}/sessions/{extracted_session_id}/pairs/{extracted_team_id}'
+        response_jsons = {}
+        dfs = {}
+        for k,v in api_urls.items():
+            print(f"requesting {k}:{v}")
+            request = requests.get(v)
+            request.raise_for_status()
+            response_jsons[k] = request.json()
+            # Check if the request was successful and extract the data
+            if 'success' in response_jsons[k] and not response_jsons[k].get('success'):
+                raise ValueError(f"API request failed: {response_jsons[k]}")
+            
+        for k,v in api_urls.items():
+            dfs[k] = unnest_structs_recursive(pl.DataFrame(response_jsons[k]))
+            print(f"dfs[{k}]:{dfs[k].columns}")
+            print(f"dfs[{k}]:{dfs[k].shape}")
+            print(f"dfs[{k}]:{dfs[k]}")
 
-        # Check if the request was successful and extract the data
-        if response_json.get('success'):
-            # Create DataFrame from the 'data' field
-            df = pl.DataFrame(response_json['data'])
-        else:
-            raise ValueError(f"API request failed: {response_json}")
+        group_df = dfs['group_url']
+        session_df = dfs['session_url']
+        teams_df = dfs['ranking_url']
 
-        # no postmortem api
-        #df = pl.DataFrame(response_json)
+        assert len(group_df) == 1, f"Expected 1 row, got {len(group_df)}"
+        group_d = group_df.to_dicts()[0]
+
+        print(f"Unnested teams_df columns: {teams_df.columns}")
+        print(f"Unnested teams_df shape: {teams_df.shape}")
+
+        # Get the column values
+        player1_dict = teams_df.select(
+            'team_player1_ffbId', 'team_player1_id'
+        ).unique().to_dict(as_series=False)
+
+        # Convert to the proper format with keys and values swapped
+        player1_id_to_ffbId_dict = dict(zip(
+            player1_dict['team_player1_id'],      # Now using IDs as keys 
+            player1_dict['team_player1_ffbId']    # And FFB IDs as values
+        ))
+
+        # Same for player2
+        player2_dict = teams_df.select(
+            'team_player2_ffbId', 'team_player2_id'
+        ).unique().to_dict(as_series=False)
+
+        player2_id_to_ffbId_dict = dict(zip(
+            player2_dict['team_player2_id'],      # Now using IDs as keys
+            player2_dict['team_player2_ffbId']    # And FFB IDs as values
+        ))
+
+        # Check if they're disjoint
+        assert set(player1_id_to_ffbId_dict.keys()).isdisjoint(set(player2_id_to_ffbId_dict.keys()))
+
+        # Merge the dictionaries
+        id_to_ffbId_dict = {**player1_id_to_ffbId_dict, **player2_id_to_ffbId_dict}
+        print(f"id_to_ffbId_dict:{id_to_ffbId_dict}")
+
+        # Process each team to get their scores
+        teams_jsons = {}
+        for team_id in teams_df['team_id']:
+            print(f"Processing team_id: {team_id}")
+            api_urls = {
+                team_id: f"https://api-lancelot.ffbridge.fr/results/teams/{team_id}/session/{st.session_state.session_id}/scores",
+            }
+            for k,v in api_urls.items():
+                print(f"requesting {k}:{v}")
+                request = requests.get(v)
+                request.raise_for_status()
+                teams_jsons[k] = request.json()
+                # Check if the request was successful and extract the data
+                if 'success' in teams_jsons[k] and not teams_jsons[k].get('success'):
+                    raise ValueError(f"API request failed: {teams_jsons[k]}")
+            
+        teams_dfs = {}  
+        for k,v in teams_jsons.items():
+            teams_dfs[k] = pl.DataFrame(v) #.drop(['eastPlayer'])
+
+        dtypes_df = create_df_of_dtypes(teams_dfs)
+        print(f"dtypes_df:{dtypes_df}")
+
+        for col in dtypes_df.columns:
+            print(f"{col}:{dtypes_df[col].value_counts()}")
+
+        # need to unnest any structs but before must rename to avoid conflicts
+        cols = None
+        for k,v in teams_dfs.items():
+            if cols is None:
+                cols = v.columns
+            else:
+                assert cols == v.columns, f"{cols} != {v.columns}"
+        
+        all_pairs_dfs = {}
+        for col in cols:
+            print(f"col:{col}")
+            if col == 'lineup': # lineup is a struct of varying types (string vs None)
+                print('bypassing lineup')
+                ldf = []
+                for k,v in teams_dfs.items():
+                    df = unnest_structs_recursive(pl.DataFrame(teams_dfs[k])['lineup'].to_frame())
+                    df = df.with_columns(
+                        pl.col(pl.Null).cast(pl.String)
+                    ).select(sorted(df.columns)) # put back into original column order.
+                    ldf.append(df)
+                all_pairs_dfs[col] = pl.concat(ldf)
+                continue
+            all_pairs_dfs[col] = pl.concat([v[col] for k,v in teams_dfs.items()]).to_frame()
+            pass
 
         # Print the structure to debug
+        df = pl.concat(all_pairs_dfs.values(),how='horizontal')
         print("DataFrame columns:", df.columns)
+        df = unnest_structs_recursive(df)
         #ShowDataFrameTable(df, key='team_and_session_df')
 
-        # Update the session state
+
         #st.session_state.group_id = st.session_state.group_id # same
-        #st.session_state.session_id = st.session_state.session_id # same
-        #st.session_state.pair_id = st.session_state.pair_id # same
+        df = df.with_columns(
+            pl.lit(st.session_state.group_id).alias('group_id'),
+            pl.lit(st.session_state.session_id).alias('session_id'),
+            #pl.lit(st.session_state.team_id).alias('team_id'),
+        )
+        df = df.unique(keep='first') # remove duplicated rows. Caused by two players being in partnership?
+
+        for direction in ['north', 'east', 'south', 'west']:
+            df = df.with_columns([
+                pl.col(f'lineup_{direction}Player_id')
+                .map_elements(lambda x: id_to_ffbId_dict.get(x, None))
+                .alias(f'lineup_{direction}Player_ffbId')
+            ])
+            assert df[f'lineup_{direction}Player_ffbId'].is_not_null().all()
+
+        # extract a df of only the requested team_id. must be a single row.
         # using [0] because all rows of team data have identical values.
-        st.session_state.player_id = df['player1_id'][0]
-        st.session_state.partner_id = df['player2_id'][0]
-        st.session_state.player_name = df['player1_firstName'][0] + ' ' + df['player1_lastName'][0]
-        st.session_state.partner_name = df['player2_firstName'][0] + ' ' + df['player2_lastName'][0]
-        st.session_state.pair_direction = df['orientation'][0]
+        team_df = teams_df.filter(pl.col('team_id').eq(st.session_state.team_id))
+        assert len(team_df) == 1, f"Expected 1 row, got {len(team_df)}"
+        team_d = team_df.to_dicts()[0]
+        # Update the session state
+        st.session_state.player_id = team_d['team_player1_id']
+        st.session_state.partner_id = team_d['team_player2_id']
+        st.session_state.player_ffbId = team_d['team_player1_ffbId']
+        st.session_state.partner_ffbId = team_d['team_player2_ffbId']
+        st.session_state.player_name = team_d['team_player1_firstName'] + ' ' + team_d['team_player1_lastName']
+        st.session_state.partner_name = team_d['team_player2_firstName'] + ' ' + team_d['team_player2_lastName']
+        st.session_state.pair_direction = team_d['orientation']
         st.session_state.player_direction = st.session_state.pair_direction[0]
         st.session_state.partner_direction = st.session_state.pair_direction[1]
         st.session_state.opponent_pair_direction = 'EW' if st.session_state.pair_direction == 'NS' else 'NS' # opposite of pair_direction
-        st.session_state.section_name = df['section'][0]
-        st.session_state.game_description = st.session_state.session_id # can't find a way to get the game description from the api so using session_id.
-        print(f"st.session_state.group_id:{st.session_state.group_id} st.session_state.session_id:{st.session_state.session_id} st.session_state.pair_id:{st.session_state.pair_id} st.session_state.player_id:{st.session_state.player_id} st.session_state.partner_id:{st.session_state.partner_id} st.session_state.player_direction:{st.session_state.player_direction} st.session_state.partner_direction:{st.session_state.partner_direction} st.session_state.opponent_pair_direction:{st.session_state.opponent_pair_direction}")
+        st.session_state.section_name = team_d['section']
+        st.session_state.organization_name = group_d['phase_stade_organization_name']
+        st.session_state.game_description = group_d['phase_stade_competitionDivision_competition_label']
+        print(f"st.session_state.group_id:{st.session_state.group_id} st.session_state.session_id:{st.session_state.session_id} st.session_state.team_id:{st.session_state.team_id} st.session_state.player_id:{st.session_state.player_id} st.session_state.partner_id:{st.session_state.partner_id} st.session_state.player_direction:{st.session_state.player_direction} st.session_state.partner_direction:{st.session_state.partner_direction} st.session_state.opponent_pair_direction:{st.session_state.opponent_pair_direction}")
 
     except Exception as e:
         st.error(f"Error getting team or scores data: {e}")
         # todo: should be replying on reset_game_data() to set defaults.
         st.session_state.group_id = st.session_state.group_id_default
         st.session_state.session_id = st.session_state.session_id_default
-        st.session_state.pair_id = st.session_state.pair_id_default
+        st.session_state.team_id = st.session_state.team_id_default
         st.session_state.player_id = st.session_state.player_id_default
         st.session_state.partner_id = st.session_state.partner_id_default
         st.session_state.player_name = st.session_state.player_name_default
@@ -389,6 +505,7 @@ def get_ffbridge_data_using_url():
         st.session_state.partner_direction = st.session_state.partner_direction_default
         st.session_state.opponent_pair_direction = st.session_state.opponent_pair_direction_default
         st.session_state.section_name = st.session_state.section_name_default
+        st.session_state.organization_name = st.session_state.organization_name_default
         st.session_state.game_description = st.session_state.game_description_default
         return None
 
@@ -440,7 +557,7 @@ def change_game_state():
                         f.write(col+'\n')
 
             # personalize to player, partner, opponents, etc.
-            st.session_state.df = filter_dataframe(df, st.session_state.group_id, st.session_state.session_id, st.session_state.player_id, st.session_state.partner_id)
+            st.session_state.df = filter_dataframe(df) #, st.session_state.group_id, st.session_state.session_id, st.session_state.player_id, st.session_state.partner_id)
 
             # Register DataFrame as 'self' view
             st.session_state.con.register('self', st.session_state.df)
@@ -468,7 +585,7 @@ def create_sidebar():
         key='game_url_input'
     )
 
-    if extract_group_id_session_id_pair_id():
+    if extract_group_id_session_id_team_id():
         st.error("Invalid game URL. Please enter a valid game URL.")
         return
 
@@ -513,24 +630,17 @@ def create_sidebar():
         on_change=session_id_on_change,
         help='Enter ffbridge session id. e.g. 107118'
     )
+    
+    st.session_state.team_id = st.sidebar.number_input(
+        'Pairs ID',
+        value=st.session_state.team_id,
+        key='sidebar_team_id',
+        on_change=team_id_on_change,
+        help='Enter ffbridge pairs id. e.g. 3976783'
+    )
 
     if st.session_state.player_id is None: # todo: not quite right. value is not updated with player_id if previously None. unsure why.
         return
-    
-    st.session_state.player_id = st.sidebar.number_input(
-        'Player ID',
-        value=st.session_state.player_id,
-        key='sidebar_player_id',
-        on_change=player_id_on_change,
-        help='Enter ffbridge player id. e.g. 246273'
-    )
-    st.session_state.partner_id = st.sidebar.number_input(
-        'Partner ID',
-        value=st.session_state.partner_id,
-        key='sidebar_partner_id',
-        on_change=partner_id_on_change,
-        help='Enter ffbridge partner id. e.g. 246273'
-    )
 
     with st.sidebar.expander('Developer Settings', False):
 
@@ -709,12 +819,14 @@ def write_report():
     # todo: need to pass the Button title to the stqdm description. this is a hack until implemented.
     st.session_state.main_section_container = st.container(border=True)
     with st.session_state.main_section_container:
-        report_title = f"Bridge Game Postmortem Report Personalized for {st.session_state.player_name} {st.session_state.player_id}" # can't use any of '():' because of href link below.
+        report_title = f"Bridge Game Postmortem Report" # can't use any of '():' because of href link below.
+        report_person = f"Personalized for {st.session_state.player_name} ({st.session_state.player_ffbId})"
         report_creator = f"Created by https://{st.session_state.game_name}.postmortem.chat"
-        report_event_info = f"{st.session_state.game_description} (event id {st.session_state.session_id})."
+        report_event_info = f"{st.session_state.organization_name} {st.session_state.game_description} (event id {st.session_state.session_id})."
         report_game_results_webpage = f"Results Page: {st.session_state.game_url}"
-        report_your_match_info = f"Your pair was {st.session_state.pair_id}{st.session_state.pair_direction} in section {st.session_state.section_name}. You played {st.session_state.player_direction}. Your partner was {st.session_state.partner_name} {st.session_state.partner_id} who played {st.session_state.partner_direction}."
+        report_your_match_info = f"Your pair was {st.session_state.team_id}{st.session_state.pair_direction} in section {st.session_state.section_name}. You played {st.session_state.player_direction}. Your partner was {st.session_state.partner_name} ({st.session_state.partner_ffbId}) who played {st.session_state.partner_direction}."
         st.markdown(f"### {report_title}")
+        st.markdown(f"#### {report_person}")
         st.markdown(f"##### {report_creator}")
         st.markdown(f"#### {report_event_info}")
         st.markdown(f"##### {report_game_results_webpage}")
@@ -722,6 +834,7 @@ def write_report():
         pdf_assets = st.session_state.pdf_assets
         pdf_assets.clear()
         pdf_assets.append(f"# {report_title}")
+        pdf_assets.append(f"#### {report_person}")
         pdf_assets.append(f"#### {report_creator}")
         pdf_assets.append(f"### {report_event_info}")
         pdf_assets.append(f"#### {report_game_results_webpage}")
@@ -825,6 +938,7 @@ def reset_game_data():
 
     # Default values for session state variables
     reset_defaults = {
+        'organization_name_default': None,
         'game_description_default': None,
         'group_id_default': None,
         'session_id_default': None,
@@ -835,7 +949,7 @@ def reset_game_data():
         'partner_name_default': None,
         'player_direction_default': None,
         'partner_direction_default': None,
-        'pair_id_default': None,
+        'team_id_default': None,
         'pair_direction_default': None,
         'opponent_pair_direction_default': None,
     }
@@ -848,6 +962,7 @@ def reset_game_data():
     # Initialize additional session state variables that depend on defaults.
     reset_session_vars = {
         'df': None,
+        'organization_name': st.session_state.organization_name_default,
         'game_description': st.session_state.game_description_default,
         'group_id': st.session_state.group_id_default,
         'session_id': st.session_state.session_id_default,
@@ -858,7 +973,7 @@ def reset_game_data():
         'partner_name': st.session_state.partner_name_default,
         'player_direction': st.session_state.player_direction_default,
         'partner_direction': st.session_state.partner_direction_default,
-        'pair_id': st.session_state.pair_id_default,
+        'team_id': st.session_state.team_id_default,
         'pair_direction': st.session_state.pair_direction_default,
         'opponent_pair_direction': st.session_state.opponent_pair_direction_default,
         #'sidebar_loaded': False,

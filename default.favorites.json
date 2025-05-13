@@ -208,7 +208,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, pct, Par, tricks, dd tricks, sd score, sd score max, sd contract max. Show those boards we declared and score > Par and score > sd score.",
-						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Pct_{Pair_Direction}, Par_{Pair_Direction}, Tricks, DD_Tricks, EV_Max_{Pair_Direction}, EV_Max_{Pair_Direction}, EV_Max_Col FROM self WHERE Boards_We_Declared = True AND Score_{Pair_Direction} > Par_{Pair_Direction} AND Score_{Pair_Direction} > EV_Max_{Pair_Direction} ORDER BY Board"
+						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Pct_{Pair_Direction}, Par_{Pair_Direction}, Tricks, DD_Tricks, EV_Max_{Pair_Direction}, EV_Max_Col FROM self WHERE Boards_We_Declared = True AND Score_{Pair_Direction} > Par_{Pair_Direction} AND Score_{Pair_Direction} > EV_Max_{Pair_Direction} ORDER BY Board"
 					}
 				]
 			},
@@ -232,7 +232,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, pct, Par, tricks, dd tricks, sd score, sd score max, sd contract max. Show those boards we played and score < Par and pct > .70.",
-						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Pct_{Pair_Direction}, Par_{Pair_Direction}, Tricks, DD_Tricks, EV_Max_{Pair_Direction}, EV_Max_{Pair_Direction}, EV_Max_Col FROM self WHERE Boards_We_Played = True AND Score_{Pair_Direction} < Par_{Pair_Direction} AND Pct_{Pair_Direction} > .70 ORDER BY Board"
+						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Pct_{Pair_Direction}, Par_{Pair_Direction}, Tricks, DD_Tricks, EV_Max_{Pair_Direction}, EV_Max_Col FROM self WHERE Boards_We_Played = True AND Score_{Pair_Direction} < Par_{Pair_Direction} AND Pct_{Pair_Direction} > .70 ORDER BY Board"
 					}
 				]
 			},
@@ -243,7 +243,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, pct, Par, tricks, dd tricks, sd score, sd score max, sd contract max. Show those boards we played and score < Par and pct < .30.",
-						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Pct_{Pair_Direction}, Par_{Pair_Direction}, Tricks, DD_Tricks, EV_Max_{Pair_Direction}, EV_Max_{Pair_Direction}, EV_Max_Col FROM self WHERE Boards_We_Played = True AND Score_{Pair_Direction} < Par_{Pair_Direction} AND Pct_{Pair_Direction} < 0.30 ORDER BY Board"
+						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Pct_{Pair_Direction}, Par_{Pair_Direction}, Tricks, DD_Tricks, EV_Max_{Pair_Direction}, EV_Max_Col FROM self WHERE Boards_We_Played = True AND Score_{Pair_Direction} < Par_{Pair_Direction} AND Pct_{Pair_Direction} < 0.30 ORDER BY Board"
 					}
 				]
 			},
@@ -253,7 +253,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, contract, pct, score, tricks, dd tricks, Par, sd score, sd score max, sd contract max. Show those boards opponent declared and score < Par and score < sd score.",
-						"sql": "SELECT Board, Contract, Pct_{Pair_Direction}, Score_{Pair_Direction}, Tricks, DD_Tricks, Par_{Pair_Direction}, EV_Max_{Pair_Direction}, EV_Max_{Pair_Direction}, EV_Max_Col FROM self WHERE Boards_Opponent_Declared = True AND Score_{Pair_Direction} < Par_{Pair_Direction} AND Score_{Pair_Direction} < EV_Max_{Pair_Direction} ORDER BY Board"
+						"sql": "SELECT Board, Contract, Pct_{Pair_Direction}, Score_{Pair_Direction}, Tricks, DD_Tricks, Par_{Pair_Direction}, EV_Max_{Pair_Direction}, EV_Max_Col FROM self WHERE Boards_Opponent_Declared = True AND Score_{Pair_Direction} < Par_{Pair_Direction} AND Score_{Pair_Direction} < EV_Max_{Pair_Direction} ORDER BY Board"
 					}
 				]
 			},
@@ -263,7 +263,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, contract, pct, score, tricks, dd tricks, Par, sd score, sd score max, sd contract max. Show those boards we declared and score > 0 and score < Par and score < sd score.",
-						"sql": "SELECT Board, Contract, Pct_{Pair_Direction}, Score_{Pair_Direction}, Tricks, DD_Tricks, Par_{Pair_Direction}, EV_Max_{Pair_Direction}, EV_Max_{Pair_Direction}, EV_Max_Col FROM self WHERE Boards_We_Declared = True AND Score_{Pair_Direction} > 0 AND Score_{Pair_Direction} < Par_{Pair_Direction} AND Score_{Pair_Direction} < EV_Max_{Pair_Direction} ORDER BY Board"
+						"sql": "SELECT Board, Contract, Pct_{Pair_Direction}, Score_{Pair_Direction}, Tricks, DD_Tricks, Par_{Pair_Direction}, EV_Max_{Pair_Direction}, EV_Max_Col FROM self WHERE Boards_We_Declared = True AND Score_{Pair_Direction} > 0 AND Score_{Pair_Direction} < Par_{Pair_Direction} AND Score_{Pair_Direction} < EV_Max_{Pair_Direction} ORDER BY Board"
 					}
 				]
 			},

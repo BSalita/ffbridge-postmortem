@@ -33,9 +33,9 @@ def convert_ffdf_to_mldf(ffdf):
     df = ffdf.select([
         pl.col('group_id'),
         pl.col('board_id'),
-        pl.col('team_session_id'),
-        pl.col('team_id'),
-        pl.col('session_id'),
+        #pl.col('team_session_id'),
+        #pl.col('team_id'),
+        #pl.col('session_id'),
         pl.col('boardNumber').alias('Board'),
         #pl.col('board_frequencies'),
         # flatten the board_frequencies column into multiple columns
@@ -55,7 +55,7 @@ def convert_ffdf_to_mldf(ffdf):
         pl.col('board_deal')
             .map_elements(PbnToN,return_dtype=pl.String)
             .alias('PBN'),
-        pl.col('boardNumber')
+        pl.col('boardNumber') # todo: check that there's no Vul already in the data.
             .map_elements(BoardNumberToVul,return_dtype=pl.UInt8)
             .replace_strict({
                 0: 'None',
@@ -87,23 +87,30 @@ def convert_ffdf_to_mldf(ffdf):
             .alias('Score'),
         (pl.col('nsNote')/100.0).alias('Pct_NS'),
         (pl.col('ewNote')/100.0).alias('Pct_EW'),
-        pl.col('player1_id'),
-        pl.col('player1_firstName'),
-        pl.col('player1_lastName'),
-        pl.col('player2_id'),
-        pl.col('player2_firstName'),
-        pl.col('player2_lastName'),
+        # is this player1_id for every row table or just the requested team? remove until understood.
+        # pl.col('team_player1_ffbId').alias('player1_id'),
+        # pl.col('team_player1_firstName').alias('player1_firstName'),
+        # pl.col('team_player1_lastName').alias('player1_lastName'),
+        # pl.col('team_player2_ffbId').alias('player2_id'),
+        # pl.col('team_player2_firstName').alias('player2_firstName'),
+        # pl.col('team_player2_lastName').alias('player2_lastName'),
         (pl.col('lineup_northPlayer_firstName')+pl.lit(' ')+pl.col('lineup_northPlayer_lastName')).alias('Player_Name_N'),
         (pl.col('lineup_eastPlayer_firstName')+pl.lit(' ')+pl.col('lineup_eastPlayer_lastName')).alias('Player_Name_E'),
         (pl.col('lineup_southPlayer_firstName')+pl.lit(' ')+pl.col('lineup_southPlayer_lastName')).alias('Player_Name_S'),
         (pl.col('lineup_westPlayer_firstName')+pl.lit(' ')+pl.col('lineup_westPlayer_lastName')).alias('Player_Name_W'),
-        pl.col('lineup_northPlayer_id').cast(pl.String).alias('Player_ID_N'),
-        pl.col('lineup_eastPlayer_id').cast(pl.String).alias('Player_ID_E'),
-        pl.col('lineup_southPlayer_id').cast(pl.String).alias('Player_ID_S'),
-        pl.col('lineup_westPlayer_id').cast(pl.String).alias('Player_ID_W'),
+        pl.col('lineup_northPlayer_id'),
+        pl.col('lineup_eastPlayer_id'),
+        pl.col('lineup_southPlayer_id'),
+        pl.col('lineup_westPlayer_id'),
+        pl.col('lineup_northPlayer_ffbId').cast(pl.String).alias('Player_ID_N'),
+        pl.col('lineup_eastPlayer_ffbId').cast(pl.String).alias('Player_ID_E'),
+        pl.col('lineup_southPlayer_ffbId').cast(pl.String).alias('Player_ID_S'),
+        pl.col('lineup_westPlayer_ffbId').cast(pl.String).alias('Player_ID_W'),
+        pl.col('lineup_segment_game_homeTeam_id').alias('team_id_home'),
         pl.col('lineup_segment_game_homeTeam_section').alias('section_id_home'),
         pl.col('lineup_segment_game_homeTeam_orientation').alias('Pair_Direction_Home'),
         pl.col('lineup_segment_game_homeTeam_startTableNumber').alias('Pair_Number_Home'),
+        pl.col('lineup_segment_game_awayTeam_id').alias('team_id_away'),
         pl.col('lineup_segment_game_awayTeam_section').alias('section_id_away'),
         pl.col('lineup_segment_game_awayTeam_orientation').alias('Pair_Direction_Away'),
         pl.col('lineup_segment_game_awayTeam_startTableNumber').alias('Pair_Number_Away'),
