@@ -162,8 +162,8 @@ def filter_dataframe(df): #, group_id, session_id, player_id, partner_id):
     full_directions_d = {'N':'north', 'E':'east', 'S':'south', 'W':'west'}
     df = df.with_columns(
         pl.col(f'lineup_{full_directions_d[st.session_state.player_direction]}Player_id').eq(pl.lit(st.session_state.player_id)).alias('Boards_I_Played'), # player_id could be numeric
-        pl.col('Declarer_ID').eq(pl.lit(str(st.session_state.player_id))).alias('Boards_I_Declared'), # player_id could be numeric
-        pl.col('Declarer_ID').eq(pl.lit(str(st.session_state.partner_id))).alias('Boards_Partner_Declared'), # partner_id could be numeric
+        pl.col('Declarer_ID').eq(pl.lit(str(st.session_state.player_ffbId))).alias('Boards_I_Declared'), # player_id could be numeric
+        pl.col('Declarer_ID').eq(pl.lit(str(st.session_state.partner_ffbId))).alias('Boards_Partner_Declared'), # partner_id could be numeric
     )
     df = df.with_columns(
         pl.col('Boards_I_Played').alias('Boards_We_Played'),
@@ -325,6 +325,49 @@ def flatten_json(nested_json, prefix=''):
     return flattened
 
 
+def concat_with_schema_unification(dfs):
+    if not dfs:
+        return None
+    
+    # Create a unified schema from all DataFrames
+    unified_schema = {}
+    
+    # First pass: collect all column names and prefer non-null types
+    for df in dfs:
+        for col_name, dtype in zip(df.columns, df.dtypes):
+            # If we haven't seen this column yet, or if the current type is non-null and the recorded one is null
+            if col_name not in unified_schema or (str(dtype) != "Null" and str(unified_schema[col_name]) == "Null"):
+                unified_schema[col_name] = dtype
+    
+    # Convert dictionary to a proper schema
+    schema = {name: dtype for name, dtype in unified_schema.items()}
+    
+    # Second pass: make all DataFrames conform to the unified schema
+    unified_dfs = []
+    for df in dfs:
+        # Create expressions for all needed columns
+        missing_cols = []
+        for col_name, dtype in schema.items():
+            if col_name not in df.columns:
+                # Add missing column with correct type
+                missing_cols.append(pl.lit(None).cast(dtype).alias(col_name))
+        
+        # Add any missing columns
+        if missing_cols:
+            df = df.with_columns(missing_cols)
+        
+        # Select and cast all columns to match the schema
+        df = df.select([
+            pl.col(col_name).cast(schema[col_name])
+            for col_name in schema.keys()
+        ])
+        
+        unified_dfs.append(df)
+    
+    # Now all DataFrames have identical schemas, so concat will work
+    return pl.concat(unified_dfs)
+
+
 def get_ffbridge_data_using_url():
 
     st.session_state.game_url = st.session_state.game_url_input
@@ -398,13 +441,14 @@ def get_ffbridge_data_using_url():
 
         # Process each team to get their scores
         teams_jsons = {}
-        for team_id in teams_df['team_id']:
-            print(f"Processing team_id: {team_id}")
+        assert not teams_df['team_id'].is_duplicated().all(), f"teams_df['team_id'] has duplicates: {teams_df['team_id']}"
+        for team_id in stqdm(teams_df['team_id'], desc='Downloading team scores...'):
+            #print(f"Processing team_id: {team_id}")
             api_urls = {
                 team_id: f"https://api-lancelot.ffbridge.fr/results/teams/{team_id}/session/{st.session_state.session_id}/scores",
             }
             for k,v in api_urls.items():
-                print(f"requesting {k}:{v}")
+                #print(f"requesting {k}:{v}")
                 request = requests.get(v)
                 request.raise_for_status()
                 teams_jsons[k] = request.json()
@@ -434,7 +478,8 @@ def get_ffbridge_data_using_url():
         for col in cols:
             print(f"col:{col}")
             if col == 'lineup': # lineup is a struct of varying types (string vs None)
-                print('bypassing lineup')
+                #continue
+                print('bypassing lineup') # error: https://ffbridge.fr/competitions/results/groups/7878/sessions/183872/pairs/8413302
                 ldf = []
                 for k,v in teams_dfs.items():
                     df = unnest_structs_recursive(pl.DataFrame(teams_dfs[k])['lineup'].to_frame())
@@ -442,7 +487,7 @@ def get_ffbridge_data_using_url():
                         pl.col(pl.Null).cast(pl.String)
                     ).select(sorted(df.columns)) # put back into original column order.
                     ldf.append(df)
-                all_pairs_dfs[col] = pl.concat(ldf)
+                all_pairs_dfs[col] = concat_with_schema_unification(ldf)
                 continue
             all_pairs_dfs[col] = pl.concat([v[col] for k,v in teams_dfs.items()]).to_frame()
             pass
@@ -460,15 +505,15 @@ def get_ffbridge_data_using_url():
             pl.lit(st.session_state.session_id).alias('session_id'),
             #pl.lit(st.session_state.team_id).alias('team_id'),
         )
-        df = df.unique(keep='first') # remove duplicated rows. Caused by two players being in partnership?
+        df = df.unique(keep='first') # remove duplicated rows. Caused by two players being in partnership (one row per player)?
 
         for direction in ['north', 'east', 'south', 'west']:
             df = df.with_columns([
                 pl.col(f'lineup_{direction}Player_id')
-                .map_elements(lambda x: id_to_ffbId_dict.get(x, None))
+                .map_elements(lambda x: id_to_ffbId_dict.get(x, None),return_dtype=pl.Int64)
                 .alias(f'lineup_{direction}Player_ffbId')
             ])
-            assert df[f'lineup_{direction}Player_ffbId'].is_not_null().all()
+            #assert df[f'lineup_{direction}Player_ffbId'].is_not_null().all() # could be None for sitout
 
         # extract a df of only the requested team_id. must be a single row.
         # using [0] because all rows of team data have identical values.
@@ -524,9 +569,10 @@ def change_game_state():
         # Fetch initial data using the URL.
         df = get_ffbridge_data_using_url()
 
-        if df['contract'].eq('').any():
-            st.error("Game data is missing contract data. Unable to continue.")
-            return True
+        # obsoleted by downloading scores for all tables.
+        # if df['contract'].eq('').any():
+        #     st.error("Game data is missing contract data. Unable to continue.")
+        #     return True
 
         if not st.session_state.use_historical_data: # historical data is already fully augmented so skip past augmentations
             if st.session_state.do_not_cache_df:

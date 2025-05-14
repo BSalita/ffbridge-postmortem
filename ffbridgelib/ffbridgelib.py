@@ -64,11 +64,17 @@ def convert_ffdf_to_mldf(ffdf):
                 3: 'Both'
         })
         .alias('Vul'),
-        pl.concat_str([
-            pl.col('contract').str.replace('NT', 'N').str.slice(0,2),
-            pl.col('declarer'),
-            pl.col('contract').str.replace('NT', 'N').str.slice(2)
-        ]).alias('Contract'),
+        pl.when((pl.col('contract').str.contains(r'^[1-7]'))) # begins with 1-7 (level)
+            .then(
+                pl.concat_str([
+                    pl.col('contract').str.replace('NT', 'N').str.slice(0,2),
+                    pl.col('declarer'),
+                    pl.col('contract').str.replace('NT', 'N').str.slice(2)
+                ]))
+            .when(pl.col('contract').eq('PASS'))
+            .then(pl.lit('PASS'))
+            .otherwise(None) # catch all for invalid contracts.
+            .alias('Contract'),
         pl.when(pl.col('result').str.starts_with('+'))
             .then(pl.col('result').str.slice(1))  # Remove '+'
             .when(pl.col('result').str.starts_with('-'))
@@ -116,18 +122,35 @@ def convert_ffdf_to_mldf(ffdf):
         pl.col('lineup_segment_game_awayTeam_startTableNumber').alias('Pair_Number_Away'),
     ])
     assert all(df['section_id_home'] == df['section_id_away'])
-    assert all(df['Pair_Direction_Home'].is_in(['NS',''])), df['Pair_Direction_Home'].value_counts() # '' is sitout
-    assert all(df['Pair_Direction_Away'].is_in(['EW',''])), df['Pair_Direction_Away'].value_counts() # '' is sitout
+    # https://ffbridge.fr/competitions/results/groups/7878/sessions/183872/pairs/8413302 shows Pair_Direction_Home can be 'NS' or 'EW' or '' (sitout).
+    #assert all(df['Pair_Direction_Home'].is_in(['NS',''])), df['Pair_Direction_Home'].value_counts() # '' is sitout
+    #assert all(df['Pair_Direction_Away'].is_in(['EW',''])), df['Pair_Direction_Away'].value_counts() # '' is sitout
     df = df.with_columns(
         pl.col('section_id_home').alias('section_name'),
         pl.col('Score_Freq_List').list.sum().sub(1).alias('MP_Top'),
-        pl.col('Pair_Direction_Home').alias('Pair_Direction_NS'),
-        pl.col('Pair_Direction_Away').alias('Pair_Direction_EW'),
-        pl.col('Pair_Number_Home').alias('Pair_Number_NS'),
-        pl.col('Pair_Number_Away').alias('Pair_Number_EW'),
-        pl.col('section_id_home')+pl.lit('_')+pl.col('Pair_Direction_Home')+pl.col('Pair_Number_Home').cast(pl.Utf8).alias('Pair_ID_NS'),
-        pl.col('section_id_away')+pl.lit('_')+pl.col('Pair_Direction_Away')+pl.col('Pair_Number_Away').cast(pl.Utf8).alias('Pair_ID_EW'),
+        #pl.col('Pair_Direction_Home').alias('Pair_Direction_NS'),
+        #pl.col('Pair_Direction_Away').alias('Pair_Direction_EW'),
+        pl.when(pl.col('Pair_Direction_Home').eq('NS'))
+            .then(pl.col('Pair_Number_Home'))
+            .otherwise(
+                pl.when(pl.col('Pair_Direction_Away').eq('NS'))
+                    .then(pl.col('Pair_Number_Away'))
+                    .otherwise(None)
+            )
+            .alias('Pair_Number_NS'),
+        pl.when(pl.col('Pair_Direction_Home').eq('EW'))
+            .then(pl.col('Pair_Number_Home'))
+            .otherwise(
+                pl.when(pl.col('Pair_Direction_Away').eq('EW'))
+                    .then(pl.col('Pair_Number_Away'))
+                    .otherwise(None)
+            )
+            .alias('Pair_Number_EW'),
+        #pl.col('section_id_home')+pl.lit('_')+pl.col('Pair_Direction_Home')+pl.col('Pair_Number_Home').cast(pl.Utf8).alias('Pair_ID_NS'),
+        #pl.col('section_id_away')+pl.lit('_')+pl.col('Pair_Direction_Away')+pl.col('Pair_Number_Away').cast(pl.Utf8).alias('Pair_ID_EW'),
     )
+    #assert df['Pair_Number_NS'].is_not_null().all()
+    #assert df['Pair_Number_EW'].is_not_null().all()
     df = df.with_columns(
         pl.struct(['Scores_List_NS', 'Scores_List_EW', 'Score_Freq_List'])
             # substitute None for adjusted scores (begin with %).
