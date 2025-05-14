@@ -467,8 +467,8 @@
 				]
 			},
 			"Scoring_Errors": {
-				"title": "Showing Possible Scoring Errors or Adjustments",
-				"help": "**Scoring errors or adjustments.**",
+				"title": "Showing Scoring Errors, Adjustments, or Missing Contracts",
+				"help": "**Scoring errors, adjusted scores, or missing contracts.**",
 				"prompts": [
 					{
 						"failed prompt": "show board, contract, score_declarer, computed_score_declarer, score_ns, score_ew when score_declarer <> computed_score_declarer or score_ns <> -score_ew sort by board.",

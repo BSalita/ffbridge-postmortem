@@ -122,14 +122,16 @@ def convert_ffdf_to_mldf(ffdf):
         pl.col('lineup_segment_game_awayTeam_startTableNumber').alias('Pair_Number_Away'),
     ])
     assert all(df['section_id_home'] == df['section_id_away'])
+
+    df = df.with_columns([
+        pl.col('section_id_home').alias('section_name'),
+        pl.col('Score_Freq_List').list.sum().sub(1).alias('MP_Top'),
+    ])
+
     # https://ffbridge.fr/competitions/results/groups/7878/sessions/183872/pairs/8413302 shows Pair_Direction_Home can be 'NS' or 'EW' or '' (sitout).
     #assert all(df['Pair_Direction_Home'].is_in(['NS',''])), df['Pair_Direction_Home'].value_counts() # '' is sitout
     #assert all(df['Pair_Direction_Away'].is_in(['EW',''])), df['Pair_Direction_Away'].value_counts() # '' is sitout
     df = df.with_columns(
-        pl.col('section_id_home').alias('section_name'),
-        pl.col('Score_Freq_List').list.sum().sub(1).alias('MP_Top'),
-        #pl.col('Pair_Direction_Home').alias('Pair_Direction_NS'),
-        #pl.col('Pair_Direction_Away').alias('Pair_Direction_EW'),
         pl.when(pl.col('Pair_Direction_Home').eq('NS'))
             .then(pl.col('Pair_Number_Home'))
             .otherwise(
@@ -149,8 +151,22 @@ def convert_ffdf_to_mldf(ffdf):
         #pl.col('section_id_home')+pl.lit('_')+pl.col('Pair_Direction_Home')+pl.col('Pair_Number_Home').cast(pl.Utf8).alias('Pair_ID_NS'),
         #pl.col('section_id_away')+pl.lit('_')+pl.col('Pair_Direction_Away')+pl.col('Pair_Number_Away').cast(pl.Utf8).alias('Pair_ID_EW'),
     )
+
+    # # Filter to keep only rows with the correct orientation
+    # df = df.filter(
+    #     (pl.col('Pair_Direction_Home').eq('NS')) & 
+    #     (pl.col('Pair_Direction_Away').eq('EW'))
+    # )
+    # # After filtering, you can simplify your column assignments
+    # df = df.with_columns([
+    #     pl.col('Pair_Number_Home').alias('Pair_Number_NS'),  # Now safe because all home are NS
+    #     pl.col('Pair_Number_Away').alias('Pair_Number_EW')   # Now safe because all away are EW
+    # ])
+
+    # fails because some boards are sitout(?).
     #assert df['Pair_Number_NS'].is_not_null().all()
     #assert df['Pair_Number_EW'].is_not_null().all()
+
     df = df.with_columns(
         pl.struct(['Scores_List_NS', 'Scores_List_EW', 'Score_Freq_List'])
             # substitute None for adjusted scores (begin with %).
