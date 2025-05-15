@@ -210,162 +210,54 @@ def extract_group_id_session_id_team_id():
     #print(f"extracted_group_id:{extracted_group_id} extracted_session_id:{extracted_session_id} extracted_team_id:{extracted_team_id}")
     return False
 
+from typing import Dict, Any, List
+from urllib.parse import urlparse
 
-def unnest_structs_recursive(df, prefix="", max_depth=10, current_depth=0):
-    """
-    Recursively unnest all struct columns in a DataFrame.
-    
-    Args:
-        df: Polars DataFrame
-        prefix: Prefix to add to column names
-        max_depth: Maximum recursion depth to prevent infinite loops
-        current_depth: Current recursion depth
-    
-    Returns:
-        DataFrame with all structs unnested
-    """
-    # Base case: stop if we reach maximum depth
-    if current_depth >= max_depth:
-        print(f"Warning: Reached maximum recursion depth ({max_depth})")
+def create_directory_structure(path: pathlib.Path) -> None:
+    """Create directory structure if it doesn't exist"""
+    pathlib.Path(path).mkdir(parents=True, exist_ok=True)
+
+def get_path_from_url(url: str) -> pathlib.Path:
+    """Extract path from URL and convert to Path object"""
+    parsed_url = urlparse(url)
+    path = pathlib.Path(parsed_url.path.lstrip('/'))
+    return path
+
+def fetch_json(url: str) -> List[Dict[str, Any]]:
+    """Fetch JSON data from the specified URL"""
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching data: {e}")
+        raise
+    except json.JSONDecodeError as e:
+        print(f"Error parsing JSON: {e}")
+        raise
+
+
+def save_json(data: List[Dict[str, Any]], file_path: pathlib.Path) -> None:
+    """Save JSON data to the specified file path"""
+    try:
+        create_directory_structure(file_path.parent)
+        json_file = file_path.with_suffix('.json')
+        json_file.write_text(json.dumps(data, indent=2), encoding='utf-8')
+        #print(f"\nJSON has been saved to {json_file}")
+    except IOError as e:
+        print(f"Error saving file: {e}")
+        raise
+
+
+def create_dataframe(data: List[Dict[str, Any]]) -> pl.DataFrame:
+    """Create a Polars DataFrame from the JSON data"""
+    try:
+        # Convert list of dictionaries directly to DataFrame
+        df = pl.DataFrame(data)
         return df
-    
-    # Find all struct columns at current level
-    struct_cols = [col for col in df.columns if df[col].dtype == pl.Struct]
-    
-    # If no struct columns left, we're done
-    if not struct_cols:
-        return df
-    
-    # Process each struct column
-    for col in struct_cols:
-        # Get the fields in the struct
-        fields = df[col].struct.fields
-        
-        # Create new field names with the column name as prefix
-        col_prefix = f"{prefix}{col}_" if prefix else f"{col}_"
-        new_field_names = [f"{col_prefix}{field}" for field in fields]
-        
-        # Rename the struct fields
-        df = df.with_columns([
-            pl.col(col).struct.rename_fields(new_field_names)
-        ])
-    
-    # Unnest all struct columns at this level
-    df = df.unnest(struct_cols)
-    
-    # Recursively unnest any new struct columns that appeared after unnesting
-    return unnest_structs_recursive(df, prefix, max_depth, current_depth + 1)
-
-
-def create_df_of_dtypes(dfs):
-    # Assuming you have a dictionary of DataFrames called 'dfs'
-    # Create a DataFrame with dtype information
-
-    # First collect all unique column names from all DataFrames
-    all_columns = set()
-    for df_name, df in dfs.items():
-        all_columns.update(df.columns)
-
-    # Create rows for the dtype DataFrame
-    rows = []
-    for df_name, df in dfs.items():
-        # Create a dictionary for this DataFrame's dtypes
-        dtype_dict = {"df_name": df_name}
-        
-        # For each possible column, add its dtype or None if column doesn't exist
-        for col in all_columns:
-            if col in df.columns:
-                # Convert dtype to string for better display
-                dtype_dict[col] = str(df[col].dtype)
-            else:
-                dtype_dict[col] = None
-        
-        rows.append(dtype_dict)
-
-    # Create the dtypes DataFrame
-    dtypes_df = pl.DataFrame(rows)
-
-    # Optionally sort columns for better readability
-    sorted_cols = ["df_name"] + sorted(list(all_columns))
-    dtypes_df = dtypes_df.select(sorted_cols)
-    return dtypes_df
-
-
-def flatten_json(nested_json, prefix=''):
-    """Flatten a nested json into a flat dictionary with dot notation for keys."""
-    flattened = {}
-    
-    for key, value in nested_json.items():
-        # Handle None values
-        if value is None:
-            flattened[f"{prefix}{key}"] = None
-        
-        # Handle dictionaries (nested objects)
-        elif isinstance(value, dict):
-            nested_flattened = flatten_json(value, prefix=f"{prefix}{key}_")
-            flattened.update(nested_flattened)
-        
-        # Handle lists
-        elif isinstance(value, list):
-            # For simplicity, we'll just join list items as strings
-            # You could handle this differently based on your needs
-            if all(isinstance(item, dict) for item in value):
-                # If list of dicts, flatten each one
-                for i, item in enumerate(value):
-                    nested_flattened = flatten_json(item, prefix=f"{prefix}{key}_{i}_")
-                    flattened.update(nested_flattened)
-            else:
-                # For simple lists, convert to string
-                flattened[f"{prefix}{key}"] = str(value)
-        
-        # Handle basic types (strings, numbers, etc.)
-        else:
-            flattened[f"{prefix}{key}"] = value
-    
-    return flattened
-
-
-def concat_with_schema_unification(dfs):
-    if not dfs:
-        return None
-    
-    # Create a unified schema from all DataFrames
-    unified_schema = {}
-    
-    # First pass: collect all column names and prefer non-null types
-    for df in dfs:
-        for col_name, dtype in zip(df.columns, df.dtypes):
-            # If we haven't seen this column yet, or if the current type is non-null and the recorded one is null
-            if col_name not in unified_schema or (str(dtype) != "Null" and str(unified_schema[col_name]) == "Null"):
-                unified_schema[col_name] = dtype
-    
-    # Convert dictionary to a proper schema
-    schema = {name: dtype for name, dtype in unified_schema.items()}
-    
-    # Second pass: make all DataFrames conform to the unified schema
-    unified_dfs = []
-    for df in dfs:
-        # Create expressions for all needed columns
-        missing_cols = []
-        for col_name, dtype in schema.items():
-            if col_name not in df.columns:
-                # Add missing column with correct type
-                missing_cols.append(pl.lit(None).cast(dtype).alias(col_name))
-        
-        # Add any missing columns
-        if missing_cols:
-            df = df.with_columns(missing_cols)
-        
-        # Select and cast all columns to match the schema
-        df = df.select([
-            pl.col(col_name).cast(schema[col_name])
-            for col_name in schema.keys()
-        ])
-        
-        unified_dfs.append(df)
-    
-    # Now all DataFrames have identical schemas, so concat will work
-    return pl.concat(unified_dfs)
+    except Exception as e:
+        print(f"Error creating DataFrame: {e}")
+        raise
 
 
 def get_ffbridge_data_using_url():
@@ -375,27 +267,33 @@ def get_ffbridge_data_using_url():
 
     try:
 
-        extract_group_id_session_id_team_id()
-        api_urls = {
-            'group_url': f"https://api-lancelot.ffbridge.fr/competitions/groups/{st.session_state.group_id}?context%5B%5D=result_status&context%5B%5D=result_data", # gets group data but no results
+        if extract_group_id_session_id_team_id():
+            return None
+
+        api_url_file_d = {
+            'group_url': (f"https://api-lancelot.ffbridge.fr/competitions/groups/{st.session_state.group_id}?context%5B%5D=result_status&context%5B%5D=result_data", f"groups/{st.session_state.group_id}"), # gets group data but no results
             #'team_url': f"https://api-lancelot.ffbridge.fr/results/teams/{st.session_state.team_id}", # gets team data but no results
-            'session_url': f"https://api-lancelot.ffbridge.fr/competitions/sessions/{st.session_state.session_id}", # gets session data but no results
-            'ranking_url': f"https://api-lancelot.ffbridge.fr/results/sessions/{st.session_state.session_id}/ranking", # gets ranking data but no results
+            'session_url': (f"https://api-lancelot.ffbridge.fr/competitions/sessions/{st.session_state.session_id}", f"sessions/{st.session_state.session_id}"), # gets session data but no results
+            'ranking_url': (f"https://api-lancelot.ffbridge.fr/results/sessions/{st.session_state.session_id}/ranking", f"rankings/{st.session_state.session_id}"), # gets ranking data but no results
         }
         #api_url = f"https://api-lancelot.ffbridge.fr/results/teams/{extracted_team_id}/session/{extracted_session_id}/scores"
         #api_url = f'https://api-lancelot.ffbridge.fr/competitions/results/groups/{extracted_group_id}/sessions/{extracted_session_id}/pairs/{extracted_team_id}'
         response_jsons = {}
         dfs = {}
-        for k,v in api_urls.items():
-            print(f"requesting {k}:{v}")
-            request = requests.get(v)
-            request.raise_for_status()
-            response_jsons[k] = request.json()
-            # Check if the request was successful and extract the data
-            if 'success' in response_jsons[k] and not response_jsons[k].get('success'):
-                raise ValueError(f"API request failed: {response_jsons[k]}")
-            
-        for k,v in api_urls.items():
+        for k,(v,cache_path) in api_url_file_d.items():
+            print(f"requesting {k}:{v}:{cache_path}")
+            file_path = pathlib.Path(st.session_state.cache_dir).joinpath(cache_path)
+            if file_path.exists():
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    response_jsons[k] = json.load(f)
+            else:
+                response_jsons[k] = fetch_json(v)
+                # Check if the request was successful and extract the data
+                if 'success' in response_jsons[k] and not response_jsons[k].get('success'):
+                    raise ValueError(f"API request failed: {response_jsons[k]}")
+                save_json(response_jsons[k], file_path)
+
+        for k,(v,cache_path) in api_url_file_d.items():
             dfs[k] = pl.DataFrame(pd.json_normalize(response_jsons[k],sep='_'))
             print(f"dfs[{k}]:{dfs[k].columns}")
             print(f"dfs[{k}]:{dfs[k].shape}")
@@ -407,6 +305,8 @@ def get_ffbridge_data_using_url():
 
         assert len(group_df) == 1, f"Expected 1 row, got {len(group_df)}"
         group_d = group_df.to_dicts()[0]
+        assert len(session_df) == 1, f"Expected 1 row, got {len(session_df)}"
+        session_d = session_df.to_dicts()[0]
 
         teams_df = teams_df.with_columns(
             pl.col(f'team_player1_id').cast(pl.Int64),
@@ -425,7 +325,7 @@ def get_ffbridge_data_using_url():
 
         # Convert to the proper format with keys and values swapped
         player1_id_to_ffbId_dict = dict(zip(
-            player1_dict['team_player1_id'],      # Now using IDs as keys 
+            player1_dict['team_player1_id'],      # Now using IDs as keys
             player1_dict['team_player1_ffbId']    # And FFB IDs as values
         ))
 
@@ -451,17 +351,26 @@ def get_ffbridge_data_using_url():
         assert not teams_df['team_id'].is_duplicated().all(), f"teams_df['team_id'] has duplicates: {teams_df['team_id']}"
         for team_id in stqdm(teams_df['team_id'], desc='Downloading team scores...'):
             #print(f"Processing team_id: {team_id}")
-            api_urls = {
-                team_id: f"https://api-lancelot.ffbridge.fr/results/teams/{team_id}/session/{st.session_state.session_id}/scores",
+            api_url_file_d = {
+                f"team_id:{team_id}": (f"https://api-lancelot.ffbridge.fr/results/teams/{team_id}/session/{st.session_state.session_id}/scores", f"scores/{team_id}_{st.session_state.session_id}.json"),
             }
-            for k,v in api_urls.items():
-                #print(f"requesting {k}:{v}")
-                request = requests.get(v)
-                request.raise_for_status()
-                request_json = request.json()
-                # Check if the request was successful and extract the data
-                if 'success' in request_json and not request_json.get('success'):
-                    raise ValueError(f"API request failed: {request_json}")
+            for k,(v,cache_path) in api_url_file_d.items():
+                print(f"requesting {k}:{v}:{cache_path}")
+                file_path = pathlib.Path(st.session_state.cache_dir).joinpath(cache_path)
+                if file_path.exists():
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        request_json = json.load(f)
+                else:
+                    request_json = fetch_json(v)
+                    # Check if the request was successful and extract the data
+                    if 'success' in request_json and not request_json.get('success'):
+                        raise ValueError(f"API request failed: {request_json}")
+                    save_json(request_json, file_path)
+                if all([b['contract'] == '' for b in request_json]):
+                    if team_id == st.session_state.team_id:
+                        raise ValueError(f"Game is missing contract data for selected team. Fatal error. {st.session_state.session_id} {session_d['label']} {v}")
+                    else:
+                        print(f"Game is missing contract data for team:{team_id} {session_d['label']} {v}")
                 teams_jsons.extend(request_json)
 
         df = pl.DataFrame(pd.json_normalize(teams_jsons,sep='_'))
@@ -541,6 +450,7 @@ def get_ffbridge_data_using_url():
         st.session_state.section_name = team_d['section']
         st.session_state.organization_name = group_d['phase_stade_organization_name']
         st.session_state.game_description = group_d['phase_stade_competitionDivision_competition_label']
+
         print(f"st.session_state.group_id:{st.session_state.group_id} st.session_state.session_id:{st.session_state.session_id} st.session_state.team_id:{st.session_state.team_id} st.session_state.player_id:{st.session_state.player_id} st.session_state.partner_id:{st.session_state.partner_id} st.session_state.player_direction:{st.session_state.player_direction} st.session_state.partner_direction:{st.session_state.partner_direction} st.session_state.opponent_pair_direction:{st.session_state.opponent_pair_direction}")
 
     except Exception as e:
@@ -575,6 +485,8 @@ def change_game_state():
 
         # Fetch initial data using the URL.
         df = get_ffbridge_data_using_url()
+        if df is None:
+            return True
 
         # obsoleted by downloading scores for all tables.
         # if df['contract'].eq('').any():
@@ -598,7 +510,7 @@ def change_game_state():
                     df = augment_df(df)
                     if df is not None:
                         st.rerun() # todo: not sure what is needed to recover from error:
-                    ffbridge_session_player_cache_dir = pathlib.Path('cache')
+                    ffbridge_session_player_cache_dir = pathlib.Path(st.session_state.cache_dir)
                     ffbridge_session_player_cache_dir.mkdir(exist_ok=True)  # Creates directory if it doesn't exist
                     ffbridge_session_player_cache_df_filename = f'cache/df-{st.session_state.session_id}-{st.session_state.player_id}.parquet'
                     ffbridge_session_player_cache_df_file = pathlib.Path(ffbridge_session_player_cache_df_filename)
@@ -967,6 +879,9 @@ def initialize_session_state():
     else:
         st.session_state.player_id = None
 
+    cache_dir = 'url_cache'
+    pathlib.Path(cache_dir).mkdir(exist_ok=True, parents=True)
+
     initialize_website_specific()
     first_time_defaults = {
         'first_time': True,
@@ -979,6 +894,7 @@ def initialize_session_state():
         'main_section_container': st.empty(),
         'app_datetime': datetime.fromtimestamp(pathlib.Path(__file__).stat().st_mtime, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S %Z'),
         'current_datetime': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        'cache_dir': cache_dir,
     }
     for key, value in first_time_defaults.items():
         st.session_state[key] = value

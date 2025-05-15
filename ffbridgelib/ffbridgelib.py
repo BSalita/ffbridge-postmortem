@@ -88,11 +88,11 @@ def convert_ffdf_to_mldf(ffdf):
             .alias('Result'),
         # not liking that only one of the two columns has a value. I prefer to have both with opposite signs.
         # although this may be an issue for director adjustments.
-        pl.when(pl.col('nsScore').str.contains(r'^\d'))
+        pl.when(pl.col('nsScore').str.contains(r'^\d+$'))
             .then(pl.col('nsScore'))
-            .when(pl.col('ewScore').str.contains(r'^\d'))
+            .when(pl.col('ewScore').str.contains(r'^\d+$'))
             .then(pl.lit('-')+pl.col('ewScore'))
-            .otherwise(pl.lit('0'))
+            .otherwise(pl.lit(None))
             .cast(pl.Int16)
             .alias('Score'),
         (pl.col('nsNote')/100.0).alias('Pct_NS'),
@@ -124,6 +124,8 @@ def convert_ffdf_to_mldf(ffdf):
         pl.col('lineup_segment_game_awayTeam_section').alias('section_id_away'),
         pl.col('lineup_segment_game_awayTeam_orientation').alias('Pair_Direction_Away'),
         pl.col('lineup_segment_game_awayTeam_startTableNumber').alias('Pair_Number_Away'),
+        #pl.col('phase_stade_competitionDivision_competition_label').alias('Game_Description'),
+        #pl.col('phase_stade_organization_name').alias('Organization_Name'),
     ])
     assert all(df['section_id_home'] == df['section_id_away'])
 
@@ -174,7 +176,7 @@ def convert_ffdf_to_mldf(ffdf):
     df = df.with_columns(
         pl.struct(['Scores_List_NS', 'Scores_List_EW', 'Score_Freq_List'])
             # substitute None for adjusted scores (begin with %).
-            .map_elements(lambda x: [None if score_ns.startswith('%') else 0 if score_ns == 'PASS' or score_ew == 'PASS' else int(score_ns) if len(score_ns) else int('-'+score_ew) for score_ns, score_ew, freq in zip(x['Scores_List_NS'], x['Scores_List_EW'], x['Score_Freq_List']) for _ in range(freq)],return_dtype=pl.List(pl.Int16))
+            .map_elements(lambda x: [None if '%' in score_ns or '%' in score_ew else 0 if score_ns == 'PASS' or score_ew == 'PASS' else int(score_ns) if len(score_ns) else int('-'+score_ew) for score_ns, score_ew, freq in zip(x['Scores_List_NS'], x['Scores_List_EW'], x['Score_Freq_List']) for _ in range(freq)],return_dtype=pl.List(pl.Int16))
             .alias('Expanded_Scores_List')
     )
     df = df.with_columns(

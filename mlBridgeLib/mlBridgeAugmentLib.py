@@ -305,7 +305,7 @@ def calculate_single_dummy_probabilities(deal, produce=100):
 # takes 1000 seconds for 100 sd calcs, or 10 sd calcs per second.
 def calculate_sd_probs(df, hrs_d, sd_productions=100, progress=None):
 
-    # calculate single dummy probabilities. if already calculated use cache value else update cache with new result.
+    # calculate single dummy probabilities. if already calculated use cache value else update e with new result.
     sd_dfs_d = {}
     unique_pbns = df['PBN'].unique(maintain_order=True) # todo: unique and not cached: if pbn not in hrs_d or 'SD' not in hrs_d[pbn] then calculate
     #print(unique_df)
