@@ -396,7 +396,7 @@ def get_ffbridge_data_using_url():
                 raise ValueError(f"API request failed: {response_jsons[k]}")
             
         for k,v in api_urls.items():
-            dfs[k] = unnest_structs_recursive(pl.DataFrame(response_jsons[k]))
+            dfs[k] = pl.DataFrame(pd.json_normalize(response_jsons[k],sep='_'))
             print(f"dfs[{k}]:{dfs[k].columns}")
             print(f"dfs[{k}]:{dfs[k].shape}")
             print(f"dfs[{k}]:{dfs[k]}")
@@ -408,11 +408,18 @@ def get_ffbridge_data_using_url():
         assert len(group_df) == 1, f"Expected 1 row, got {len(group_df)}"
         group_d = group_df.to_dicts()[0]
 
+        teams_df = teams_df.with_columns(
+            pl.col(f'team_player1_id').cast(pl.Int64),
+            pl.col(f'team_player1_ffbId').cast(pl.Int64),
+            pl.col(f'team_player2_id').cast(pl.Int64),
+            pl.col(f'team_player2_ffbId').cast(pl.Int64),
+        )
+
         print(f"Unnested teams_df columns: {teams_df.columns}")
         print(f"Unnested teams_df shape: {teams_df.shape}")
 
         # Get the column values
-        player1_dict = teams_df.select(
+        player1_dict = teams_df.drop_nulls('team_player1_ffbId').select(
             'team_player1_ffbId', 'team_player1_id'
         ).unique().to_dict(as_series=False)
 
@@ -423,7 +430,7 @@ def get_ffbridge_data_using_url():
         ))
 
         # Same for player2
-        player2_dict = teams_df.select(
+        player2_dict = teams_df.drop_nulls('team_player2_ffbId').select(
             'team_player2_ffbId', 'team_player2_id'
         ).unique().to_dict(as_series=False)
 
@@ -440,7 +447,7 @@ def get_ffbridge_data_using_url():
         print(f"id_to_ffbId_dict:{id_to_ffbId_dict}")
 
         # Process each team to get their scores
-        teams_jsons = {}
+        teams_jsons = []
         assert not teams_df['team_id'].is_duplicated().all(), f"teams_df['team_id'] has duplicates: {teams_df['team_id']}"
         for team_id in stqdm(teams_df['team_id'], desc='Downloading team scores...'):
             #print(f"Processing team_id: {team_id}")
@@ -451,52 +458,52 @@ def get_ffbridge_data_using_url():
                 #print(f"requesting {k}:{v}")
                 request = requests.get(v)
                 request.raise_for_status()
-                teams_jsons[k] = request.json()
+                request_json = request.json()
                 # Check if the request was successful and extract the data
-                if 'success' in teams_jsons[k] and not teams_jsons[k].get('success'):
-                    raise ValueError(f"API request failed: {teams_jsons[k]}")
-            
-        teams_dfs = {}  
-        for k,v in teams_jsons.items():
-            teams_dfs[k] = pl.DataFrame(v) #.drop(['eastPlayer'])
+                if 'success' in request_json and not request_json.get('success'):
+                    raise ValueError(f"API request failed: {request_json}")
+                teams_jsons.extend(request_json)
 
-        dtypes_df = create_df_of_dtypes(teams_dfs)
-        print(f"dtypes_df:{dtypes_df}")
+        df = pl.DataFrame(pd.json_normalize(teams_jsons,sep='_'))
+        # teams_dfs = {}  
+        # for k,v in teams_jsons.items():
+        #     teams_dfs[k] = pl.DataFrame(pd.json_normalize(v,sep='_')) #pl.DataFrame(v) #.drop(['eastPlayer'])
 
-        for col in dtypes_df.columns:
-            print(f"{col}:{dtypes_df[col].value_counts()}")
+        # dtypes_df = create_df_of_dtypes(teams_dfs)
+        # print(f"dtypes_df:{dtypes_df}")
 
-        # need to unnest any structs but before must rename to avoid conflicts
-        cols = None
-        for k,v in teams_dfs.items():
-            if cols is None:
-                cols = v.columns
-            else:
-                assert cols == v.columns, f"{cols} != {v.columns}"
+        # for col in dtypes_df.columns:
+        #     print(f"{col}:{dtypes_df[col].value_counts()}")
+
+        # # need to unnest any structs but before must rename to avoid conflicts
+        # cols = None
+        # for k,v in teams_dfs.items():
+        #     if cols is None:
+        #         cols = v.columns
+        #     else:
+        #         assert set(cols) == set(v.columns), set(cols)-set(v.columns)
         
-        all_pairs_dfs = {}
-        for col in cols:
-            print(f"col:{col}")
-            if col == 'lineup': # lineup is a struct of varying types (string vs None)
-                #continue
-                print('bypassing lineup') # error: https://ffbridge.fr/competitions/results/groups/7878/sessions/183872/pairs/8413302
-                ldf = []
-                for k,v in teams_dfs.items():
-                    df = unnest_structs_recursive(pl.DataFrame(teams_dfs[k])['lineup'].to_frame())
-                    df = df.with_columns(
-                        pl.col(pl.Null).cast(pl.String)
-                    ).select(sorted(df.columns)) # put back into original column order.
-                    ldf.append(df)
-                all_pairs_dfs[col] = concat_with_schema_unification(ldf)
-                continue
-            all_pairs_dfs[col] = pl.concat([v[col] for k,v in teams_dfs.items()]).to_frame()
-            pass
+        # all_pairs_dfs = {}
+        # for k,v in teams_dfs.items():
+        # for col in teams_dfs.items():
+        #     print(f"col:{col}")
+        #     if col == 'lineup': # lineup is a struct of varying types (string vs None)
+        #         #continue
+        #         print('bypassing lineup') # error: https://ffbridge.fr/competitions/results/groups/7878/sessions/183872/pairs/8413302
+        #         ldf = []
+        #         for k,v in teams_dfs.items():
+        #             df = teams_dfs[k] # unnest_structs_recursive(pl.DataFrame(teams_dfs[k])['lineup'].to_frame())
+        #             ldf.append(df)
+        #         all_pairs_dfs[col] = concat_with_schema_unification(ldf)
+        #         continue
+        #     all_pairs_dfs[col] = pl.concat([v[col] for k,v in teams_dfs.items()]).to_frame()
+        #     pass
 
-        # Print the structure to debug
-        df = pl.concat(all_pairs_dfs.values(),how='horizontal')
-        print("DataFrame columns:", df.columns)
-        df = unnest_structs_recursive(df)
-        #ShowDataFrameTable(df, key='team_and_session_df')
+        # # Print the structure to debug
+        # df = pl.concat(all_pairs_dfs.values(),how='horizontal')
+        # print("DataFrame columns:", df.columns)
+        # df = unnest_structs_recursive(df)
+        # #ShowDataFrameTable(df, key='team_and_session_df')
 
 
         #st.session_state.group_id = st.session_state.group_id # same
