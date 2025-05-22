@@ -134,7 +134,8 @@ def endplay_boards_to_df(boards_d):
     }
     assert set(board_d.keys()) == set(schema.keys()), set(board_d.keys()).symmetric_difference(set(schema.keys()))
 
-    df = pl.DataFrame(board_d,schema=schema,strict=False) # todo: complains about Player if strict=True. haven't been able to isolate why.
+    # TypeError: unexpected value while building Series of type String; found value of type Struct([Field { name: "ordering", dtype: Null }, Field { name: "name", dtype: String }, Field { name: "minwidth", dtype: String }, Field { name: "alignment", dtype: String }]): {null,"Denomination","2","R"}
+    df = pl.DataFrame(board_d,strict=False) # ,schema=schema # todo: complains about Player if strict=True. haven't been able to isolate why.
 
     # Struct columns need to be unnested.
     if 'info' in df.columns:
@@ -181,6 +182,10 @@ def endplay_boards_to_df(boards_d):
 
 # all these dicts have been copied to mlBridgeLib.py. todo: remove these but requires using import mlBridgeLib.
 Direction_to_NESW_d = {
+    0:'N',
+    1:'E',
+    2:'S',
+    3:'W',
     '0':'N',
     '1':'E',
     '2':'S',
@@ -227,6 +232,10 @@ Strain_to_CDHSN_d = {
 
 # todo: use mlBridgeLib.Vulnerability_to_Vul_d instead?
 Vulnerability_to_Vul_d = {
+    0: 'None',
+    1: 'N_S',
+    2: 'E_W',
+    3: 'Both',
     '0': 'None',
     '1': 'N_S',
     '2': 'E_W',
@@ -260,16 +269,16 @@ EpiVul_to_Vul_EW_Bool_d = {
     3: True,
 }
 
-Dbl_to_x_d = {
+Dbl_to_X_d = {
     'passed':'',
-    'doubled':'x',
-    'redoubled':'xx',
+    'doubled':'X',
+    'redoubled':'XX',
     'p':'',
-    'd':'x',
-    'r':'xx',
+    'd':'X',
+    'r':'XX',
     'p':'',
-    'x':'x',
-    'xx':'xx'
+    'x':'X',
+    'xx':'XX'
 }
 
 
@@ -287,10 +296,10 @@ def convert_endplay_df_to_mlBridge_df(df):
         pl.Series('Board',df['board_num'],pl.UInt8),
     )
     df = df.with_columns(
-        pl.Series('Dealer', df['dealer'].replace_strict(Direction_to_NESW_d,return_dtype=pl.String), pl.String),
+        pl.Series('Dealer', [Direction_to_NESW_d[d] for d in df['dealer']], pl.String, strict=False), # todo: using list comprehension instead of type error when using replace_strict().
     )
     df = df.with_columns(
-        pl.Series('Vul',df['vulnerability'].replace_strict(Vulnerability_to_Vul_d,return_dtype=pl.String),pl.String),
+        pl.Series('Vul', [Vulnerability_to_Vul_d[v] for v in df['vulnerability']], pl.String, strict=False), # todo: using list comprehension instead of type error when using replace_strict().
     )
     df = df.with_columns(
         pl.Series('iVul',df['vulnerability'].cast(pl.UInt8),pl.UInt8), # assumes input is 0 or '0', etc.
@@ -305,7 +314,7 @@ def convert_endplay_df_to_mlBridge_df(df):
     df = df.with_columns(
         # easier to use discrete replaces instead of having to slice contract (nt, pass would be a complication)
         # first NT->N and suit symbols to SHDCN
-        pl.Series('Contract',df['contract'],pl.String).str.replace('NT','N').str.replace('♠','S').str.replace('♥','H').str.replace('♦','D').str.replace('♣','C'),
+        pl.Series('Contract',df['contract'],pl.String).str.replace('NT','N').str.replace('♠','S').str.replace('♥','H').str.replace('♦','D').str.replace('♣','C').str.extract(r"^([^-+]*)", 1),
     )
     df = df.with_columns(
         pl.Series('BidLvl',df['level'].cast(pl.UInt8, strict=False),pl.UInt8), # todo: make level a uint8 in previous step.
@@ -317,10 +326,10 @@ def convert_endplay_df_to_mlBridge_df(df):
         pl.Series('trump',df['trump'].replace_strict(Strain_to_CDHSN_d,return_dtype=pl.String),pl.String),# categorical?
     )
     df = df.with_columns(
-        pl.Series('Dbl',df['penalty'].replace_strict(Dbl_to_x_d,return_dtype=pl.String),pl.String),# categorical, yes
+        pl.Series('Dbl',df['penalty'].replace_strict(Dbl_to_X_d,return_dtype=pl.String),pl.String),# categorical, yes
     )
     df = df.with_columns(
-        pl.Series('Declarer_Direction', df['declarer'].replace_strict(Direction_to_NESW_d,return_dtype=pl.String), pl.String),# categorical, yes
+        pl.Series('Declarer_Direction', [Direction_to_NESW_d[d] for d in df['dealer']], pl.String, strict=False), # todo: using list comprehension instead of type error when using replace_strict().
     )
     df = df.with_columns(
         pl.Series('Result',df['result'].cast(pl.Int8, strict=False).fill_nan(0),pl.Int8),

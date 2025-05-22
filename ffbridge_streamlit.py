@@ -57,7 +57,9 @@ sys.path.append(str(pathlib.Path.cwd().joinpath('ffbridgelib')))  # global
 import ffbridgelib
 import streamlitlib
 #import mlBridgeLib
-import mlBridgeAugmentLib # Requires "./mlBridgeLib" be in extraPaths in .vscode/settings.json
+from mlBridgeLib.mlBridgeAugmentLib import (
+    AllAugmentations,
+)
 #import mlBridgeEndplayLib
 
 
@@ -371,6 +373,7 @@ def get_ffbridge_data_using_url():
                         raise ValueError(f"Game is missing contract data for selected team. Fatal error. {st.session_state.session_id} {session_d['label']} {v}")
                     else:
                         print(f"Game is missing contract data for team:{team_id} {session_d['label']} {v}")
+                        continue
                 teams_jsons.extend(request_json)
 
         df = pl.DataFrame(pd.json_normalize(teams_jsons,sep='_'))
@@ -477,7 +480,7 @@ def get_ffbridge_data_using_url():
 
 def change_game_state():
 
-    with st.spinner('Preparing Game Analysis. Takes 2 minutes total...'):
+    with st.spinner(f'Preparing Bridge Game Postmortem Report for {st.session_state.player_id}. Takes 2 minutes total...'):
         # Use the entered URL or fallback to default.
         st.session_state.game_url = st.session_state.game_url_input.strip()
         if st.session_state.game_url is None or st.session_state.game_url.strip() == "":
@@ -672,42 +675,30 @@ def initialize_website_specific():
 # Everything below here is the standard mlBridge code.
 
 
-def perform_hand_augmentations(df, sd_productions):
-    """Wrapper for backward compatibility"""
-    def hand_augmentation_work(df, progress, **kwargs):
-        augmenter = mlBridgeAugmentLib.HandAugmenter(
-            df, 
-            {}, 
-            sd_productions=kwargs.get('sd_productions'),
-            progress=progress
-        )
-        return augmenter.perform_hand_augmentations()
-    
-    return streamlitlib.perform_queued_work(
-        df, 
-        hand_augmentation_work, 
-        work_description="Hand analysis",
-        sd_productions=sd_productions
-    )
+# this version of perform_hand_augmentations_locked() uses self for class compatibility, older versions did not.
+def perform_hand_augmentations_queue(self, hand_augmentation_work):
+    return streamlitlib.perform_queued_work(self, hand_augmentation_work, "Hand analysis")
 
 
 def augment_df(df):
-    with st.spinner('Creating hand data...'):
-        # with safe_resource(): # perform_hand_augmentations() requires a lock because of double dummy solver dll
-        #     # todo: break apart perform_hand_augmentations into dd and sd augmentations to speed up and stqdm()\
-        #     progress = st.progress(0) # pass progress bar to augmenter to show progress of long running operations
-        #     augmenter = mlBridgeAugmentLib.HandAugmenter(df,{},sd_productions=st.session_state.single_dummy_sample_count,progress=progress)
-        #     df = augmenter.perform_hand_augmentations()
-        df = perform_hand_augmentations(df, st.session_state.single_dummy_sample_count)
-    with st.spinner('Augmenting with result data...'):
-        augmenter = mlBridgeAugmentLib.ResultAugmenter(df,{})
-        df = augmenter.perform_result_augmentations()
-    with st.spinner('Augmenting with DD and SD data...'):
-        augmenter = mlBridgeAugmentLib.DDSDAugmenter(df)
-        df = augmenter.perform_dd_sd_augmentations()
-    with st.spinner('Augmenting with matchpoints and percentages data...'):
-        augmenter = mlBridgeAugmentLib.MatchPointAugmenter(df)
-        df = augmenter.perform_matchpoint_augmentations()
+    with st.spinner('Augmenting data...'):
+        augmenter = AllAugmentations(df,hrs_d={},sd_productions=st.session_state.single_dummy_sample_count,progress=st.progress(0),lock_func=perform_hand_augmentations_queue)
+        df = augmenter.perform_all_augmentations()
+    # with st.spinner('Creating hand data...'):
+    #     augmenter = HandAugmenter(df,{},sd_productions=st.session_state.single_dummy_sample_count,progress=st.progress(0),lock_func=perform_hand_augmentations_queue)
+    #     df = augmenter.perform_hand_augmentations()
+    # with st.spinner('Augmenting with result data...'):
+    #     augmenter = ResultAugmenter(df,{})
+    #     df = augmenter.perform_result_augmentations()
+    # with st.spinner('Augmenting with contract data...'):
+    #     augmenter = ScoreAugmenter(df)
+    #     df = augmenter.perform_score_augmentations()
+    # with st.spinner('Augmenting with DD and SD data...'):
+    #     augmenter = DDSDAugmenter(df)
+    #     df = augmenter.perform_dd_sd_augmentations()
+    # with st.spinner('Augmenting with matchpoints and percentages data...'):
+    #     augmenter = MatchPointAugmenter(df)
+    #     df = augmenter.perform_matchpoint_augmentations()
     return df
 
 

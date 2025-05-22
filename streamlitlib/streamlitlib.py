@@ -28,15 +28,14 @@ def safe_resource():
         'queue': queue.Queue()  # FIFO queue
     }
 
-def perform_queued_work(df, work_fn, work_description="Work", **work_kwargs):
+# this version of perform_queued_work() uses self for class compatibility, older versions did not.
+def perform_queued_work(self, work_fn, work_description):
     """
     Perform work in a FIFO queue with progress tracking.
     
     Args:
-        df: DataFrame to process
         work_fn: Callable that takes df and **work_kwargs as arguments
         work_description: Description of work for status messages
-        **work_kwargs: Additional arguments to pass to work_fn
     """
     # Create empty placeholders
     status_placeholder = st.empty()
@@ -76,7 +75,7 @@ def perform_queued_work(df, work_fn, work_description="Work", **work_kwargs):
         progress = st.progress(0)
         
         # Call the work function with progress bar and other arguments
-        df = work_fn(df, progress=progress, **work_kwargs)
+        df = work_fn()
 
     finally:
         if acquired:
