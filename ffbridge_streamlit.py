@@ -463,7 +463,9 @@ def get_ffbridge_data_using_url():
         st.session_state.session_id = st.session_state.session_id_default
         st.session_state.team_id = st.session_state.team_id_default
         st.session_state.player_id = st.session_state.player_id_default
+        st.session_state.player_ffbId = st.session_state.player_ffbId_default
         st.session_state.partner_id = st.session_state.partner_id_default
+        st.session_state.partner_ffbId = st.session_state.partner_ffbId_default
         st.session_state.player_name = st.session_state.player_name_default
         st.session_state.partner_name = st.session_state.partner_name_default
         st.session_state.player_direction = st.session_state.player_direction_default
@@ -480,7 +482,7 @@ def get_ffbridge_data_using_url():
 
 def change_game_state():
 
-    with st.spinner(f'Preparing Bridge Game Postmortem Report for {st.session_state.player_id}. Takes 2 minutes total...'):
+    with st.spinner(f'Preparing Bridge Game Postmortem Report. Takes 2 minutes total...'):
         # Use the entered URL or fallback to default.
         st.session_state.game_url = st.session_state.game_url_input.strip()
         if st.session_state.game_url is None or st.session_state.game_url.strip() == "":

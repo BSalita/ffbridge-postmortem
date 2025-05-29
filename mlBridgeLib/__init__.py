@@ -17,7 +17,9 @@ from mlBridgeLib.mlBridgeLib import (
     PlayerDirectionToPairDirection,
     NextPosition,
     PairDirectionToOpponentPairDirection,
-    score
+    score,
+    ContractTypeFromContract,
+    ContractType
 )
 
 # List of all possible contract strings
