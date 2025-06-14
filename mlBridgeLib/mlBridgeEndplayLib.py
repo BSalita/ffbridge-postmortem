@@ -140,6 +140,17 @@ def endplay_boards_to_df(boards_d):
     # Struct columns need to be unnested.
     if 'info' in df.columns:
         df = df.unnest('info') # if derived from lin files: unnest 'info' (Struct(5)) into Player_[NESW] columns.
+        if 'ScoreTable' in df.columns:
+            st_dfs = []
+            for i,b in enumerate(boards_in_lin_file):
+                st_df = pl.DataFrame(b.info.ScoreTable['rows'],schema=[h['name'] for h in b.info.ScoreTable['headers']],orient="row")
+                st_df = st_df.with_columns(pl.lit(b.board_num).alias('board_num'))
+                st_df = st_df.select(['board_num'] + [col for col in st_df.columns if col != 'board_num'])
+                st_dfs.append(st_df)
+            st_df = pl.concat(st_dfs)
+            # Explode the main DataFrame by joining with ScoreTable data
+            df = df.join(st_df, on='board_num', how='inner')
+            # todo: use exploded columns ['Contract', 'Declarer', 'Result'] to replace 'denom', 'penalty', 'trump', 'contract', 'level', 'bid_denom', 'bid_penalty', 'bid_trump', 'bid_contract', 'bid_level'
 
     # rename columns. some derive from lin->endplay, others from pbn->endplay
     # todo: after renaming, cast to preferred type.

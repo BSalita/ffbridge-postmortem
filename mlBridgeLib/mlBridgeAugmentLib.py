@@ -3,8 +3,8 @@
 
 # todo:
 # assert that column names don't exist in df.columns for all column creation functions.
-# refactor: HandAugmenter -> TableAugmenter -> ContractAugmenter -> DD_SD_Augmenter -> ResultAugmenter -> MatchpointAugmenter
 # refactor when should *_Dcl columns be created? At end of each func, class, class of it's own?
+# if a column already exists, print a message and skip creation.
 
 import polars as pl
 from collections import defaultdict
@@ -95,29 +95,73 @@ def Augment_Metric_By_Suits(metrics: pl.DataFrame, metric: str, dtype: pl.DataTy
     return metrics
 
 
+def update_hrs_cache_df(hrs_cache_df: pl.DataFrame, new_df: pl.DataFrame) -> pl.DataFrame:
+    # Print initial row counts
+    print(f"hrs_cache_df rows: {hrs_cache_df.height}")
+    print(f"new_df rows: {new_df.height}")
+    
+    # Calculate which rows will be added vs replaced
+    existing_pbns = set(hrs_cache_df['PBN'].to_list())
+    new_pbns = set(new_df['PBN'].to_list())
+    
+    pbns_to_replace = existing_pbns & new_pbns  # intersection
+    pbns_to_add = new_pbns - existing_pbns      # difference
+    
+    print(f"Rows to be replaced: {len(pbns_to_replace)}")
+    print(f"Rows to be added: {len(pbns_to_add)}")
+    print(f"Expected final row count: {hrs_cache_df.height + len(pbns_to_add)}")
+    
+    # check for differing dtypes
+    common_cols = set(hrs_cache_df.columns) & set(new_df.columns)
+    dtype_diffs = {
+        col: (hrs_cache_df[col].dtype, new_df[col].dtype)
+        for col in common_cols
+        if hrs_cache_df[col].dtype != new_df[col].dtype and new_df[col].dtype != pl.Null
+    }
+    assert len(dtype_diffs) == 0, f"Differing dtypes: {dtype_diffs}"
+
+    # Update existing rows (only columns from new_df)
+    hrs_cache_df = hrs_cache_df.update(new_df, on='PBN')
+    
+    # Add missing columns to new_df ONLY for new rows
+    missing_columns = set(hrs_cache_df.columns) - set(new_df.columns)
+    new_rows = new_df.join(hrs_cache_df.select('PBN'), on='PBN', how='anti')
+    if new_rows.height > 0:
+        new_rows = new_rows.with_columns([
+            pl.lit(None).alias(col) for col in missing_columns
+        ])
+        hrs_cache_df = pl.concat([hrs_cache_df, new_rows.select(hrs_cache_df.columns)])
+        print(f"Added {len(missing_columns)} missing columns to {new_rows.height} new rows")
+    
+    print(f"Final hrs_cache_df rows: {hrs_cache_df.height}")
+    print(f"Net rows added: {len(pbns_to_add)}")
+    
+    return hrs_cache_df
+
+
 # calculate dict of contract result scores. each column contains (non-vul,vul) scores for each trick taken. sets are always penalty doubled.
 def calculate_scores() -> Tuple[Dict[Tuple, int], Dict[Tuple, int], pl.DataFrame]:
 
     scores_d = {}
     all_scores_d = {(None,None,None,None,None):0} # PASS
 
-    suit_to_denom = [Denom.clubs, Denom.diamonds, Denom.hearts, Denom.spades, Denom.nt]
-    for suit_char in 'SHDCN':
-        suit_index = 'CDHSN'.index(suit_char) # [3,2,1,0,4]
-        denom = suit_to_denom[suit_index]
+    strain_to_denom = [Denom.clubs, Denom.diamonds, Denom.hearts, Denom.spades, Denom.nt]
+    for strain_char in 'SHDCN':
+        strain_index = 'CDHSN'.index(strain_char) # [3,2,1,0,4]
+        denom = strain_to_denom[strain_index]
         for level in range(1,8): # contract level
             for tricks in range(14):
                 result = tricks-6-level
                 # sets are always penalty doubled
-                scores_d[(level,suit_char,tricks,False)] = Contract(level=level,denom=denom,declarer=Player.north,penalty=Penalty.passed if result>=0 else Penalty.doubled,result=result).score(Vul.none)
-                scores_d[(level,suit_char,tricks,True)] = Contract(level=level,denom=denom,declarer=Player.north,penalty=Penalty.passed if result>=0 else Penalty.doubled,result=result).score(Vul.both)
+                scores_d[(level,strain_char,tricks,False)] = Contract(level=level,denom=denom,declarer=Player.north,penalty=Penalty.passed if result>=0 else Penalty.doubled,result=result).score(Vul.none)
+                scores_d[(level,strain_char,tricks,True)] = Contract(level=level,denom=denom,declarer=Player.north,penalty=Penalty.passed if result>=0 else Penalty.doubled,result=result).score(Vul.both)
                 # calculate all possible scores
-                all_scores_d[(level,suit_char,tricks,False,'')] = Contract(level=level,denom=denom,declarer=Player.north,penalty=Penalty.passed,result=result).score(Vul.none)
-                all_scores_d[(level,suit_char,tricks,False,'X')] = Contract(level=level,denom=denom,declarer=Player.north,penalty=Penalty.doubled,result=result).score(Vul.none)
-                all_scores_d[(level,suit_char,tricks,False,'XX')] = Contract(level=level,denom=denom,declarer=Player.north,penalty=Penalty.redoubled,result=result).score(Vul.none)
-                all_scores_d[(level,suit_char,tricks,True,'')] = Contract(level=level,denom=denom,declarer=Player.north,penalty=Penalty.passed,result=result).score(Vul.both)
-                all_scores_d[(level,suit_char,tricks,True,'X')] = Contract(level=level,denom=denom,declarer=Player.north,penalty=Penalty.doubled,result=result).score(Vul.both)
-                all_scores_d[(level,suit_char,tricks,True,'XX')] = Contract(level=level,denom=denom,declarer=Player.north,penalty=Penalty.redoubled,result=result).score(Vul.both)
+                all_scores_d[(level,strain_char,tricks,False,'')] = Contract(level=level,denom=denom,declarer=Player.north,penalty=Penalty.passed,result=result).score(Vul.none)
+                all_scores_d[(level,strain_char,tricks,False,'X')] = Contract(level=level,denom=denom,declarer=Player.north,penalty=Penalty.doubled,result=result).score(Vul.none)
+                all_scores_d[(level,strain_char,tricks,False,'XX')] = Contract(level=level,denom=denom,declarer=Player.north,penalty=Penalty.redoubled,result=result).score(Vul.none)
+                all_scores_d[(level,strain_char,tricks,True,'')] = Contract(level=level,denom=denom,declarer=Player.north,penalty=Penalty.passed,result=result).score(Vul.both)
+                all_scores_d[(level,strain_char,tricks,True,'X')] = Contract(level=level,denom=denom,declarer=Player.north,penalty=Penalty.doubled,result=result).score(Vul.both)
+                all_scores_d[(level,strain_char,tricks,True,'XX')] = Contract(level=level,denom=denom,declarer=Player.north,penalty=Penalty.redoubled,result=result).score(Vul.both)
 
     # create score dataframe from dict
     sd = defaultdict(list)
@@ -154,7 +198,6 @@ def calc_double_dummy_deals(deals: List[Deal], batch_size: int = 40, output_prog
         result_tables = calc_all_tables(deals[b:b+batch_size])
         all_result_tables.extend(result_tables)
     if output_progress: 
-
         if progress:
             progress.progress(100,f"100%: Double dummies calculated for {len(deals)} unique deals.")
             progress.empty() # hmmm, this removes the progress bar so fast that 100% message won't be seen.
@@ -163,18 +206,47 @@ def calc_double_dummy_deals(deals: List[Deal], batch_size: int = 40, output_prog
     return all_result_tables
 
 
-
-def calculate_ddtricks_par_scores(df: pl.DataFrame, hrs_d: Dict[str, Any], scores_d: Dict[Tuple, int], output_progress: bool = True, progress: Optional[Any] = None) -> Tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
+# takes 10000/hour
+# easier to combine calculations of double dummy and par scores into one function. Otherwise, we would need to calculate par scores from columns.
+def calculate_ddtricks_par_scores(hrs_df: pl.DataFrame, hrs_cache_df: pl.DataFrame, max_adds: Optional[int] = None, output_progress: bool = True, progress: Optional[Any] = None) -> pl.DataFrame:
 
     # Calculate double dummy and par
-    unique_pbns = df['PBN'].unique(maintain_order=True)
-    pbns = [pbn for pbn in unique_pbns if pbn not in hrs_d or 'DD' not in hrs_d[pbn]]
-    deals = [Deal(pbn) for pbn in pbns]
-    assert all([pbn == dpbn.to_pbn() for pbn,dpbn in zip(pbns,deals)]) # usually a sort order issue which should have been fixed in previous step
-    unique_dd_tables = calc_double_dummy_deals(deals, output_progress=output_progress, progress=progress)
-    unique_dd_tables_d = {deal.to_pbn():rt for deal,rt in zip(deals,unique_dd_tables)}
+    print(f"{hrs_df.height=}")
+    print(f"{hrs_cache_df.height=}")
+    assert hrs_df['PBN'].null_count() == 0, "PBNs in df must be non-null"
+    assert hrs_cache_df['PBN'].null_count() == 0, "PBNs in hrs_cache_df must be non-null"
+    unique_hrs_df = hrs_df.unique(subset=['PBN']) # could be non-unique PBN with difference Dealer, Vul.
+    print(f"{len(unique_hrs_df)=}")
+    unique_hrs_df_pbns = unique_hrs_df['PBN'] # could be non-unique PBN with difference Dealer, Vul.
+    print(f"{len(unique_hrs_df_pbns)=}")
+    hrs_cache_with_nulls_df = hrs_cache_df.filter(pl.col('DD_N_C').is_null() | pl.col('ParScore').is_null())
+    print(f"{len(hrs_cache_with_nulls_df)=}")
+    hrs_cache_with_nulls_pbns = hrs_cache_with_nulls_df['PBN']
+    print(f"{len(hrs_cache_with_nulls_pbns)=}")
+    unique_hrs_cache_with_nulls_pbns = hrs_cache_with_nulls_pbns.unique()
+    print(f"{len(unique_hrs_cache_with_nulls_pbns)=}")
+    
+    # FIXED: Correct the logic
+    hrs_cache_all_pbns = set(hrs_cache_df['PBN'])
+    pbns_to_add = set(unique_hrs_df_pbns) - hrs_cache_all_pbns  # In hrs_df but NOT in hrs_cache_df
+    print(f"{len(pbns_to_add)=}")
+    pbns_to_replace = set(unique_hrs_df_pbns).intersection(set(unique_hrs_cache_with_nulls_pbns))  # In both, with nulls in hrs_cache_df
+    print(f"{len(pbns_to_replace)=}")
+    pbns_to_process = pbns_to_add.union(pbns_to_replace)
+    print(f"{len(pbns_to_process)=}")
+    
+    if max_adds is not None:
+        pbns_to_process = list(pbns_to_process)[:max_adds]
+        print(f"limit: {max_adds=} {len(pbns_to_process)=}")
+    
+    cleaned_pbns = [Deal(pbn) for pbn in pbns_to_process]
+    assert all([pbn == dpbn.to_pbn() for pbn,dpbn in zip(pbns_to_process,cleaned_pbns)]), [(pbn,dpbn.to_pbn()) for pbn,dpbn in zip(pbns_to_process,cleaned_pbns) if pbn != dpbn.to_pbn()] # usually a sort order issue which should have been fixed in previous step
+    unique_dd_tables = calc_double_dummy_deals(cleaned_pbns, output_progress=output_progress, progress=progress)
+    print(f"{len(unique_dd_tables)=}")
+    unique_dd_tables_d = {deal.to_pbn():rt for deal,rt in zip(cleaned_pbns,unique_dd_tables)}
+    print(f"{len(unique_dd_tables_d)=}")
 
-    # Create dataframe of par scores using double dummy
+    # todo: use versions in mlBridgeLib
     VulToEndplayVul_d = { # convert mlBridgeLib Vul to endplay Vul
         'None':Vul.none,
         'Both':Vul.both,
@@ -188,47 +260,49 @@ def calculate_ddtricks_par_scores(df: pl.DataFrame, hrs_d: Dict[str, Any], score
         'W':Player.west
     }
 
-    par_scores_ns = []
-    par_scores_ew = []
-    par_contracts = []
-    flattened_dd_rows = []
-    for pbn, dealer, vul in df[('PBN','Dealer','Vul')].rows():
-        if pbn not in hrs_d:
-            hrs_d[pbn] = {}
-        if 'DD' not in hrs_d[pbn]:
-            hrs_d[pbn]['DD'] = unique_dd_tables_d[pbn]
-        rt = hrs_d[pbn]['DD']
-        # middle arg is board number (if int) otherwise enum vul. Must use Vul.find(v) because some boards have random (vul,dealer).
-        parlist = par(rt, VulToEndplayVul_d[vul], DealerToEndPlayDealer_d[dealer])
-        # there may be multiple par scores for a given pbn. pbn's may have different (dealer,vul) combinations.
-        if 'Par' not in hrs_d[pbn]:
-            hrs_d[pbn]['Par'] = {}
-        hrs_d[pbn]['Par'][(dealer,vul)] = parlist
-        par_scores_ns.append(parlist.score)
-        par_scores_ew.append(-parlist.score)
-        par_contracts.append([', '.join([str(contract.level) + 'SHDCN'[int(contract.denom)] + contract.declarer.abbr + contract.penalty.abbr + ('' if contract.result == 0 else '+'+str(contract.result) if contract.result > 0 else str(contract.result)) for contract in parlist])])
-        # convert endplay's dd table to df by flattening each dd table into rows.
-        flattened_row = [item for sublist in zip(*rt.to_list()) for item in sublist]
-        flattened_dd_rows.append(flattened_row)
-    par_df = pl.DataFrame({'Par_NS': par_scores_ns, 'Par_EW': par_scores_ew, 'ParContract': par_contracts},orient='row')
+    # Create dataframe of par scores using double dummy
+    # FIXED: Use hrs_df for Dealer/Vul since it has complete data
+    d = defaultdict(list)
+    dd_columns = {f'DD_{direction}_{suit}':pl.UInt8 for suit in 'SHDCN' for direction in 'NESW'}
 
-    # Create column names
-    columns = {f'DD_{direction}_{suit}':pl.UInt8 for direction in 'NESW' for suit in 'SHDCN'}
+    # Get Dealer/Vul from appropriate source (either hrs_df or hrs_cache_df) for each PBN type
+    source_rows = []
+    if pbns_to_add:
+        source_rows.extend(hrs_df.filter(pl.col('PBN').is_in(list(pbns_to_add)))[['PBN','Dealer','Vul']].unique().rows())
+    if pbns_to_replace:
+        source_rows.extend(hrs_cache_df.filter(pl.col('PBN').is_in(list(pbns_to_replace)))[['PBN','Dealer','Vul']].unique().rows())
+    print(f"pbns_to_add: {len(pbns_to_add)=}")
+    print(f"pbns_to_replace: {len(pbns_to_replace)=}")
+    print(f"source_rows: {len(source_rows)=}")
+    for pbn, dealer, vul in source_rows:
+        if pbn not in unique_dd_tables_d:
+            continue
+        dd_rows = sum(unique_dd_tables_d[pbn].to_list(), []) # flatten dd_table
+        d['PBN'].append(pbn)
+        for col,dd in zip(dd_columns, dd_rows):
+            d[col].append(dd)
+        d['Dealer'].append(dealer)
+        d['Vul'].append(vul)
+        parlist = par(unique_dd_tables_d[pbn], VulToEndplayVul_d[vul], DealerToEndPlayDealer_d[dealer])
+        d['ParScore'].append(parlist.score)
+        d['ParNumber'].append(parlist._data.number)
+        contracts = [{
+            "Level": str(contract.level),
+            "Strain": 'SHDCN'[int(contract.denom)],
+            "Doubled": contract.penalty.abbr,
+            "Pair_Direction": 'NS' if contract.declarer.abbr in 'NS' else 'EW',
+            "Result": contract.result
+        } for contract in parlist]
+        d['ParContracts'].append(contracts)
 
-    # Create the DataFrame
-    DD_Tricks_df = pl.DataFrame(flattened_dd_rows, schema=columns, orient='row')
-
-    dd_ns_ew_columns = [
-        pl.max_horizontal(f"DD_{pair[0]}_{strain}",f"DD_{pair[1]}_{strain}").alias(f"DD_{pair}_{strain}")
-        for pair in ['NS','EW']
-        for strain in "SHDCN"
-    ]
-    DD_Tricks_df = DD_Tricks_df.with_columns(dd_ns_ew_columns)
-
-    dd_score_cols = [[scores_d[(level,suit,tricks,vul == 'Both' or (vul != 'None' and direction in vul))] for tricks,vul in zip(DD_Tricks_df['_'.join(['DD',direction,suit])],df['Vul'])] for direction in 'NESW' for suit in 'SHDCN' for level in range(1, 8)]
-    dd_score_df = pl.DataFrame(dd_score_cols, schema=['_'.join(['DD_Score', str(l) + s, d]) for d in 'NESW' for s in 'SHDCN' for l in range(1, 8)])
-    
-    return DD_Tricks_df, par_df, dd_score_df
+    # Create a DataFrame using only the keys in dictionary d while maintaining the schema from hrs_cache_df
+    filtered_schema = {k: hrs_cache_df[k].dtype for k, v in hrs_cache_df.schema.items() if k in d}
+    print(f"filtered_schema: {filtered_schema}")
+    error_filtered_schema = {k: None for k, v in d.items() if k not in hrs_cache_df.columns}
+    print(f"error_filtered_schema: {error_filtered_schema}")
+    assert len(error_filtered_schema) == 0, f"error_filtered_schema: {error_filtered_schema}"
+    dd_par_df = pl.DataFrame(d, schema=filtered_schema)
+    return dd_par_df
 
 
 def constraints(deal: Deal) -> bool:
@@ -295,48 +369,69 @@ def calculate_single_dummy_probabilities(deal: str, produce: int = 100) -> Tuple
 #     return sd_cache_d
 
 
-# takes 1000 seconds for 100 sd calcs, or 10 sd calcs per second.
-def calculate_sd_probs(df: pl.DataFrame, hrs_d: Dict[str, Any], sd_productions: int = 100, progress: Optional[Any] = None) -> Tuple[Dict[str, pl.DataFrame], pl.DataFrame]:
+# performs at 10000/hr
+def calculate_sd_probs(df: pl.DataFrame, hrs_cache_df: pl.DataFrame, sd_productions: int = 100, max_adds=None, progress: Optional[Any] = None) -> Tuple[Dict[str, pl.DataFrame], pl.DataFrame]:
 
     # calculate single dummy probabilities. if already calculated use cache value else update e with new result.
+    sd_d = {}
     sd_dfs_d = {}
-    unique_pbns = df['PBN'].unique(maintain_order=True) # todo: unique and not cached: if pbn not in hrs_d or 'SD' not in hrs_d[pbn] then calculate
-    #print(unique_df)
-    for i,pbn in enumerate(unique_pbns):
+    assert hrs_cache_df.height == hrs_cache_df['PBN'].n_unique(), "PBNs in hrs_cache_df must be unique"
+    pbns_to_add = set(df['PBN'])-set(hrs_cache_df['PBN'])
+    print(f"{len(pbns_to_add)=}")
+    pbns_to_replace = set(hrs_cache_df.filter(pl.col('PBN').is_in(df['PBN'].to_list()) & pl.col('Probs_Trials').is_null())['PBN'].to_list())
+    print(f"{len(pbns_to_replace)=}")
+    assert hrs_cache_df.filter(pl.col('PBN').is_in(pbns_to_replace) & pl.col('Probs_Trials').is_null()).height == len(pbns_to_replace), "PBN not a valid replacement"
+    pbns_to_process = pbns_to_add.union(pbns_to_replace)
+    print(f"{len(pbns_to_process)=}")
+    if max_adds is not None:
+        pbns_to_process = list(pbns_to_process)[:max_adds]
+        print(f"limit: {max_adds=} {len(pbns_to_process)=}")
+    cleaned_pbns = [Deal(pbn) for pbn in pbns_to_process]
+    assert all([pbn == dpbn.to_pbn() for pbn,dpbn in zip(pbns_to_process,cleaned_pbns)]), [(pbn,dpbn.to_pbn()) for pbn,dpbn in zip(pbns_to_process,cleaned_pbns) if pbn != dpbn.to_pbn()] # usually a sort order issue which should have been fixed in previous step
+    print(f"processing time assuming 10000/hour:{len(pbns_to_process)/10000} hours")
+    for i,pbn in enumerate(pbns_to_process):
         if progress:
-            percent_complete = int(i*100/len(unique_pbns))
-            progress.progress(percent_complete,f"{percent_complete}%: Single dummies calculated for {i} of {len(unique_pbns)} unique deals using {sd_productions} samples per deal. This step takes 30 seconds...")
+            percent_complete = int(i*100/len(pbns_to_process))
+            progress.progress(percent_complete,f"{percent_complete}%: Single dummies calculated for {i} of {len(pbns_to_process)} unique deals using {sd_productions} samples per deal. This step takes 30 seconds...")
         else:
             if i < 10 or i % 10000 == 0:
-                percent_complete = int(i*100/len(unique_pbns))
-                print(f"{percent_complete}%: Single dummies calculated for {i} of {len(unique_pbns)} unique deals using {sd_productions} samples per deal.")
-        if pbn not in hrs_d:
-            hrs_d[pbn] = {}
-        if 'SD' not in hrs_d[pbn]:
-            #print(pbn)
-            if not progress and (i < 10 or i % 10000 == 0):
-                t = time.time()
-            sd_dfs_d[pbn], hrs_d[pbn]['SD'] = calculate_single_dummy_probabilities(pbn, sd_productions) # all combinations of declarer pair direction, declarer direciton, suit, tricks taken
-            if not progress and (i < 10 or i % 10000 == 0):
-                print(f"calculate_single_dummy_probabilities: time:{time.time()-t} seconds")
-            #error
+                percent_complete = int(i*100/len(pbns_to_process))
+                print(f"{percent_complete}%: Single dummies calculated for {i} of {len(pbns_to_process)} unique deals using {sd_productions} samples per deal.")
+        if not progress and (i < 10 or i % 10000 == 0):
+            t = time.time()
+        sd_dfs_d[pbn], sd_d[pbn] = calculate_single_dummy_probabilities(pbn, sd_productions) # all combinations of declarer pair direction, declarer direciton, suit, tricks taken
+        if not progress and (i < 10 or i % 10000 == 0):
+            print(f"calculate_single_dummy_probabilities: time:{time.time()-t} seconds")
+        #error
     if progress:
-        progress.progress(100,f"100%: Single dummies calculated for {len(unique_pbns)} of {len(unique_pbns)} unique deals using {sd_productions} samples per deal.")
+            progress.progress(100,f"100%: Single dummies calculated for {len(pbns_to_process)} of {len(pbns_to_process)} unique deals using {sd_productions} samples per deal.")
     else:
-        print(f"100%: Single dummies calculated for {len(unique_pbns)} of {len(unique_pbns)} unique deals using {sd_productions} samples per deal.")
+        print(f"100%: Single dummies calculated for {len(pbns_to_process)} of {len(pbns_to_process)} unique deals using {sd_productions} samples per deal.")
 
     # create single dummy trick taking probability distribution columns
     sd_probs_d = defaultdict(list)
-    for pbn in df['PBN']:
-        productions, sd_d = hrs_d[pbn]['SD']
-        for (pair_direction,declarer_direction,suit),probs in sd_d.items():
+    for pbn, v in sd_d.items():
+        productions, probs_d = v
+        sd_probs_d['PBN'].append(pbn)
+        sd_probs_d['Probs_Trials'].append(productions)
+        for (pair_direction,declarer_direction,suit),probs in probs_d.items():
             #print(pair_direction,declarer_direction,suit)
             for i,t in enumerate(probs):
                 sd_probs_d['_'.join(['Probs',pair_direction,declarer_direction,suit,str(i)])].append(t)
     # st.write(sd_probs_d)
     sd_probs_df = pl.DataFrame(sd_probs_d,orient='row')
+
+    # update sd_df with sd_probs_df # doesn't work because sd_df isn't updated unless returned.
+    # if sd_df.is_empty():
+    #     sd_df = sd_probs_df
+    # else:
+    #     assert set(sd_df['PBN']).isdisjoint(set(sd_probs_df['PBN']))
+    #     assert set(sd_df.columns) == (set(sd_probs_df.columns))
+    #     sd_df = pl.concat([sd_df, sd_probs_df.select(sd_df.columns)]) # must reorder columns to match sd_df
+
     if progress:
         progress.empty()
+
     return sd_dfs_d, sd_probs_df
 
 
@@ -359,28 +454,30 @@ def create_scores_df_with_vul(scores_df: pl.DataFrame) -> pl.DataFrame:
     return df_scores.with_columns(exploded_columns).drop(df_scores.columns)
 
 
-def get_cached_sd_data(pbn: str, hrs_d: Dict[str, Any]) -> Dict[str, Union[str, float]]:
-    sd_data = hrs_d[pbn]['SD'][1]
-    row_data = {'PBN': pbn}
-    for (pair_direction, declarer_direction, strain), probs in sd_data.items():
-        col_prefix = f"{pair_direction}_{declarer_direction}_{strain}"
-        for i, prob in enumerate(probs):
-            row_data[f"{col_prefix}_{i}"] = prob
-    return row_data
+# def get_cached_sd_data(pbn: str, hrs_d: Dict[str, Any]) -> Dict[str, Union[str, float]]:
+#     sd_data = hrs_d[pbn]['SD'][1]
+#     row_data = {'PBN': pbn}
+#     for (pair_direction, declarer_direction, strain), probs in sd_data.items():
+#         col_prefix = f"{pair_direction}_{declarer_direction}_{strain}"
+#         for i, prob in enumerate(probs):
+#             row_data[f"{col_prefix}_{i}"] = prob
+#     return row_data
 
 
-def calculate_sd_expected_values(df: pl.DataFrame, hrs_d: Dict[str, Any], scores_df: pl.DataFrame) -> pl.DataFrame:
+def calculate_sd_expected_values(df: pl.DataFrame, scores_df: pl.DataFrame) -> pl.DataFrame:
 
     # retrieve probabilities from cache
-    sd_probs = [get_cached_sd_data(pbn, hrs_d) for pbn in df['PBN']]
+    #sd_probs = [get_cached_sd_data(pbn, hrs_d) for pbn in df['PBN']]
 
     # Create a DataFrame from the extracted sd probs (frequency distribution of tricks).
-    sd_df = pl.DataFrame(sd_probs)
+    #sd_df = pl.DataFrame(sd_probs)
 
+    # todo: look for other places where this is called. duplicated code?
     scores_df_vuls = create_scores_df_with_vul(scores_df)
 
+    # takes 2m for 4m rows,5m for 7m rows
     # Define the combinations
-    # todo: move this to globals? but beware that globals can create weirdness with streamlit.
+    # todo: make global function
     pair_directions = ['NS', 'EW']
     declarer_directions = 'NESW'
     strains = 'SHDCN'
@@ -389,8 +486,8 @@ def calculate_sd_expected_values(df: pl.DataFrame, hrs_d: Dict[str, Any], scores
     vuls = ['NV','V']
 
     # Perform the multiplication
-    result = sd_df.select([
-        pl.col(f'{pair_direction}_{declarer_direction}_{strain}_{taken}').mul(score).alias(f'{pair_direction}_{declarer_direction}_{strain}_{level}_{vul}_{taken}_{score}')
+    df = df.with_columns([
+        pl.col(f'Probs_{pair_direction}_{declarer_direction}_{strain}_{taken}').mul(score).alias(f'EV_{pair_direction}_{declarer_direction}_{strain}_{level}_{vul}_{taken}_{score}')
         for pair_direction in pair_directions
         for declarer_direction in pair_direction #declarer_directions
         for strain in strains
@@ -398,13 +495,12 @@ def calculate_sd_expected_values(df: pl.DataFrame, hrs_d: Dict[str, Any], scores
         for vul in vuls
         for taken, score in zip(tricks, scores_df_vuls[f'Score_{level}{strain}_{vul}'])
     ])
-
     #print("Results with prob*score:")
     #display(result)
 
     # Add a column for the sum (expected value)
-    result = result.with_columns([
-        pl.sum_horizontal(pl.col(f'^{pair_direction}_{declarer_direction}_{strain}_{level}_{vul}_\\d+_.*$')).alias(f'EV_{pair_direction}_{declarer_direction}_{strain}_{level}_{vul}')
+    df = df.with_columns([
+        pl.sum_horizontal(pl.col(f'^EV_{pair_direction}_{declarer_direction}_{strain}_{level}_{vul}_\\d+_.*$')).alias(f'EV_{pair_direction}_{declarer_direction}_{strain}_{level}_{vul}')
         for pair_direction in pair_directions
         for declarer_direction in pair_direction #declarer_directions
         for strain in strains
@@ -413,7 +509,7 @@ def calculate_sd_expected_values(df: pl.DataFrame, hrs_d: Dict[str, Any], scores
     ])
 
     #print("\nResults with expected value:")
-    return result
+    return df
 
 
 # calculate EV max scores for various regexes including all vulnerabilities. also create columns of the column names of the max values.
@@ -491,6 +587,14 @@ def convert_contract_to_declarer(df: pl.DataFrame) -> List[Optional[str]]:
     return [None if c is None or c == 'PASS' else c[2] for c in df['Contract']] # extract declarer from contract
 
 
+def convert_contract_to_pair_declarer(df: pl.DataFrame) -> List[Optional[str]]:
+    return [None if c is None or c == 'PASS' else 'NS' if c[2] in 'NS' else 'EW' for c in df['Contract']] # extract declarer from contract
+
+
+def convert_contract_to_vul_declarer(df: pl.DataFrame) -> List[Optional[str]]:
+    return [None if c is None or c == 'PASS' else ns if c[2] in 'NS' else ew for c,ns,ew in zip(df['Contract'],df['Vul_NS'],df['Vul_EW'])] # extract declarer from contract
+
+
 def convert_contract_to_level(df: pl.DataFrame) -> List[Optional[int]]:
     return [None if c is None or c == 'PASS' else int(c[0]) for c in df['Contract']] # extract level from contract
 
@@ -528,19 +632,56 @@ def convert_contract_to_DD_Tricks_Dummy(df: pl.DataFrame) -> List[Optional[int]]
 
 
 def convert_contract_to_DD_Score_Ref(df: pl.DataFrame) -> pl.DataFrame:
+    # create a column which contains the name of the column which contains the double dummy score for the contract.
     # could use pl.str_concat() instead
     df = df.with_columns(
         (pl.lit('DD_Score_')+pl.col('BidLvl').cast(pl.String)+pl.col('BidSuit')+pl.lit('_')+pl.col('Declarer_Direction')).alias('DD_Score_Refs'),
     )
-    ddscore_ns = []
-    for i,(d,ref) in enumerate(zip(df['Declarer_Direction'],df['DD_Score_Refs'])):
-        if ref is None:
-            ddscore_ns.append(0)
-        else:
-            ddscore_ns.append(df[ref][i] if d in 'NS' else -df[ref][i])
-    df = df.with_columns(pl.Series('DD_Score_NS',ddscore_ns,pl.Int16))
-    df = df.with_columns(pl.col('DD_Score_NS').neg().alias('DD_Score_EW'))
-    df = df.with_columns(pl.when(pl.col('Declarer_Direction').is_in(['N','S'])).then(pl.col('DD_Score_NS')).otherwise(pl.col('DD_Score_EW')).alias('DD_Score_Declarer'))
+    all_scores_d, scores_d, scores_df = calculate_scores()
+    # Create all DD_Score columns
+    df = df.with_columns([
+        pl.struct([f"DD_{direction}_{strain}", f"Vul_{pair_direction}"])
+        .map_elements(
+            lambda r, lvl=level, strn=strain, dir=direction, pdir=pair_direction: 
+                scores_d.get((lvl, strn, r[f"DD_{dir}_{strn}"], r[f"Vul_{pdir}"]), None),
+            return_dtype=pl.Int16
+        )
+        .alias(f"DD_Score_{level}{strain}_{direction}")
+        for level in range(1, 8)
+        for strain in mlBridgeLib.CDHSN
+        for direction, pair_direction in [('N','NS'), ('E','EW'), ('S','NS'), ('W','EW')]
+    ])
+
+    # Create list of all DD_Score column names
+    dd_score_columns = [f"DD_Score_{level}{strain}_{direction}" 
+                        for level in range(1, 8)
+                        for strain in mlBridgeLib.CDHSN  
+                        for direction in mlBridgeLib.NESW]
+    # Create DD_Score_Declarer using struct with all columns
+    df = df.with_columns([
+        pl.struct(['BidLvl', 'BidSuit', 'Declarer_Direction'] + dd_score_columns)
+        .map_elements(
+            lambda r: None if r['Declarer_Direction'] is None else r[f"DD_Score_{r['BidLvl']}{r['BidSuit']}_{r['Declarer_Direction']}"],
+            return_dtype=pl.Int16
+        )
+        .alias('DD_Score_Declarer')
+    ])
+
+    df = df.with_columns(
+        pl.when(pl.col('Declarer_Pair_Direction').eq('NS'))
+            .then(pl.col('DD_Score_Declarer'))
+            .when(pl.col('Declarer_Pair_Direction').eq('EW'))
+            .then(pl.col('DD_Score_Declarer').neg())
+            .otherwise(None)
+            .alias('DD_Score_NS'),
+        
+        pl.when(pl.col('Declarer_Pair_Direction').eq('EW'))
+            .then(pl.col('DD_Score_Declarer'))
+            .when(pl.col('Declarer_Pair_Direction').eq('NS'))
+            .then(pl.col('DD_Score_Declarer').neg())
+            .otherwise(None)
+            .alias('DD_Score_EW')
+    )
     return df
 
 # todo: implement this
@@ -574,7 +715,6 @@ def Perform_Legacy_Renames(df: pl.DataFrame) -> pl.DataFrame:
         pl.col('W').alias('Player_Name_W'),
         pl.col('Declarer_Name').alias('Name_Declarer'),
         pl.col('Declarer_ID').alias('Number_Declarer'), #  todo: rename to 'Declarer_ID'?
-        pl.col('Declarer_Direction').replace_strict(PlayerDirectionToPairDirection).alias('Declarer_Pair_Direction'),
         pl.concat_list(['N', 'S']).alias('Player_Names_NS'),
         pl.concat_list(['E', 'W']).alias('Player_Names_EW'),
         # EV legacy renames
@@ -655,6 +795,16 @@ def CardsToHCP(df: pl.DataFrame) -> pl.DataFrame:
     ]
     df = df.with_columns(hcp_partnership_expr)
 
+    # Step 4: Calculate HCP for partnerships by suit
+    hcp_partnership_suit_expr = [
+        (pl.col(f'HCP_N_{s}') + pl.col(f'HCP_S_{s}')).alias(f'HCP_NS_{s}')
+        for s in 'SHDC'
+    ] + [
+        (pl.col(f'HCP_E_{s}') + pl.col(f'HCP_W_{s}')).alias(f'HCP_EW_{s}')
+        for s in 'SHDC'
+    ]
+    df = df.with_columns(hcp_partnership_suit_expr)
+
     return df
 
 
@@ -700,7 +850,19 @@ def CardsToQuickTricks(df: pl.DataFrame) -> pl.DataFrame:
     ]
     
     # Apply partnership QT calculations
-    return df.with_columns(partnership_qt)
+    df = df.with_columns(partnership_qt)
+    
+    # Calculate partnership QT by suit
+    partnership_qt_suit = [
+        (pl.col(f'QT_N_{s}') + pl.col(f'QT_S_{s}')).alias(f'QT_NS_{s}')
+        for s in 'SHDC'
+    ] + [
+        (pl.col(f'QT_E_{s}') + pl.col(f'QT_W_{s}')).alias(f'QT_EW_{s}')
+        for s in 'SHDC'
+    ]
+    
+    # Apply partnership QT by suit calculations
+    return df.with_columns(partnership_qt_suit)
 
 
 def calculate_LoTT(df: pl.DataFrame) -> pl.DataFrame:
@@ -967,6 +1129,13 @@ class HandAugmenter:
                 .with_columns([
                     (pl.col('DP_N')+pl.col('DP_S')).alias('DP_NS'),
                     (pl.col('DP_E')+pl.col('DP_W')).alias('DP_EW'),
+                ])
+                .with_columns([
+                    (pl.col(f'DP_N_{s}') + pl.col(f'DP_S_{s}')).alias(f'DP_NS_{s}')
+                    for s in 'SHDC'
+                ] + [
+                    (pl.col(f'DP_E_{s}') + pl.col(f'DP_W_{s}')).alias(f'DP_EW_{s}')
+                    for s in 'SHDC'
                 ]),
                 self.df
             )
@@ -1070,10 +1239,12 @@ class HandAugmenter:
 
 
 class DD_SD_Augmenter:
-    def __init__(self, df: pl.DataFrame, hrs_d: Optional[Dict[str, Any]] = None, sd_productions: int = 40, progress: Optional[Any] = None, lock_func: Optional[Callable[..., pl.DataFrame]] = None):
+    def __init__(self, df: pl.DataFrame, hrs_cache_df: pl.DataFrame, sd_productions: int = 40, max_adds: Optional[int] = None, output_progress: Optional[bool] = True, progress: Optional[Any] = None, lock_func: Optional[Callable[..., pl.DataFrame]] = None):
         self.df = df
-        self.hrs_d = hrs_d if hrs_d is not None else {}
+        self.hrs_cache_df = hrs_cache_df
         self.sd_productions = sd_productions
+        self.max_adds = max_adds
+        self.output_progress = output_progress
         self.progress = progress
         self.lock_func = lock_func
 
@@ -1085,42 +1256,55 @@ class DD_SD_Augmenter:
 
     def _process_scores_and_tricks(self) -> pl.DataFrame:
         all_scores_d, scores_d, scores_df = self._time_operation("calculate_scores", calculate_scores)
-        DD_Tricks_df, par_df, dd_score_df = self._time_operation(
+        dd_par_df = self._time_operation(
             "calculate_ddtricks_par_scores", 
             calculate_ddtricks_par_scores, 
-            self.df, self.hrs_d, scores_d, progress=self.progress
+            self.df, self.hrs_cache_df, self.max_adds, self.output_progress, self.progress
         )
-        sd_dfs_d, sd_probs_df = self._time_operation(
+
+        if not dd_par_df.is_empty():
+            self.hrs_cache_df = update_hrs_cache_df(self.hrs_cache_df, dd_par_df)
+
+        sd_dfs_d, sd_df = self._time_operation(
             "calculate_sd_probs",
             calculate_sd_probs,
-            self.df, self.hrs_d, self.sd_productions, self.progress
+            self.df, self.hrs_cache_df, self.sd_productions, self.max_adds, self.progress
         )
-        sd_ev_df = self._time_operation(
+
+        if not sd_df.is_empty():
+            self.hrs_cache_df = update_hrs_cache_df(self.hrs_cache_df, sd_df)
+
+        self.df = self.df.join(self.hrs_cache_df, on=['PBN','Dealer','Vul'], how='inner') # on='PBN', how='left' or on=['PBN','Dealer','Vul'], how='inner'
+
+        self.df = self._time_operation(
             "calculate_sd_expected_values",
             calculate_sd_expected_values,
-            self.df, self.hrs_d, scores_df
+            self.df, scores_df
         )
-        best_contracts_df = self._time_operation("create_best_contracts", create_best_contracts, sd_ev_df)
-        
-        self.df = pl.concat(
-            [self.df, DD_Tricks_df, par_df, dd_score_df, sd_probs_df, sd_ev_df, best_contracts_df],
-            how='horizontal'
-        )
-        return scores_df
 
-    def perform_dd_sd_augmentations(self) -> pl.DataFrame:
-        self.lock_func(self, self.perform_dd_sd_augmentations_queue_up)
-        return self.df
+        best_contracts_df = create_best_contracts(self.df)
+        assert self.df.height == best_contracts_df.height, f"{self.df.height} != {best_contracts_df.height}"
+        self.df = pl.concat([self.df, best_contracts_df], how='horizontal')
+        del best_contracts_df        
+
+        return self.df, self.hrs_cache_df #, scores_df
+
+    def perform_dd_sd_augmentations(self) -> Tuple[pl.DataFrame, pl.DataFrame]:
+        if self.lock_func is None:
+            self.df, self.hrs_cache_df = self.perform_dd_sd_augmentations_queue_up()
+        else:
+            self.df, self.hrs_cache_df = self.lock_func(self, self.perform_dd_sd_augmentations_queue_up)
+        return self.df, self.hrs_cache_df
 
     def perform_dd_sd_augmentations_queue_up(self) -> pl.DataFrame:
         """Main method to perform all double dummy and single dummy augmentations"""
         t_start = time.time()
         print(f"Starting DD/SD trick augmentations")
         
-        self._process_scores_and_tricks()
+        self.df, self.hrs_cache_df = self._process_scores_and_tricks()
         
         print(f"DD/SD trick augmentations complete: {time.time() - t_start:.2f} seconds")
-        return self.df
+        return self.df, self.hrs_cache_df
 
 
 class AllContractsAugmenter:
@@ -1157,15 +1341,31 @@ class AllContractsAugmenter:
     def _create_ct_booleans(self) -> None:
         if 'CT_N_C_Game' not in self.df.columns:
             ct_boolean_columns = [
-                pl.col(f"CT_{direction}_{strain}").eq(pl.lit(contract))
-                .alias(f"CT_{direction}_{strain}_{contract}")
+                pl.col(f"CT_{direction}_{strain}").eq(pl.lit(contract_type))
+                .alias(f"CT_{direction}_{strain}_{contract_type}")
                 for direction in "NESW"
                 for strain in "SHDCN"
-                for contract in ["Pass","Game","SSlam","GSlam","Partial"]
+                for contract_type in ["Pass","Game","SSlam","GSlam","Partial"]
             ]
             self.df = self._time_operation(
                 "create CT boolean columns",
                 lambda df: df.with_columns(ct_boolean_columns),
+                self.df
+            )
+            
+        # Create CT boolean columns for pair directions (NS and EW)
+        if 'CT_NS_C_Game' not in self.df.columns:
+            ct_pair_boolean_columns = [
+                (pl.col(f"CT_{pair_direction[0]}_{strain}_{contract_type}") | 
+                 pl.col(f"CT_{pair_direction[1]}_{strain}_{contract_type}"))
+                .alias(f"CT_{pair_direction}_{strain}_{contract_type}")
+                for pair_direction in ["NS", "EW"]
+                for strain in "SHDCN"
+                for contract_type in ["Pass","Game","SSlam","GSlam","Partial"]
+            ]
+            self.df = self._time_operation(
+                "create CT pair boolean columns",
+                lambda df: df.with_columns(ct_pair_boolean_columns),
                 self.df
             )
 
@@ -1212,6 +1412,8 @@ class FinalContractAugmenter:
             "convert_contract_parts",
             lambda df: df.with_columns([
                 pl.Series('Declarer_Direction', convert_contract_to_declarer(df), pl.String, strict=False),
+                pl.Series('Declarer_Pair_Direction', convert_contract_to_pair_declarer(df), pl.String, strict=False),
+                pl.Series('Vul_Declarer', convert_contract_to_vul_declarer(df), pl.Boolean, strict=False),
                 pl.Series('BidLvl', convert_contract_to_level(df), pl.UInt8, strict=False),
                 pl.Series('BidSuit', convert_contract_to_strain(df), pl.String, strict=False),
                 pl.Series('Dbl', convert_contract_to_dbl(df), pl.String, strict=False),
@@ -1322,7 +1524,7 @@ class FinalContractAugmenter:
             lambda df: df.with_columns(max_expressions).with_columns([
                 pl.max_horizontal('EV_Max_NS','EV_Max_EW').alias('EV_Max'),
                 pl.max_horizontal('EV_Max_Col_NS','EV_Max_Col_EW').alias('EV_Max_Col'),
-                pl.when(pl.col('Declarer_Direction').is_in(['N','S'])).then(pl.col('EV_Max_NS')).otherwise(pl.col('EV_Max_EW')).alias('EV_Max_Declarer'),
+                pl.when(pl.col('Declarer_Pair_Direction').eq('NS')).then(pl.col('EV_Max_NS')).otherwise(pl.col('EV_Max_EW')).alias('EV_Max_Declarer'),
             ]),
             self.df
         )
@@ -1400,11 +1602,11 @@ class FinalContractAugmenter:
                 #     pl.col('Score').neg().alias('Score_EW')
                 # ]),
                 lambda df: df.with_columns([
-                    pl.when(pl.col('Declarer_Direction').is_in(['N', 'S']))
+                    pl.when(pl.col('Declarer_Pair_Direction').eq('NS'))
                     .then(pl.col('Score'))
                     .otherwise(-pl.col('Score'))
                     .alias('Score_NS'),
-                    pl.when(pl.col('Declarer_Direction').is_in(['E', 'W']))
+                    pl.when(pl.col('Declarer_Pair_Direction').eq('EW'))
                     .then(pl.col('Score'))
                     .otherwise(-pl.col('Score'))
                     .alias('Score_EW')
@@ -1457,6 +1659,7 @@ class FinalContractAugmenter:
 
 
     def _create_position_columns(self) -> None:
+        # these augmentations should not already exist.
         assert 'Direction_OnLead' not in self.df.columns
         assert 'Opponent_Pair_Direction' not in self.df.columns
         assert 'Direction_Dummy' not in self.df.columns
@@ -1467,8 +1670,7 @@ class FinalContractAugmenter:
         assert 'EV_Score_Col_Declarer' not in self.df.columns
         assert 'Score_Declarer' not in self.df.columns
         assert 'Par_Declarer' not in self.df.columns
-        assert 'Vul_Declarer' not in self.df.columns
-
+ 
         self.df = self._time_operation(
             "create position columns",
             lambda df: df.with_columns([
@@ -1497,11 +1699,7 @@ class FinalContractAugmenter:
                 .then(pl.col('Par_NS'))
                 .otherwise(pl.col('Par_EW'))
                 .alias('Par_Declarer'),
-                
-                ((pl.col('Declarer_Pair_Direction').eq('NS') & pl.col('Vul_NS')) | 
-                 (pl.col('Declarer_Pair_Direction').eq('EW') & pl.col('Vul_EW')))
-                .alias('Vul_Declarer'),
-                
+               
                 *[
                     # Note: this is how to create a column name to dynamically choose a value from multiple columns on a row-by-row basis.
                     # For each t (0 ... 13), build a new column which looks up the value
@@ -1541,20 +1739,14 @@ class FinalContractAugmenter:
                 pl.struct(['Direction_NotOnLead', 'Player_ID_N', 'Player_ID_E', 'Player_ID_S', 'Player_ID_W']).map_elements(
                     lambda r: None if r['Direction_NotOnLead'] is None else r[f"Player_ID_{r["Direction_NotOnLead"]}"],
                     return_dtype=pl.String
-                ).alias('NotOnLead'),
-            ])
-            .with_columns([
-                pl.struct(['Declarer_Pair_Direction', 'Vul_NS', 'Vul_EW']).map_elements(
-                    lambda r: None if r['Declarer_Pair_Direction'] is None else r[f'Vul_{r["Declarer_Pair_Direction"]}'],
-                        return_dtype=pl.Boolean
-                    ).alias('Vul_Declarer'),
-                ]),
+                ).alias('NotOnLead')
+            ]),
             self.df
         )
 
     def _create_board_result_columns(self) -> None:
         print(self.df.filter(pl.col('Result').is_null() | pl.col('Tricks').is_null())
-              ['Contract','Declarer_Direction', 'Vul_Declarer','iVul','Score_NS','BidLvl','Result','Tricks'])
+              ['Contract','Declarer_Direction','Vul_Declarer','iVul','Score_NS','BidLvl','Result','Tricks'])
         
         all_scores_d, scores_d, scores_df = calculate_scores() # todo: put this in __init__?
         
@@ -1626,9 +1818,9 @@ class FinalContractAugmenter:
         self._create_contract_types()
         self._create_declarer_columns()
         self._create_result_columns()
+        self._create_score_columns()
         self._create_dd_columns()
         self._create_ev_columns()
-        self._create_score_columns()
         self._create_score_diff_columns()
         self._create_lott() # todo: would be interesting to create lott for all contracts and then move into AllContractsAugmenter
         self._perform_legacy_renames()
@@ -1695,7 +1887,7 @@ class MatchPointAugmenter:
             self.df = self._time_operation(
                 "create Declarer_Pct",
                 lambda df: df.with_columns(
-                    pl.when(pl.col('Declarer_Direction').is_in(['N','S']))
+                    pl.when(pl.col('Declarer_Pair_Direction').eq('NS'))
                     .then('Pct_NS')
                     .otherwise('Pct_EW')
                     .alias('Declarer_Pct')
@@ -1839,35 +2031,77 @@ class IMPAugmenter:
         return self.df
 
 
-class AllAugmentations:
+class AllHandRecordAugmentations:
     def __init__(self, df: pl.DataFrame, 
-                 hrs_d: Optional[Dict[str, Any]] = None, 
+                 hrs_cache_df: Optional[pl.DataFrame] = None, 
                  sd_productions: int = 40, 
+                 max_adds: Optional[int] = None,
+                 output_progress: Optional[bool] = True,
                  progress: Optional[Any] = None,
                  lock_func: Optional[Callable[..., pl.DataFrame]] = None):
         """Initialize the AllAugmentations class with a DataFrame and optional parameters.
         
         Args:
             df: The input DataFrame to augment
-            hrs_d: Optional dictionary for hand records
+            hrs_cache_df: dataframe of cached computes
             sd_productions: Number of single dummy productions to generate
+            max_adds: Maximum number of adds to generate
+            output_progress: Whether to output progress
             progress: Optional progress indicator object
             lock_func: Optional function for thread safety
         """
         self.df = df
-        self.hrs_d = hrs_d if hrs_d is not None else {}
+        self.hrs_cache_df = hrs_cache_df
         self.sd_productions = sd_productions
+        self.max_adds = max_adds
+        self.output_progress = output_progress
         self.progress = progress
         self.lock_func = lock_func
+
+        # instance initialization
+
+        # Double dummy tricks for each player and strain
+        dd_cols = {f"DD_{p}_{s}": pl.UInt8 for p in 'NESW' for s in 'CDHSN'}
+
+        # Single dummy probabilities. Note that the order of declarers and suits must match the original schema.
+        # The declarer order was found to be N, S, W, E from inspecting the original schema.
+        probs_cols = {f"Probs_{pair}_{declarer}_{s}_{i}": pl.Float64 for pair in ['NS', 'EW'] for declarer in 'NESW' for s in 'CDHSN' for i in range(14)}
+
+        # Columns that appear after DD columns and before probability columns
+        schema_cols = {
+            'PBN': pl.String,
+            'Dealer': pl.String,
+            'Vul': pl.String,
+            **dd_cols,
+            'ParScore': pl.Int16,
+            'ParNumber': pl.Int8,
+            'ParContracts': pl.List(pl.Struct({
+                'Level': pl.String, 
+                'Strain': pl.String, 
+                'Doubled': pl.String, 
+                'Pair_Direction': pl.String, 
+                'Result': pl.Int16
+            })),
+            'Probs_Trials': pl.Int64,
+            **probs_cols,
+        }
+
+        # Convert the dict to a Polars Schema for a valid comparison
+        hrs_cache_df_schema = pl.Schema(schema_cols)
+
+        if hrs_cache_df is None:
+            self.hrs_cache_df = pl.DataFrame(schema=hrs_cache_df_schema)
+        else:
+            assert set(self.hrs_cache_df.schema.items()) == set(hrs_cache_df_schema.items()), f"hrs_cache_df schema {self.hrs_cache_df.schema} does not match expected schema {hrs_cache_df_schema}"
         
-    def perform_all_augmentations(self) -> pl.DataFrame:
-        """Execute all augmentation steps in the correct order.
+    def perform_all_hand_record_augmentations(self) -> pl.DataFrame:
+        """Execute all hand record augmentation steps. Input is a fully cleaned hand record DataFrame.
         
         Returns:
-            The fully augmented DataFrame
+            The fully augmented hand record DataFrame.
         """
         t_start = time.time()
-        print(f"Starting all augmentations on DataFrame with {len(self.df)} rows")
+        print(f"Starting all hand record augmentations on DataFrame with {len(self.df)} rows")
         
         # Step 1: Deal-level augmentations
         deal_augmenter = DealAugmenter(self.df)
@@ -1880,16 +2114,49 @@ class AllAugmentations:
         # Step 3: Double dummy and single dummy augmentations
         dd_sd_augmenter = DD_SD_Augmenter(
             self.df, 
-            self.hrs_d, 
+            self.hrs_cache_df,  
             self.sd_productions, 
-            self.progress, 
+            self.max_adds, 
+            self.output_progress,
+            self.progress,
             self.lock_func
         )
-        self.df = dd_sd_augmenter.perform_dd_sd_augmentations()
+        self.df, self.hrs_cache_df = dd_sd_augmenter.perform_dd_sd_augmentations()
+
+        # todo: move this somewhere more sensible.
+        self.df = self.df.with_columns(pl.col('ParScore').alias('Par_NS'))
+        self.df = self.df.with_columns(pl.col('ParScore').neg().alias('Par_EW'))
+        
+        # todo: move this somewhere more sensible.
+        # Create DD columns for pair directions and strains e.g. DD_NS_S
+        dd_pair_columns = [
+            pl.max_horizontal(f'DD_{pair_direction[0]}_{strain}', f'DD_{pair_direction[1]}_{strain}').alias(f'DD_{pair_direction}_{strain}')
+            for pair_direction in ['NS', 'EW']
+            for strain in 'SHDCN'
+        ]
+        self.df = self.df.with_columns(dd_pair_columns)
         
         # Step 4: All contract augmentations
         hand_augmenter = AllContractsAugmenter(self.df)
         self.df = hand_augmenter.perform_all_contracts_augmentations()
+
+        print(f"All hand records augmentations completed in {time.time() - t_start:.2f} seconds")
+        
+        return self.df, self.hrs_cache_df
+
+
+class AllBoardResultsAugmentations:
+    def __init__(self, df: pl.DataFrame):
+        self.df = df
+
+    def perform_all_board_results_augmentations(self) -> pl.DataFrame:
+        """Execute all board results augmentation steps. Input is a fully augmented hand record DataFrame.
+        
+        Returns:
+            The fully joined and augmented hand record and board results DataFrame.
+        """
+        t_start = time.time()
+        print(f"Starting all board results augmentations on DataFrame with {len(self.df)} rows")
         
         # Step 5: Final contract augmentations
         hand_augmenter = FinalContractAugmenter(self.df)
@@ -1903,6 +2170,36 @@ class AllAugmentations:
         imp_augmenter = IMPAugmenter(self.df)
         self.df = imp_augmenter.perform_imp_augmentations()
         
-        print(f"All augmentations complete in {time.time() - t_start:.2f} seconds")
+        print(f"All board results augmentations completed in {time.time() - t_start:.2f} seconds")
         
         return self.df
+
+
+class AllAugmentations:
+    def __init__(self, df: pl.DataFrame, hrs_cache_df: Optional[pl.DataFrame] = None, sd_productions: int = 40, max_adds: Optional[int] = None, output_progress: Optional[bool] = True, progress: Optional[Any] = None, lock_func: Optional[Callable[..., pl.DataFrame]] = None):
+        self.df = df
+        self.hrs_cache_df = hrs_cache_df
+        self.sd_productions = sd_productions
+        self.max_adds = max_adds
+        self.output_progress = output_progress
+        self.progress = progress
+        self.lock_func = lock_func
+
+    def perform_all_augmentations(self) -> pl.DataFrame:
+        """Execute all augmentation steps.
+        
+        Returns:
+            The fully joined and augmented hand record and board results DataFrame.
+        """
+        t_start = time.time()
+        print(f"Starting all augmentations on DataFrame with {len(self.df)} rows")
+
+        hand_record_augmenter = AllHandRecordAugmentations(self.df, self.hrs_cache_df, self.sd_productions, self.max_adds, self.output_progress, self.progress, self.lock_func)
+        self.df, self.hrs_cache_df = hand_record_augmenter.perform_all_hand_record_augmentations()
+        board_results_augmenter = AllBoardResultsAugmentations(self.df)
+        self.df = board_results_augmenter.perform_all_board_results_augmentations()
+
+        print(f"All augmentations completed in {time.time() - t_start:.2f} seconds")
+
+        return self.df, self.hrs_cache_df
+    

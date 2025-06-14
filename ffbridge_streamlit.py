@@ -684,8 +684,8 @@ def perform_hand_augmentations_queue(self, hand_augmentation_work):
 
 def augment_df(df):
     with st.spinner('Augmenting data...'):
-        augmenter = AllAugmentations(df,hrs_d={},sd_productions=st.session_state.single_dummy_sample_count,progress=st.progress(0),lock_func=perform_hand_augmentations_queue)
-        df = augmenter.perform_all_augmentations()
+        augmenter = AllAugmentations(df,None,sd_productions=st.session_state.single_dummy_sample_count,progress=st.progress(0),lock_func=perform_hand_augmentations_queue)
+        df, hrs_cache_df = augmenter.perform_all_augmentations()
     # with st.spinner('Creating hand data...'):
     #     augmenter = HandAugmenter(df,{},sd_productions=st.session_state.single_dummy_sample_count,progress=st.progress(0),lock_func=perform_hand_augmentations_queue)
     #     df = augmenter.perform_hand_augmentations()

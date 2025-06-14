@@ -39,7 +39,7 @@ from endplay.dds import par, calc_all_tables
 
 # declare module read-only variables
 CDHS = 'CDHS' # string ordered by suit rank - low to high
-CDHSN = CDHS+'N' # string ordered by strain
+CDHSN = 'CDHSN' # string ordered by suit rank - low to high including N for no trump
 NSHDC = 'NSHDC' # order by highest score value. useful for idxmax(). coincidentally reverse of CDHSN.
 SHDC = 'SHDC' # Hands, PBN, board_record_string (brs) ordering
 NSEW = 'NSEW' # double dummy solver ordering
@@ -407,8 +407,9 @@ def brs_to_pbn(brs,void='',ten='T'):
     r = r'S(.*)H(.*)D(.*)C(.*)'
     rs = r*4
     suits = [suit for suit in re.match(rs,brs).groups()]
-    return 'N:'+' '.join(['.'.join(suits[i*4:i*4+4]) for i in [0,2,3,1]]).replace('10',ten).replace('-',void) # brs uses NWES order but we want NESW. void may or not contain '-'
-
+    pbn = 'N:'+' '.join(['.'.join(suits[i*4:i*4+4]) for i in [0,2,3,1]]).replace('10',ten).replace('-',void) # brs uses NWES order but we want NESW. void may or not contain '-'
+    pbn = Deal(pbn).to_pbn() # todo: too much overhead to use as validation. Problem is reversed order of cards in a suit.
+    return pbn
 
 def brs_to_hands(brs,void='',ten='T'):
     no_10s = brs.replace('10',ten).replace('-',void) # replace 10 with T and remove unnecessary '-' which signifies a void suit.
@@ -589,6 +590,7 @@ def ContractTypeFromContract(contract):
     return ContractType(tricks,suit)
 
 
+# Returns a dict of contract types by direction by suit. Used to create a dataframe of contract types by direction by suit. Unsuitable for concat().
 def CategorifyContractTypeBySuit(ddmakes):
     contract_types_d = defaultdict(list)
     for dd in ddmakes:

@@ -106,12 +106,10 @@ def define_layer_sizes(input_size, num_layers=3, shrink_factor=2):
     return layer_sizes
 
 # create a test set using date and sample size. current default is 10k samples ge 2024-07-01.
-def sample_by_date(df, include_dates='2024-07-01', max_samples=10000):
+def split_by_date(df, include_dates):
     include_date = datetime.strptime(include_dates, '%Y-%m-%d') # i'm not getting why datetime.datetime.strptime isn't working here but the only thing that works elsewhere?
-
     date_filter = df['Date'] >= include_date
-        
-    return df.filter(~date_filter), df.filter(date_filter).sample(n=max_samples) if max_samples < date_filter.sum() else df.filter(date_filter)
+    return df.filter(~date_filter), df.filter(date_filter)
 
 def get_device():
     """
@@ -138,7 +136,7 @@ def get_device():
 
 def train_model(df, y_names, cat_names=None, cont_names=None, nsamples=None, 
                 procs=None, valid_pct=0.2, bs=1024*10, layers=None, epochs=3, 
-                device=None, y_range=(0,1), lr=1e-3, patience=3, min_delta=0.001):
+                device=None, y_range=(0,1), lr=1e-3, patience=3, min_delta=0.001, seed=42):
     """
     Train a PyTorch tabular model similar to the fastai implementation.
     
@@ -188,11 +186,11 @@ def train_model(df, y_names, cat_names=None, cont_names=None, nsamples=None,
     assert set(y_names).intersection(cat_names+cont_names) == set(), set(y_names).intersection(cat_names+cont_names)
     assert set(cat_names).intersection(cont_names) == set(), set(cat_names).intersection(cont_names)
 
-    # Sample data if requested
+    # Sample data if requested. If nsamples is None, use all data.
     if nsamples is None:
         pandas_df = df[y_names+cat_names+cont_names].to_pandas()
     else:
-        pandas_df = df[y_names+cat_names+cont_names].sample(nsamples, seed=42).to_pandas()
+        pandas_df = df[y_names+cat_names+cont_names].sample(nsamples, seed=seed).to_pandas()
 
     print('y_names[0].dtype:', pandas_df[y_names[0]].dtype.name)
     
@@ -640,7 +638,7 @@ def preprocess_inference_data(df, artifacts):
             df[col] = df[col].astype(str)
             # Fill missing values
             fill_val = artifacts['na_fills'][col]
-            df[col] = df[col].fillna(fill_val)
+            df[col] = df[col].fillna(fill_val).infer_objects(copy=False)
             
             # Handle unseen categories by mapping them to a default value
             encoder = artifacts['categorical_encoders'][col]
@@ -661,7 +659,7 @@ def preprocess_inference_data(df, artifacts):
         if col in df.columns:
             # Fill missing values
             fill_val = artifacts['na_fills'][col]
-            df[col] = df[col].fillna(fill_val)
+            df[col] = df[col].fillna(fill_val).infer_objects(copy=False)
             
             # Scale using the same scaler from training (vectorized)
             scaler = artifacts['continuous_scalers'][col]
@@ -955,17 +953,25 @@ def get_feature_importance(learn_dict):
     
     return importance
 
-def chart_feature_importance(learn_dict):
+def chart_feature_importance(learn_dict, topn=None):
     """
     Calculate and visualize feature importance.
     
     Args:
         learn_dict: Dictionary containing model, artifacts, and device info
+        topn: Number of top features to display (None for all features)
     """
     # Calculate and display feature importance
     importance = get_feature_importance(learn_dict)
     sorted_importance = sorted(importance.items(), key=lambda x: x[1], reverse=True)
-    print(f"\nFeature Importances {len(importance)}:")
+    
+    # Limit to top N features if specified
+    if topn is not None:
+        sorted_importance = sorted_importance[:topn]
+        print(f"\nTop {len(sorted_importance)} Feature Importances (out of {len(importance)} total):")
+    else:
+        print(f"\nFeature Importances {len(importance)}:")
+    
     for name, imp in sorted_importance:
         print_to_log_info(f"{name}: {imp:.4f}")
 
@@ -974,13 +980,17 @@ def chart_feature_importance(learn_dict):
         from matplotlib import pyplot as plt
 
         plt.figure(figsize=(24, 4))
-        plt.bar(range(len(importance)), [imp for name, imp in sorted_importance])
-        plt.xticks(range(len(importance)), [name for name, imp in sorted_importance], rotation=45, ha='right')
-        plt.title('Feature Importance')
+        plt.bar(range(len(sorted_importance)), [imp for name, imp in sorted_importance])
+        plt.xticks(range(len(sorted_importance)), [name for name, imp in sorted_importance], rotation=45, ha='right')
+        
+        if topn is not None:
+            plt.title(f'Top {len(sorted_importance)} Feature Importance (out of {len(importance)} total)')
+        else:
+            plt.title('Feature Importance')
+        
         plt.tight_layout()
         plt.show()
     except ImportError:
         print_to_log_info("matplotlib not available, skipping visualization")
     except Exception as e:
-        print_to_log_info(f"Error creating plot: {e}")
-        # Still return the importance data even if plotting fails 
+        print_to_log_info(f"Error creating plot: {e}") 
