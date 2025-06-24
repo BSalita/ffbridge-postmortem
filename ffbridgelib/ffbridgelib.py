@@ -86,8 +86,8 @@ def convert_ffdf_to_mldf(ffdf):
             .otherwise(pl.lit('0'))  # Replace '=' with '0'
             .cast(pl.Int16)
             .alias('Result'),
-        # not liking that only one of the two columns has a value. I prefer to have both with opposite signs.
-        # although this may be an issue for director adjustments.
+        # not liking that only one of the two columns (nsScore or ewScore) has a value. I prefer to have both with opposite signs.
+        # although this may be an issue for director adjustments. Creating new columns (Score_NS and Score_EW) with opposite signs.
         pl.when(pl.col('nsScore').str.contains(r'^\d+$'))
             .then(pl.col('nsScore'))
             .when(pl.col('ewScore').str.contains(r'^\d+$'))
