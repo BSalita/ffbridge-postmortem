@@ -88,13 +88,20 @@ def convert_ffdf_to_mldf(ffdf):
             .alias('Result'),
         # not liking that only one of the two columns has a value. I prefer to have both with opposite signs.
         # although this may be an issue for director adjustments.
-        pl.when(pl.col('nsScore').str.contains(r'^[\-]?\d+$'))
+        pl.when(pl.col('nsScore').str.contains(r'^\d+$'))
             .then(pl.col('nsScore'))
-            .when(pl.col('ewScore').str.contains(r'^[\-]?\d+$'))
-            .then(pl.lit('-')+pl.col('ewScore'))
+            .when(pl.col('ewScore').str.contains(r'^\d+$'))
+            .then('-'+pl.col('ewScore'))
             .otherwise(pl.lit(None))
             .cast(pl.Int16)
-            .alias('Score'),
+            .alias('Score_NS'),
+        pl.when(pl.col('ewScore').str.contains(r'^\d+$'))
+            .then(pl.col('ewScore'))
+            .when(pl.col('nsScore').str.contains(r'^\d+$'))
+            .then('-'+pl.col('nsScore'))
+            .otherwise(pl.lit(None))
+            .cast(pl.Int16)
+            .alias('Score_EW'),
         (pl.col('nsNote')/100.0).alias('Pct_NS'),
         (pl.col('ewNote')/100.0).alias('Pct_EW'),
         # is this player1_id for every row table or just the requested team? remove until understood.
