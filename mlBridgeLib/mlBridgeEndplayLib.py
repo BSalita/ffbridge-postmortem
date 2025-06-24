@@ -46,7 +46,7 @@ def endplay_boards_to_df(boards_d):
         #    break
         for i,b in enumerate(boards_in_lin_file):
             board_d['board_num'].append(b.board_num)
-            board_d['dealer'].append(b._dealer) # None if passed out
+            board_d['dealer'].append(b.dealer.abbr) # None if passed out
             board_d['vulnerability'].append(b._vul) # None if passed out, weird
             board_d['passout'].append(b._contract.is_passout() if b._contract else None)
             board_d['contract'].append(str(b._contract) if b._contract else None)
@@ -321,68 +321,141 @@ def convert_endplay_df_to_mlBridge_df(df):
     df = df.with_columns(
         pl.col('iVul').replace_strict(EpiVul_to_Vul_EW_Bool_d,return_dtype=pl.Boolean).alias('Vul_EW'),
     )
-    #pl.Series('passout',df['passout'],pl.Boolean), # todo: make passout a boolean in previous step.
-    df = df.with_columns(
-        # easier to use discrete replaces instead of having to slice contract (nt, pass would be a complication)
-        # first NT->N and suit symbols to SHDCN
-        pl.Series('Contract',df['contract'],pl.String).str.replace('NT','N').str.replace('♠','S').str.replace('♥','H').str.replace('♦','D').str.replace('♣','C').str.extract(r"^([^-+]*)", 1),
-    )
-    df = df.with_columns(
-        pl.Series('BidLvl',df['level'].cast(pl.UInt8, strict=False),pl.UInt8), # todo: make level a uint8 in previous step.
-    )
-    df = df.with_columns(
-        pl.Series('BidSuit',df['denom'].replace_strict(Strain_to_CDHSN_d,return_dtype=pl.String),pl.String),# categorical, yes
-    )
-    df = df.with_columns(
-        pl.Series('trump',df['trump'].replace_strict(Strain_to_CDHSN_d,return_dtype=pl.String),pl.String),# categorical?
-    )
-    df = df.with_columns(
-        pl.Series('Dbl',df['penalty'].replace_strict(Dbl_to_X_d,return_dtype=pl.String),pl.String),# categorical, yes
-    )
-    df = df.with_columns(
-        pl.Series('Declarer_Direction', [Direction_to_NESW_d[d] for d in df['dealer']], pl.String, strict=False), # todo: using list comprehension instead of type error when using replace_strict().
-    )
-    df = df.with_columns(
-        pl.Series('Result',df['result'].cast(pl.Int8, strict=False).fill_nan(0),pl.Int8),
-    )
-    df = df.with_columns(
-        pl.Series('Tricks',df['level'].cast(pl.Int8, strict=False).fill_nan(0)+df['result'].cast(pl.Int8, strict=False).fill_nan(0)+6,pl.UInt8),
-    )
-    df = df.with_columns(
-        pl.Series('Score',df['score'].cast(pl.Int16, strict=False).fill_nan(0),pl.Int16),
-    )
+    # BridgeWeb uses ScoreTable.
+    if 'ScoreTable' in df.columns:
+        df = df.with_columns(
+           pl.col('Contract').str.replace('NT','N').str.extract(r"^([^-+]*)", 1),
+        )
+        df = df.with_columns(
+            pl.Series('Dbl',df['Contract'].str.slice(2),pl.String), # categorical, yes
+        )
+        df = df.with_columns(
+            pl.col('Contract').str.slice(0,1).cast(pl.UInt8, strict=False).alias('BidLvl'), # Extract first character (bid level)
+        )
+        df = df.with_columns(
+            pl.col('Contract').str.slice(1,1).alias('BidSuit'), # Extract second character (suit) from contract (categorical, yes)
+        )
+        df = df.with_columns(
+            # easier to use discrete replaces instead of having to slice contract (nt, pass would be a complication)
+            # first NT->N and suit symbols to SHDCN
+            # If BidLvl is None, make Contract None
+            pl.when(pl.col('BidLvl').is_null())
+            .then(None)
+            .otherwise(pl.col('BidLvl').cast(pl.String)+pl.col('BidSuit')+pl.col('Declarer')+pl.col('Dbl'))
+            .alias('Contract'),
+        )
+        df = df.with_columns(
+            pl.Series('trump',df['trump'].replace_strict(Strain_to_CDHSN_d,return_dtype=pl.String),pl.String),# categorical?
+        )
+        df = df.with_columns(
+            pl.Series('Declarer_Direction', [Direction_to_NESW_d[d] for d in df['Declarer']], pl.String, strict=False), # todo: using list comprehension instead of type error when using replace_strict().
+        )
+        df = df.with_columns(
+            pl.Series('Tricks',df['Result'].cast(pl.UInt8, strict=False).fill_nan(0),pl.UInt8),
+        )
+        # example of creating unneeded column. could drop here and leave it to mlBridgeAugmentLib to recreate with proper values.
+        df = df.with_columns(
+            pl.Series('Result',df['Tricks'].cast(pl.Int8, strict=False)-6-df['BidLvl']), # overwrites Result column.
+        )
+        # leave it to mlBridgeAugmentLib to convert contract parts to Score and Score_NS.
+        # df = df.with_columns(
+        #     pl.Series('Score',df['score'].cast(pl.Int16, strict=False).fill_nan(0),pl.Int16),
+        # )
+        df = df.with_columns(
+            pl.col('PairId_NS').cast(pl.Utf8).alias('Pair_Number_NS'), # todo: fake Pair_Number_NS
+        )
+        df = df.with_columns(
+            pl.col('PairId_EW').cast(pl.Utf8).alias('Pair_Number_EW'), # todo: fake Pair_Number_EW
+        )
+        df = df.with_columns(
+            pl.Series('Player_ID_N',df['Pair_Number_NS']+'_N',pl.String), # todo: fake player id
+        )
+        df = df.with_columns(
+            pl.Series('Player_ID_E',df['Pair_Number_EW']+'_E',pl.String), # todo: fake player id
+        )
+        df = df.with_columns(
+            pl.Series('Player_ID_S',df['Pair_Number_NS']+'_S',pl.String), # todo: fake player id
+        )
+        df = df.with_columns(
+            pl.Series('Player_ID_W',df['Pair_Number_EW']+'_W',pl.String), # todo: fake player id
+        )
+        # todo: rename ScorePercent_NS to MP_Pct_NS?
+        # df = df.with_columns(
+        #     pl.Series('?',df['ScorePercent_NS'],pl.Float64),
+        # )
+        # df = df.with_columns(
+        #     pl.Series('?',df['ScorePercent_EW'],pl.Float64),
+        # )
+        # todo: rename MatchPoints_NS to ?
+        # df = df.with_columns(
+        #     pl.Series('?',df['MatchPoints_NS'],pl.Float64),
+        # )
+        # df = df.with_columns(
+        #     pl.Series('?',df['MatchPoints_EW'],pl.Float64),
+        # )
+    else:
+        #pl.Series('passout',df['passout'],pl.Boolean), # todo: make passout a boolean in previous step.
+        df = df.with_columns(
+            # easier to use discrete replaces instead of having to slice contract (nt, pass would be a complication)
+            # first NT->N and suit symbols to SHDCN
+            pl.Series('Contract',df['contract'],pl.String).str.replace('NT','N').str.replace('♠','S').str.replace('♥','H').str.replace('♦','D').str.replace('♣','C').str.extract(r"^([^-+]*)", 1),
+        )
+        df = df.with_columns(
+            pl.Series('BidLvl',df['level'].cast(pl.UInt8, strict=False),pl.UInt8), # todo: make level a uint8 in previous step.
+        )
+        df = df.with_columns(
+            pl.Series('BidSuit',df['denom'].replace_strict(Strain_to_CDHSN_d,return_dtype=pl.String),pl.String),# categorical, yes
+        )
+        df = df.with_columns(
+            pl.Series('trump',df['trump'].replace_strict(Strain_to_CDHSN_d,return_dtype=pl.String),pl.String),# categorical?
+        )
+        df = df.with_columns(
+            pl.Series('Dbl',df['penalty'].replace_strict(Dbl_to_X_d,return_dtype=pl.String),pl.String),# categorical, yes
+        )
+        df = df.with_columns(
+            pl.Series('Declarer_Direction', [Direction_to_NESW_d[d] for d in df['declarer']], pl.String, strict=False), # todo: using list comprehension instead of type error when using replace_strict().
+        )
+        df = df.with_columns(
+            pl.Series('Result',df['result'].cast(pl.Int8, strict=False).fill_nan(0),pl.Int8),
+        )
+        df = df.with_columns(
+            pl.Series('Tricks',df['level'].cast(pl.Int8, strict=False).fill_nan(0)+df['result'].cast(pl.Int8, strict=False).fill_nan(0)+6,pl.UInt8),
+        )
+        df = df.with_columns(
+            pl.Series('Score',df['score'].cast(pl.Int16, strict=False).fill_nan(0),pl.Int16),
+        )
+        df = df.with_columns(
+            pl.lit(0).cast(pl.UInt32).alias('Pair_Number_NS'), # todo: fake Pair_Number_NS
+        )
+        df = df.with_columns(
+            pl.lit(0).cast(pl.UInt32).alias('Pair_Number_EW'), # todo: fake Pair_Number_EW
+        )
+        df = df.with_columns(
+            pl.Series('Player_Name_N',df['Player_N'],pl.String),
+        )
+        df = df.with_columns(
+            pl.Series('Player_Name_E',df['Player_E'],pl.String),
+        )
+        df = df.with_columns(
+            pl.Series('Player_Name_S',df['Player_S'],pl.String),
+        )
+        df = df.with_columns(
+            pl.Series('Player_Name_W',df['Player_W'],pl.String),
+        )
+        df = df.with_columns(
+            pl.Series('Player_ID_N',df['Pair_Number_NS']+'_N',pl.String), # todo: fake player id
+        )
+        df = df.with_columns(
+            pl.Series('Player_ID_E',df['Pair_Number_EW']+'_E',pl.String), # todo: fake player id
+        )
+        df = df.with_columns(
+            pl.Series('Player_ID_S',df['Pair_Number_NS']+'_S',pl.String), # todo: fake player id
+        )
+        df = df.with_columns(
+            pl.Series('Player_ID_W',df['Pair_Number_EW']+'_W',pl.String), # todo: fake player id
+        )
     df = df.with_columns(
         df['claimed'].cast(pl.Boolean, strict=False),
-    )
-    df = df.with_columns(
-        pl.Series('Player_Name_N',df['Player_N'],pl.String),
-    )
-    df = df.with_columns(
-        pl.Series('Player_Name_E',df['Player_E'],pl.String),
-    )
-    df = df.with_columns(
-        pl.Series('Player_Name_S',df['Player_S'],pl.String),
-    )
-    df = df.with_columns(
-        pl.Series('Player_Name_W',df['Player_W'],pl.String),
-    )
-    df = df.with_columns(
-        pl.Series('Player_ID_N',df['Player_N'],pl.String), # todo: fake player id
-    )
-    df = df.with_columns(
-        pl.Series('Player_ID_E',df['Player_E'],pl.String), # todo: fake player id
-    )
-    df = df.with_columns(
-        pl.Series('Player_ID_S',df['Player_S'],pl.String), # todo: fake player id
-    )
-    df = df.with_columns(
-        pl.Series('Player_ID_W',df['Player_W'],pl.String), # todo: fake player id
-    )
-    df = df.with_columns(
-        pl.lit(0).cast(pl.UInt32).alias('Pair_Number_NS'), # todo: fake Pair_Number_NS
-    )
-    df = df.with_columns(
-        pl.lit(0).cast(pl.UInt32).alias('Pair_Number_EW'), # todo: fake Pair_Number_EW
     )
     df = df.with_columns(
         pl.Series('source_file',df['source_file'],pl.String),
@@ -428,6 +501,10 @@ def convert_endplay_df_to_mlBridge_df(df):
             'Player_E',
             'Player_S',
             'Player_W',
+            #'ScorePercent_NS',
+            #'MatchPoints_NS',
+            #'ScorePercent_EW',
+            #'MatchPoints_EW',
         }
     )
     return df

@@ -190,7 +190,10 @@ def calc_double_dummy_deals(deals: List[Deal], batch_size: int = 40, output_prog
         if output_progress:
             if progress:
                 percent_complete = int(i*100/len(deals))
-                progress.progress(percent_complete,f"{percent_complete}%: Double dummies calculated for {i} of {len(deals)} unique deals.")
+                if hasattr(progress, 'progress'): # streamlit
+                    progress.progress(percent_complete, f"{percent_complete}%: Double dummies calculated for {i} of {len(deals)} unique deals.")
+                elif hasattr(progress, 'set_description'): # tqdm
+                    progress.set_description(f"{percent_complete}%: Double dummies calculated for {i} of {len(deals)} unique deals.")
             else:
                 if i % 1000 == 0:
                     percent_complete = int(i*100/len(deals))
@@ -199,8 +202,11 @@ def calc_double_dummy_deals(deals: List[Deal], batch_size: int = 40, output_prog
         all_result_tables.extend(result_tables)
     if output_progress: 
         if progress:
-            progress.progress(100,f"100%: Double dummies calculated for {len(deals)} unique deals.")
-            progress.empty() # hmmm, this removes the progress bar so fast that 100% message won't be seen.
+            if hasattr(progress, 'progress'): # streamlit
+                progress.progress(100, f"100%: Double dummies calculated for {len(deals)} unique deals.")
+                progress.empty() # hmmm, this removes the progress bar so fast that 100% message won't be seen.
+            elif hasattr(progress, 'set_description'): # tqdm
+                progress.set_description(f"100%: Double dummies calculated for {len(deals)} unique deals.")
         else:
             print(f"100%: Double dummies calculated for {len(deals)} unique deals.")
     return all_result_tables
@@ -392,7 +398,10 @@ def calculate_sd_probs(df: pl.DataFrame, hrs_cache_df: pl.DataFrame, sd_producti
     for i,pbn in enumerate(pbns_to_process):
         if progress:
             percent_complete = int(i*100/len(pbns_to_process))
-            progress.progress(percent_complete,f"{percent_complete}%: Single dummies calculated for {i} of {len(pbns_to_process)} unique deals using {sd_productions} samples per deal. This step takes 30 seconds...")
+            if hasattr(progress, 'progress'): # streamlit
+                progress.progress(percent_complete, f"{percent_complete}%: Single dummies calculated for {i} of {len(pbns_to_process)} unique deals using {sd_productions} samples per deal. This step takes 30 seconds...")
+            elif hasattr(progress, 'set_description'): # tqdm
+                progress.set_description(f"{percent_complete}%: Single dummies calculated for {i} of {len(pbns_to_process)} unique deals using {sd_productions} samples per deal. This step takes 30 seconds...")
         else:
             if i < 10 or i % 10000 == 0:
                 percent_complete = int(i*100/len(pbns_to_process))
@@ -404,7 +413,10 @@ def calculate_sd_probs(df: pl.DataFrame, hrs_cache_df: pl.DataFrame, sd_producti
             print(f"calculate_single_dummy_probabilities: time:{time.time()-t} seconds")
         #error
     if progress:
-            progress.progress(100,f"100%: Single dummies calculated for {len(pbns_to_process)} of {len(pbns_to_process)} unique deals using {sd_productions} samples per deal.")
+        if hasattr(progress, 'progress'): # streamlit
+            progress.progress(100, f"100%: Single dummies calculated for {len(pbns_to_process)} of {len(pbns_to_process)} unique deals using {sd_productions} samples per deal.")
+        elif hasattr(progress, 'set_description'): # tqdm
+            progress.set_description(f"100%: Single dummies calculated for {len(pbns_to_process)} of {len(pbns_to_process)} unique deals using {sd_productions} samples per deal.")
     else:
         print(f"100%: Single dummies calculated for {len(pbns_to_process)} of {len(pbns_to_process)} unique deals using {sd_productions} samples per deal.")
 
@@ -429,7 +441,7 @@ def calculate_sd_probs(df: pl.DataFrame, hrs_cache_df: pl.DataFrame, sd_producti
     #     assert set(sd_df.columns) == (set(sd_probs_df.columns))
     #     sd_df = pl.concat([sd_df, sd_probs_df.select(sd_df.columns)]) # must reorder columns to match sd_df
 
-    if progress:
+    if progress and hasattr(progress, 'empty'):
         progress.empty()
 
     return sd_dfs_d, sd_probs_df
@@ -733,32 +745,14 @@ def Perform_Legacy_Renames(df: pl.DataFrame) -> pl.DataFrame:
     return df
 
 
-def Create_Fake_Predictions(df: pl.DataFrame) -> pl.DataFrame:
-    # todo: remove this once NN predictions are implemented
-    df = df.with_columns(
-
-        # pl.col('Pct_NS').alias('Pct_NS_Pred'),
-        # pl.col('Pct_EW').alias('Pct_EW_Pred'),
-        # pl.col('Pct_NS').sub(pl.col('Pct_NS')).alias('Pct_NS_Diff_Pred'),
-        # pl.col('Pct_EW').sub(pl.col('Pct_EW')).alias('Pct_EW_Diff_Pred'),
-        # pl.col('Declarer_Direction').alias('Declarer_Direction_Pred'), # Declarer_Direction_Actual not needed
-        # pl.lit(.321).alias('Declarer_Pct_Pred'), # todo: implement 'Declarer_Pct'
-        # pl.lit(456).alias('Declarer_Number_Pred'), # todo: implement 'Declarer_ID'
-        # pl.col('Declarer_Name').alias('Declarer_Name_Pred'),
-        # pl.col('Contract').alias('Contract_Pred'),
-    )
-    return df
-
-
 def DealToCards(df: pl.DataFrame) -> pl.DataFrame:
-    lazy_df = df.lazy()
-    lazy_cards_df = lazy_df.with_columns([
+    df = df.with_columns([
         pl.col(f'Suit_{direction}_{suit}').str.contains(rank).alias(f'C_{direction}{suit}{rank}')
         for direction in 'NESW'
         for suit in 'SHDC'
         for rank in 'AKQJT98765432'
     ])
-    return lazy_cards_df.collect()
+    return df
 
 
 def CardsToHCP(df: pl.DataFrame) -> pl.DataFrame:
@@ -1525,6 +1519,7 @@ class FinalContractAugmenter:
                 pl.max_horizontal('EV_Max_NS','EV_Max_EW').alias('EV_Max'),
                 pl.max_horizontal('EV_Max_Col_NS','EV_Max_Col_EW').alias('EV_Max_Col'),
                 pl.when(pl.col('Declarer_Pair_Direction').eq('NS')).then(pl.col('EV_Max_NS')).otherwise(pl.col('EV_Max_EW')).alias('EV_Max_Declarer'),
+                pl.when(pl.col('Declarer_Pair_Direction').eq('NS')).then(pl.col('EV_Max_Col_NS')).otherwise(pl.col('EV_Max_Col_EW')).alias('EV_Max_Col_Declarer'),
             ]),
             self.df
         )
@@ -1594,6 +1589,18 @@ class FinalContractAugmenter:
         ]
 
     def _create_score_columns(self) -> None:
+        if 'Score' not in self.df.columns and 'Score_NS' not in self.df.columns:
+            all_scores_d, scores_d, scores_df = calculate_scores()
+            self.df = self._time_operation(
+                "convert_contract_to_score",
+                lambda df: df.with_columns([
+                    pl.struct(['BidLvl', 'BidSuit', 'Tricks', 'Vul_Declarer', 'Dbl'])
+                        .map_elements(lambda x: all_scores_d.get(tuple(x.values()),None),
+                                    return_dtype=pl.Int16)
+                        .alias('Score'),
+                ]),
+                self.df
+            )
         if 'Score_NS' not in self.df.columns:
             self.df = self._time_operation(
                 "convert_score_to_score",
@@ -1649,14 +1656,6 @@ class FinalContractAugmenter:
             self.df
         )
 
-    # todo: remove this once NN predictions are implemented
-    def _create_fake_predictions(self) -> None:
-        self.df = self._time_operation(
-            "create fake predictions",
-            Create_Fake_Predictions,
-            self.df
-        )
-
 
     def _create_position_columns(self) -> None:
         # these augmentations should not already exist.
@@ -1674,6 +1673,12 @@ class FinalContractAugmenter:
         self.df = self._time_operation(
             "create position columns",
             lambda df: df.with_columns([
+                pl.struct(['Declarer_Direction', 'Player_ID_N', 'Player_ID_E', 'Player_ID_S', 'Player_ID_W']).map_elements(
+                    lambda r: None if r['Declarer_Direction'] is None else r[f'Player_ID_{r["Declarer_Direction"]}'],
+                    return_dtype=pl.String
+                ).alias('Declarer'),
+            ])
+            .with_columns([
                 pl.col('Declarer_Direction').replace_strict(NextPosition).alias('Direction_OnLead'),
             ])
             .with_columns([
@@ -1824,7 +1829,6 @@ class FinalContractAugmenter:
         self._create_score_diff_columns()
         self._create_lott() # todo: would be interesting to create lott for all contracts and then move into AllContractsAugmenter
         self._perform_legacy_renames()
-        self._create_fake_predictions()
         self._create_position_columns()
         self._create_board_result_columns()
         self._create_trick_columns()
@@ -1989,12 +1993,12 @@ class MatchPointAugmenter:
                 #pl.col('EV_Pct_Max_EW').alias('SD_Pct_EW'),
                 #pl.col('EV_Pct_Max_NS').alias('SD_Pct_Max_NS'),
                 #pl.col('EV_Pct_Max_EW').alias('SD_Pct_Max_EW'),
-                (pl.col('Pct_NS')-pl.col('EV_Pct_Max_NS')).alias('EV_Pct_Max_Diff_NS'),
-                (pl.col('Pct_EW')-pl.col('EV_Pct_Max_EW')).alias('EV_Pct_Max_Diff_EW'),
-                (pl.col('Pct_NS')-pl.col('Par_Pct_NS')).alias('EV_Par_Pct_Diff_NS'),
-                (pl.col('Pct_EW')-pl.col('Par_Pct_EW')).alias('EV_Par_Pct_Diff_EW'),
-                (pl.col('Pct_NS')-pl.col('Par_Pct_NS')).alias('EV_Par_Pct_Max_Diff_NS'),
-                (pl.col('Pct_EW')-pl.col('Par_Pct_EW')).alias('EV_Par_Pct_Max_Diff_EW'),
+                (pl.col('EV_Pct_Max_NS')-pl.col('Pct_NS')).alias('EV_Pct_Max_Diff_NS'), # todo: suspect this is wrong
+                (pl.col('EV_Pct_Max_EW')-pl.col('Pct_EW')).alias('EV_Pct_Max_Diff_EW'), # todo: suspect this is wrong
+                (pl.col('DD_Score_Pct_NS_Max')-pl.col('Par_Pct_NS')).alias('EV_Par_Pct_Diff_NS'), # todo: suspect this is wrong
+                (pl.col('DD_Score_Pct_EW_Max')-pl.col('Par_Pct_EW')).alias('EV_Par_Pct_Diff_EW'), # todo: suspect this is wrong
+                (pl.col('EV_Pct_Max_NS')-pl.col('Par_Pct_NS')).alias('EV_Par_Pct_Max_Diff_NS'), # todo: suspect this is wrong
+                (pl.col('EV_Pct_Max_EW')-pl.col('Par_Pct_EW')).alias('EV_Par_Pct_Max_Diff_EW'), # todo: suspect this is wrong
             ])
         ]
 
