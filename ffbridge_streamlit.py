@@ -320,6 +320,16 @@ def get_ffbridge_data_using_url():
         print(f"Unnested teams_df columns: {teams_df.columns}")
         print(f"Unnested teams_df shape: {teams_df.shape}")
 
+        same_players_in_player1_and_player2 = set(teams_df['team_player1_id']).intersection(set(teams_df['team_player2_id']))
+        if same_players_in_player1_and_player2:
+            print(f"same_players_in_player1_and_player2:{same_players_in_player1_and_player2}")
+            print(teams_df.filter(pl.col('team_player1_id').is_in(same_players_in_player1_and_player2))['team_player1_lastName'])
+            # Remove rows where either player1_id or player2_id is in the overlapping set
+            teams_df = teams_df.filter(
+                ~(pl.col('team_player1_id').is_in(same_players_in_player1_and_player2) | 
+                pl.col('team_player2_id').is_in(same_players_in_player1_and_player2))
+            )
+
         # Get the column values
         player1_dict = teams_df.drop_nulls('team_player1_ffbId').select(
             'team_player1_ffbId', 'team_player1_id'
@@ -892,7 +902,7 @@ def initialize_session_state():
         'show_sql_query': True, # os.getenv('STREAMLIT_ENV') == 'development',
         'use_historical_data': False,
         'do_not_cache_df': True, # todo: set to True for production
-        'con': duckdb.connect(),
+        'con': duckdb.connect(), # IMPORTANT: duckdb.connect() hung until previous version was installed.
         'con_register_name': 'self',
         'main_section_container': st.empty(),
         'app_datetime': datetime.fromtimestamp(pathlib.Path(__file__).stat().st_mtime, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S %Z'),
