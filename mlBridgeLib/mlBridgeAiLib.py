@@ -17,28 +17,29 @@ import logging
 import json
 from copy import deepcopy
 from datetime import datetime
+from typing import Any, Optional, Dict, List, Tuple, Union
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def print_to_log_info(*args):
+def print_to_log_info(*args: Any) -> None:
     print_to_log(logging.INFO, *args)
 
-def print_to_log_debug(*args):
+def print_to_log_debug(*args: Any) -> None:
     print_to_log(logging.DEBUG, *args)
 
-def print_to_log(level, *args):
+def print_to_log(level: int, *args: Any) -> None:
     logging.log(level, ' '.join(str(arg) for arg in args))
 
 # --- PyTorch Dataset for Tabular Data ---
 class TabularDataset(Dataset):
-    def __init__(self, X_categorical, X_continuous, y):
+    def __init__(self, X_categorical: torch.Tensor, X_continuous: torch.Tensor, y: torch.Tensor) -> None:
         self.X_categorical = X_categorical
         self.X_continuous = X_continuous
         self.y = y
 
-    def __len__(self):
+    def __len__(self) -> int:
         if torch.is_tensor(self.y) and self.y.ndim > 0:
             return self.y.size(0)
         elif torch.is_tensor(self.X_categorical) and self.X_categorical.ndim > 0 and self.X_categorical.size(0) > 0:
@@ -47,7 +48,7 @@ class TabularDataset(Dataset):
             return self.X_continuous.size(0)
         return 0
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         cat_item = self.X_categorical[idx] if torch.is_tensor(self.X_categorical) and self.X_categorical.numel() > 0 and self.X_categorical.size(0) > idx else torch.empty(0, dtype=torch.long)
         cont_item = self.X_continuous[idx] if torch.is_tensor(self.X_continuous) and self.X_continuous.numel() > 0 and self.X_continuous.size(0) > idx else torch.empty(0, dtype=torch.float32)
         label_item = self.y[idx] if torch.is_tensor(self.y) and self.y.numel() > 0 and self.y.size(0) > idx else torch.empty(0, dtype=torch.long)
@@ -60,11 +61,12 @@ class TabularDataset(Dataset):
 
 # --- PyTorch Model Definition ---
 class TabularNNModel(nn.Module):
-    def __init__(self, embedding_sizes, n_continuous, n_classes, layers, p_dropout=0.1):
+    def __init__(self, embedding_sizes: List[Tuple[int, int]], n_continuous: int, n_classes: int, layers: List[int], p_dropout: float = 0.1, y_range: Optional[Tuple[float, float]] = None) -> None:
         super().__init__()
         self.embeddings = nn.ModuleList([nn.Embedding(categories, size) for categories, size in embedding_sizes])
         n_embeddings = sum(e.embedding_dim for e in self.embeddings)
         self.n_continuous = n_continuous
+        self.y_range = y_range
         
         all_layers = []
         input_size = n_embeddings + n_continuous
@@ -77,9 +79,19 @@ class TabularNNModel(nn.Module):
             input_size = layer_size
             
         all_layers.append(nn.Linear(layers[-1], n_classes))
+        
+        # Add sigmoid activation and scaling if y_range is specified for regression
+        if y_range is not None and n_classes == 1:
+            all_layers.append(nn.Sigmoid())
+            self.y_min = y_range[0]
+            self.y_max = y_range[1]
+        else:
+            self.y_min = None
+            self.y_max = None
+            
         self.layers = nn.Sequential(*all_layers)
 
-    def forward(self, x_categorical, x_continuous):
+    def forward(self, x_categorical: torch.Tensor, x_continuous: torch.Tensor) -> torch.Tensor:
         x_embeddings = []
         for i, e in enumerate(self.embeddings):
             x_embeddings.append(e(x_categorical[:, i]))
@@ -91,27 +103,32 @@ class TabularNNModel(nn.Module):
             x = torch.cat([x, x_continuous], 1)
             
         x = self.layers(x)
+        
+        # Scale sigmoid output to y_range if specified
+        if self.y_min is not None and self.y_max is not None:
+            x = x * (self.y_max - self.y_min) + self.y_min
+            
         return x
 
 # Function to calculate the total input size (similar to fastai version)
-def calculate_input_size(embedding_sizes, n_continuous):
+def calculate_input_size(embedding_sizes: List[Tuple[int, int]], n_continuous: int) -> int:
     total_embedding_size = sum(size for _, size in embedding_sizes)
     return total_embedding_size + n_continuous
 
 # Function to define optimal layer sizes (similar to fastai version)
-def define_layer_sizes(input_size, num_layers=3, shrink_factor=2):
+def define_layer_sizes(input_size: int, num_layers: int = 3, shrink_factor: int = 2) -> List[int]:
     layer_sizes = [input_size]
     for i in range(1, num_layers):
         layer_sizes.append(layer_sizes[-1] // shrink_factor)
     return layer_sizes
 
 # create a test set using date and sample size. current default is 10k samples ge 2024-07-01.
-def split_by_date(df, include_dates):
+def split_by_date(df: Any, include_dates: str) -> Tuple[Any, Any]:
     include_date = datetime.strptime(include_dates, '%Y-%m-%d') # i'm not getting why datetime.datetime.strptime isn't working here but the only thing that works elsewhere?
     date_filter = df['Date'] >= include_date
     return df.filter(~date_filter), df.filter(date_filter)
 
-def get_device():
+def get_device() -> str:
     """
     Get the best available device (GPU if available, otherwise CPU).
     
@@ -134,9 +151,9 @@ def get_device():
         print_to_log_info("No GPU available, using CPU")
     return device
 
-def train_model(df, y_names, cat_names=None, cont_names=None, nsamples=None, 
-                procs=None, valid_pct=0.2, bs=1024*10, layers=None, epochs=3, 
-                device=None, y_range=(0,1), lr=1e-3, patience=3, min_delta=0.001, seed=42):
+def train_model(df: Any, y_names: List[str], cat_names: Optional[List[str]] = None, cont_names: Optional[List[str]] = None, nsamples: Optional[int] = None, 
+                procs: Optional[Any] = None, valid_pct: float = 0.2, bs: int = 1024*10, layers: Optional[List[int]] = None, epochs: int = 3, 
+                device: Optional[str] = None, y_range: Tuple[float, float] = (0,1), lr: float = 1e-3, patience: int = 3, min_delta: float = 0.001, seed: int = 42) -> Dict[str, Any]:
     """
     Train a PyTorch tabular model similar to the fastai implementation.
     
@@ -156,6 +173,7 @@ def train_model(df, y_names, cat_names=None, cont_names=None, nsamples=None,
         lr: Learning rate
         patience: Early stopping patience
         min_delta: Minimum delta for early stopping
+        seed: Random seed
     
     Returns:
         Dictionary containing model, artifacts, and training info
@@ -165,7 +183,7 @@ def train_model(df, y_names, cat_names=None, cont_names=None, nsamples=None,
         device = get_device()
     
     t = time.time()
-    print_to_log_info(f"{y_names=} {cat_names=} {cont_names} {valid_pct=} {bs=} {layers=} {epochs=} {device=}")
+    print_to_log_info(f"{y_names=} {cat_names=} {cont_names=} {nsamples=} {valid_pct=} {bs=} {layers=} {epochs=} {device=} {y_range=} {lr=} {patience=} {min_delta=} {seed=}")
 
     # Validate inputs
     assert isinstance(y_names, list) and len(y_names) == 1, 'Only one target variable is supported.'
@@ -208,9 +226,9 @@ def train_model(df, y_names, cat_names=None, cont_names=None, nsamples=None,
                                       epochs=epochs, device=device, lr=lr, 
                                       patience=patience, min_delta=min_delta, y_range=y_range)
 
-def train_classifier_pytorch(df, y_names, cat_names, cont_names, valid_pct=0.2, 
-                           bs=1024*5, layers=None, epochs=3, device=None, 
-                           lr=1e-3, patience=3, min_delta=0.001):
+def train_classifier_pytorch(df: Any, y_names: List[str], cat_names: List[str], cont_names: List[str], valid_pct: float = 0.2,
+                           bs: int = 1024*5, layers: Optional[List[int]] = None, epochs: int = 3, device: Optional[str] = None, 
+                           lr: float = 1e-3, patience: int = 3, min_delta: float = 0.001) -> Dict[str, Any]:
     """Train a classification model using PyTorch."""
     # Auto-detect device if not specified
     if device is None:
@@ -306,10 +324,13 @@ def train_classifier_pytorch(df, y_names, cat_names, cont_names, valid_pct=0.2,
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
     
-    # Training loop with early stopping
+    # Training loop with best model saving and early stopping
     best_val_loss = float('inf')
+    best_val_acc = 0.0
+    best_model_state = None
     patience_counter = 0
     training_history = []
+    early_stopped = False
     
     for epoch in range(epochs):
         # Training
@@ -363,17 +384,32 @@ def train_classifier_pytorch(df, y_names, cat_names, cont_names, valid_pct=0.2,
         
         print_to_log_info(f"Epoch {epoch+1}/{epochs}: Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
         
-        # Early stopping
+        # Save best model (based on validation accuracy)
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            best_model_state = deepcopy(model.state_dict())
+            print_to_log_info(f"New best model saved! Val Acc: {val_acc:.4f}")
+        
+        # Early stopping (based on validation loss)
         if val_loss < best_val_loss - min_delta:
             best_val_loss = val_loss
             patience_counter = 0
         else:
             patience_counter += 1
             if patience_counter >= patience:
+                early_stopped = True
                 print_to_log_info(f"Early stopping at epoch {epoch+1}")
                 break
     
+    # Load the best model weights
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
+        print_to_log_info(f"Loaded best model with validation accuracy: {best_val_acc:.4f}")
+    else:
+        print_to_log_info("Warning: No best model state found, using final model")
+    
     artifacts['training_history'] = training_history
+    artifacts['early_stopped'] = early_stopped
     artifacts['model_params'] = {
         'embedding_sizes': embedding_sizes,
         'n_continuous': n_continuous,
@@ -389,9 +425,9 @@ def train_classifier_pytorch(df, y_names, cat_names, cont_names, valid_pct=0.2,
         'device': device
     }
 
-def train_regression_pytorch(df, y_names, cat_names, cont_names, valid_pct=0.2, 
-                           bs=1024*5, layers=None, epochs=3, device=None, 
-                           lr=1e-3, patience=3, min_delta=0.001, y_range=(0,1)):
+def train_regression_pytorch(df: Any, y_names: List[str], cat_names: List[str], cont_names: List[str], valid_pct: float = 0.2, 
+                           bs: int = 1024*5, layers: Optional[List[int]] = None, epochs: int = 3, device: Optional[str] = None, 
+                           lr: float = 1e-3, patience: int = 3, min_delta: float = 0.001, y_range: Tuple[float, float] = (0,1)) -> Dict[str, Any]:
     """Train a regression model using PyTorch."""
     # Auto-detect device if not specified
     if device is None:
@@ -469,16 +505,18 @@ def train_regression_pytorch(df, y_names, cat_names, cont_names, valid_pct=0.2,
     val_loader = DataLoader(val_dataset, batch_size=bs, shuffle=False)
 
     # Create model (output size 1 for regression)
-    model = TabularNNModel(embedding_sizes, n_continuous, 1, layers)
+    model = TabularNNModel(embedding_sizes, n_continuous, 1, layers, y_range=y_range)
     model.to(device)
     
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
     
-    # Training loop with early stopping
+    # Training loop with best model saving and early stopping  
     best_val_loss = float('inf')
+    best_model_state = None
     patience_counter = 0
     training_history = []
+    early_stopped = False
     
     for epoch in range(epochs):
         # Training
@@ -532,17 +570,34 @@ def train_regression_pytorch(df, y_names, cat_names, cont_names, valid_pct=0.2,
                           f"Train RMSE: {train_rmse_scaled:.4f} (scaled) / {train_rmse_original:.4f} (original), "
                           f"Val RMSE: {val_rmse_scaled:.4f} (scaled) / {val_rmse_original:.4f} (original)")
         
-        # Early stopping
-        if val_loss < best_val_loss - min_delta:
+        # Early stopping and model saving logic
+        improvement_threshold = best_val_loss - min_delta
+        print_to_log_info(f"DEBUG: val_loss={val_loss:.6f}, best_val_loss={best_val_loss:.6f}, min_delta={min_delta}, threshold={improvement_threshold:.6f}, patience_counter={patience_counter}")
+        
+        if val_loss < improvement_threshold:
+            # Significant improvement: save model, update best loss, reset patience
             best_val_loss = val_loss
+            best_model_state = deepcopy(model.state_dict())
             patience_counter = 0
+            print_to_log_info(f"New best model saved! Val Loss: {val_loss:.4f}")
         else:
+            # No significant improvement: increment patience counter
             patience_counter += 1
+            print_to_log_info(f"No significant improvement. Patience: {patience_counter}/{patience}")
             if patience_counter >= patience:
+                early_stopped = True
                 print_to_log_info(f"Early stopping at epoch {epoch+1}")
                 break
     
+    # Load the best model weights
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
+        print_to_log_info(f"Loaded best model with validation loss: {best_val_loss:.4f}")
+    else:
+        print_to_log_info("Warning: No best model state found, using final model")
+    
     artifacts['training_history'] = training_history
+    artifacts['early_stopped'] = early_stopped
     artifacts['model_params'] = {
         'embedding_sizes': embedding_sizes,
         'n_continuous': n_continuous,
@@ -558,7 +613,7 @@ def train_regression_pytorch(df, y_names, cat_names, cont_names, valid_pct=0.2,
         'device': device
     }
 
-def save_model(learn_dict, f):
+def save_model(learn_dict: Dict[str, Any], f: str) -> None:
     """
     Save a PyTorch model and its artifacts.
     
@@ -579,7 +634,7 @@ def save_model(learn_dict, f):
     torch.save(save_dict, f)
     print_to_log_info('save_model time:', time.time()-t)
 
-def load_model(f):
+def load_model(f: str) -> Dict[str, Any]:
     """
     Load a PyTorch model and its artifacts.
     
@@ -600,12 +655,21 @@ def load_model(f):
     artifacts = save_dict['artifacts']
     model_params = artifacts['model_params']
     
-    model = TabularNNModel(
-        model_params['embedding_sizes'],
-        model_params['n_continuous'],
-        model_params['n_classes'],
-        model_params['layers']
-    )
+    if artifacts['is_classification']:
+        model = TabularNNModel(
+            artifacts['embedding_sizes'], 
+            len(artifacts['continuous_feature_names']),
+            artifacts['model_params']['n_classes'],
+            artifacts['model_params']['layers']
+        )
+    else:
+        model = TabularNNModel(
+            artifacts['embedding_sizes'], 
+            len(artifacts['continuous_feature_names']),
+            artifacts['model_params']['n_classes'],
+            artifacts['model_params']['layers'],
+            y_range=artifacts.get('y_range')
+        )
     
     model.load_state_dict(save_dict['model_state_dict'])
     
@@ -618,7 +682,7 @@ def load_model(f):
     print_to_log_info('load_model time:', time.time()-t)
     return learn_dict
 
-def preprocess_inference_data(df, artifacts):
+def preprocess_inference_data(df: Any, artifacts: Dict[str, Any]) -> Dict[str, torch.Tensor]:
     """
     Preprocess inference data using the same transformations as training data.
     
@@ -668,7 +732,7 @@ def preprocess_inference_data(df, artifacts):
     print_to_log_info(f'preprocess_inference_data time: {time.time()-t:.4f} seconds')
     return df
 
-def get_predictions(learn_dict, df, y_names=None, device=None):
+def get_predictions(learn_dict: Dict[str, Any], df: Any, y_names: Optional[List[str]] = None, device: Optional[str] = None) -> Any:
     """
     Perform inference using a trained PyTorch model.
     
@@ -813,7 +877,7 @@ def get_predictions(learn_dict, df, y_names=None, device=None):
     if artifacts['is_classification']:
         # Convert probabilities to class labels
         pred_probs = torch.softmax(predictions, dim=1)
-        pred_codes = predictions.argmax(dim=1).numpy()
+        pred_codes = pred_probs.argmax(dim=1).numpy()
         
         # Decode predictions back to original labels
         target_encoder = artifacts['target_encoder']
@@ -862,7 +926,7 @@ def get_predictions(learn_dict, df, y_names=None, device=None):
     print_to_log_info('get_predictions time:', time.time()-t)
     return pd.DataFrame(results)
 
-def find_first_linear_layer(module):
+def find_first_linear_layer(module: nn.Module) -> Optional[nn.Module]:
     """
     Find the first linear layer in a PyTorch model.
     
@@ -886,7 +950,7 @@ def find_first_linear_layer(module):
                 return found
     return None
 
-def get_feature_importance(learn_dict):
+def get_feature_importance(learn_dict: Dict[str, Any]) -> Dict[str, Any]:
     """
     Calculate feature importance based on the weights of the first linear layer.
     
@@ -953,7 +1017,7 @@ def get_feature_importance(learn_dict):
     
     return importance
 
-def chart_feature_importance(learn_dict, topn=None):
+def chart_feature_importance(learn_dict: Dict[str, Any], topn: Optional[int] = None) -> None:
     """
     Calculate and visualize feature importance.
     
@@ -993,4 +1057,275 @@ def chart_feature_importance(learn_dict, topn=None):
     except ImportError:
         print_to_log_info("matplotlib not available, skipping visualization")
     except Exception as e:
-        print_to_log_info(f"Error creating plot: {e}") 
+        print_to_log_info(f"Error creating plot: {e}")
+
+def predict_pct(learn_dict: Dict[str, Any], df: Any, session_col: str = 'Session', target_col: str = 'Pct_Target', device: Optional[str] = None) -> Any:
+    """
+    Comprehensive Pct_NS/Pct_EW prediction function with constraint enforcement.
+    
+    Adds prediction columns to df_test:
+    - Pct_NS_Pred, Pct_EW_Pred: Final constrained predictions
+    - Pct_NS_Pred_Error, Pct_EW_Pred_Error: Prediction errors (if actuals available)
+    - Pct_NS_Pred_Absolute_Error, Pct_EW_Pred_Absolute_Error: Absolute errors
+    
+    Enforces constraints:
+    - Row-wise: Pct_NS_Pred + Pct_EW_Pred = 1.0 for each board
+    - Session-wise: mean(Pct_NS_Pred) = 0.5 within each session
+    - Session-wise: mean(Pct_EW_Pred) = 0.5 within each session
+    
+    Args:
+        model_file: Path to saved PyTorch model file
+        df_test: Polars or Pandas DataFrame with test data (can contain multiple sessions)
+        session_col: Name of session column (default: 'Session')
+        target_col: Name of target column for evaluation (default: 'Pct_Target')
+        device: Device for inference (None for auto-detection)
+        
+    Returns:
+        Dictionary containing:
+        - 'df': DataFrame with original data plus prediction columns
+        - 'metrics': Dictionary with per-session and overall metrics
+        - 'constraints': Dictionary with constraint satisfaction info
+        - 'sessions': List of session statistics
+    """
+    print_to_log_info("=== PREDICT_PCT: Comprehensive Pct_NS/EW Prediction with Constraints ===")
+    
+    assert isinstance(df, pl.DataFrame), "df_test must be a Polars DataFrame"
+    
+    # Extract model features with robust error handling
+    artifacts = learn_dict.get('artifacts', {})
+    if isinstance(artifacts, dict):
+        cat_names = artifacts.get('categorical_feature_names', [])
+        cont_names = artifacts.get('continuous_feature_names', [])
+        target_name = artifacts.get('target_name', target_col)
+        
+        # Fallback: try alternative key names
+        if not cat_names and not cont_names:
+            cat_names = artifacts.get('cat_names', [])
+            cont_names = artifacts.get('cont_names', [])
+    else:
+        raise ValueError(f"Invalid artifacts format in model. Expected dict, got {type(artifacts)}")
+    
+    if not cat_names and not cont_names:
+        raise ValueError(f"Cannot find feature names in artifacts. Available keys: {list(artifacts.keys())}")
+    
+    model_features = cat_names + cont_names
+    print_to_log_info(f"Model expects {len(model_features)} features: {len(cat_names)} categorical, {len(cont_names)} continuous")
+    
+    # ASSERTION 1: Check all training features are present
+    missing_features = [f for f in model_features if f not in df.columns]
+    assert len(missing_features) == 0, f"Missing required features in df_test: {missing_features}"
+    print_to_log_info(f"✅ All {len(model_features)} training features present in test data")
+    
+    # Session validation and statistics
+    if session_col in df.columns:
+        unique_sessions = df[session_col].unique().to_list()
+        print_to_log_info(f"✅ Found {len(unique_sessions)} unique sessions: {unique_sessions}")
+        session_counts = df.group_by(session_col).agg(pl.count().alias('count')).sort(session_col)
+        print_to_log_info(f"Session distribution:")
+        for row in session_counts.iter_rows():
+            print_to_log_info(f"  Session {row[0]}: {row[1]} boards")
+    else:
+        print_to_log_info("⚠️  No session column found - treating as single session")
+        df = df.with_columns(pl.lit(1).alias(session_col))
+        unique_sessions = [1]
+    
+    # Check if we have actual values for evaluation
+    has_actuals = 'Pct_NS' in df.columns and 'Pct_EW' in df.columns
+    has_target = target_name in df.columns
+    
+    print_to_log_info(f"Evaluation mode: Pct_NS/EW available={has_actuals}, {target_name} available={has_target}")
+    
+    # Prepare inference data - convert to pandas for compatibility with existing inference pipeline
+    inference_features = model_features + ([target_name] if has_target else [])
+    df_inference = df.select(inference_features).to_pandas()
+    
+    # Run inference using existing get_predictions function
+    print_to_log_info("Running model inference...")
+    try:
+        df_predictions = get_predictions(learn_dict, df_inference, y_names=[target_name] if has_target else None, device=device)
+        print_to_log_info(f"✅ Inference completed: {len(df_predictions)} predictions generated")
+    except Exception as e:
+        raise RuntimeError(f"Inference failed: {e}")
+    
+    # Find prediction column with robust naming
+    pred_col_name = f"{target_name}_Pred"
+    if pred_col_name not in df_predictions.columns:
+        pred_cols = [col for col in df_predictions.columns if col.endswith('_Pred')]
+        if pred_cols:
+            pred_col_name = pred_cols[0]
+            print_to_log_info(f"Using prediction column: {pred_col_name}")
+        else:
+            raise ValueError(f"Cannot find prediction column. Available: {list(df_predictions.columns)}")
+    
+    raw_predictions = df_predictions[pred_col_name].values
+    print_to_log_info(f"Raw predictions - mean: {np.mean(raw_predictions):.6f}, std: {np.std(raw_predictions):.6f}")
+    
+    # Normalize predictions by session to enforce constraints
+    sessions = df[session_col].to_numpy()
+    constrained_predictions, session_stats = normalize_predictions_by_session(raw_predictions, sessions)
+    
+    # Create final constrained Pct_NS and Pct_EW predictions
+    final_pct_ns = constrained_predictions
+    final_pct_ew = 1.0 - final_pct_ns
+    
+    print_to_log_info(f"Constrained predictions - NS mean: {np.mean(final_pct_ns):.6f}, EW mean: {np.mean(final_pct_ew):.6f}")
+    
+    # Add prediction columns to original DataFrame
+    df_result = df.with_columns([
+        pl.Series('Pct_NS_Pred', final_pct_ns),
+        pl.Series('Pct_EW_Pred', final_pct_ew)
+    ])
+    
+    # Add error columns if actuals are available
+    if has_actuals:
+        actual_ns = df['Pct_NS'].to_numpy()
+        actual_ew = df['Pct_EW'].to_numpy()
+        
+        df_result = df_result.with_columns([
+            pl.Series('Pct_NS_Pred_Error', final_pct_ns - actual_ns),
+            pl.Series('Pct_EW_Pred_Error', final_pct_ew - actual_ew),
+            pl.Series('Pct_NS_Pred_Absolute_Error', np.abs(final_pct_ns - actual_ns)),
+            pl.Series('Pct_EW_Pred_Absolute_Error', np.abs(final_pct_ew - actual_ew))
+        ])
+    
+    # Calculate comprehensive metrics
+    metrics = {}
+    constraint_info = {}
+    
+    # Overall constraint verification
+    row_sums = final_pct_ns + final_pct_ew
+    max_row_error = np.max(np.abs(row_sums - 1.0))
+    constraint_info['row_sum_constraint_satisfied'] = max_row_error < 1e-10
+    constraint_info['max_row_sum_error'] = max_row_error
+    constraint_info['ns_mean'] = np.mean(final_pct_ns)
+    constraint_info['ew_mean'] = np.mean(final_pct_ew)
+    constraint_info['mean_constraint_satisfied'] = abs(np.mean(final_pct_ns) - 0.5) < 1e-6
+    
+    # Per-session and overall metrics
+    if has_actuals:
+        from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+        
+        # Overall metrics
+        metrics['overall'] = {
+            'samples': len(final_pct_ns),
+            'sessions': len(unique_sessions),
+            'ns_rmse': np.sqrt(mean_squared_error(actual_ns, final_pct_ns)),
+            'ns_mae': mean_absolute_error(actual_ns, final_pct_ns),
+            'ns_r2': r2_score(actual_ns, final_pct_ns),
+            'ew_rmse': np.sqrt(mean_squared_error(actual_ew, final_pct_ew)),
+            'ew_mae': mean_absolute_error(actual_ew, final_pct_ew),
+            'ew_r2': r2_score(actual_ew, final_pct_ew)
+        }
+        
+        # Per-session metrics
+        session_metrics = []
+        for session_id in unique_sessions:
+            session_mask = sessions == session_id
+            if np.sum(session_mask) == 0:
+                continue
+                
+            session_actual_ns = actual_ns[session_mask]
+            session_actual_ew = actual_ew[session_mask]
+            session_pred_ns = final_pct_ns[session_mask]
+            session_pred_ew = final_pct_ew[session_mask]
+            
+            session_metric = {
+                'session_id': session_id,
+                'samples': len(session_actual_ns),
+                'ns_rmse': np.sqrt(mean_squared_error(session_actual_ns, session_pred_ns)),
+                'ns_mae': mean_absolute_error(session_actual_ns, session_pred_ns),
+                'ns_r2': r2_score(session_actual_ns, session_pred_ns),
+                'ew_rmse': np.sqrt(mean_squared_error(session_actual_ew, session_pred_ew)),
+                'ew_mae': mean_absolute_error(session_actual_ew, session_pred_ew),
+                'ew_r2': r2_score(session_actual_ew, session_pred_ew),
+                'ns_pred_mean': np.mean(session_pred_ns),
+                'ew_pred_mean': np.mean(session_pred_ew),
+                'ns_actual_mean': np.mean(session_actual_ns),
+                'ew_actual_mean': np.mean(session_actual_ew)
+            }
+            session_metrics.append(session_metric)
+        
+        metrics['sessions'] = session_metrics
+    
+    print_to_log_info("\n=== CONSTRAINT VERIFICATION ===")
+    print_to_log_info(f"✅ Row-wise constraint: Pct_NS + Pct_EW = 1.0 (max error: {max_row_error:.2e})")
+    print_to_log_info(f"✅ Overall mean constraint: NS={constraint_info['ns_mean']:.6f}, EW={constraint_info['ew_mean']:.6f}")
+    
+    # Session constraint verification
+    session_constraint_errors = []
+    for stat in session_stats:
+        error = abs(stat['final_mean'] - 0.5)
+        session_constraint_errors.append(error)
+        print_to_log_info(f"✅ Session {stat['session']} mean constraint: {stat['final_mean']:.6f} (error: {error:.2e})")
+    
+    max_session_constraint_error = max(session_constraint_errors) if session_constraint_errors else 0
+    constraint_info['max_session_constraint_error'] = max_session_constraint_error
+    constraint_info['session_constraints_satisfied'] = max_session_constraint_error < 1e-6
+    
+    if has_actuals:
+        print_to_log_info("\n=== PERFORMANCE METRICS ===")
+        overall = metrics['overall']
+        print_to_log_info(f"Overall ({overall['samples']} samples across {overall['sessions']} sessions):")
+        print_to_log_info(f"  NS: RMSE={overall['ns_rmse']:.6f}, MAE={overall['ns_mae']:.6f}, R²={overall['ns_r2']:.6f}")
+        print_to_log_info(f"  EW: RMSE={overall['ew_rmse']:.6f}, MAE={overall['ew_mae']:.6f}, R²={overall['ew_r2']:.6f}")
+    
+    print_to_log_info(f"\n✅ PREDICT_PCT COMPLETE: {len(df_result)} boards with constrained predictions")
+    
+    return {
+        'df': df_result,
+        'metrics': metrics,
+        'constraints': constraint_info,
+        'sessions': session_stats
+    }
+
+def normalize_predictions_by_session(predictions: Any, sessions: Any) -> Any:
+    """
+    Normalize predictions so that within each session, the mean equals 0.5.
+    This enforces session-wise constraint: mean(Pct_NS_Pred) = 0.5 per session.
+    
+    Args:
+        predictions: array of Pct_NS predictions
+        sessions: array of session identifiers (same length as predictions)
+    
+    Returns:
+        tuple: (normalized predictions, session statistics)
+    """
+    predictions = np.array(predictions)
+    sessions = np.array(sessions)
+    normalized = predictions.copy()
+    
+    session_stats = []
+    
+    for session_id in np.unique(sessions):
+        session_mask = sessions == session_id
+        session_preds = predictions[session_mask]
+        
+        if len(session_preds) == 0:
+            continue
+            
+        # Normalize this session to have mean = 0.5
+        current_mean = session_preds.mean()
+        adjusted = session_preds - current_mean + 0.5
+        
+        # Clamp to [0, 1] range
+        adjusted = np.clip(adjusted, 0.0, 1.0)
+        
+        # Fine-tune if clamping changed the mean
+        final_mean = adjusted.mean()
+        if abs(final_mean - 0.5) > 1e-6:
+            # Scale around 0.5 to get exact mean
+            adjusted = 0.5 + (adjusted - 0.5) * (0.5 / final_mean)
+            adjusted = np.clip(adjusted, 0.0, 1.0)
+        
+        normalized[session_mask] = adjusted
+        session_stats.append({
+            'session': session_id,
+            'count': len(session_preds),
+            'original_mean': current_mean,
+            'final_mean': adjusted.mean()
+        })
+    
+    print_to_log_info(f"Normalized {len(session_stats)} sessions")
+    print_to_log_info(f"Overall mean after session normalization: {normalized.mean():.6f}")
+    
+    return normalized, session_stats 

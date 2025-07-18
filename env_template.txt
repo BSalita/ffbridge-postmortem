@@ -1,0 +1,19 @@
+# FFBridge Authentication Configuration Template
+# Copy this content to a file named ".env" in your project directory
+
+# Token update timestamp (automatically filled by signInWithPassword.bat)
+FFBRIDGE_BEARER_TOKEN_LAST_UPDATE= 
+
+# Your FFBridge login credentials
+FFBRIDGE_EMAIL=your.email@example.com
+FFBRIDGE_PASSWORD=your_password_here
+
+# Browser automation settings (true/false)
+FFBRIDGE_HEADLESS=true
+
+# Bearer token for api-lancelot.ffbridge.fr (automatically filled by automation script)
+FFBRIDGE_BEARER_TOKEN_LANCELOT= 
+
+# EASI token for api.ffbridge.fr (manually set or automatically filled)
+FFBRIDGE_EASI_TOKEN=
+

@@ -341,7 +341,7 @@ def convert_endplay_df_to_mlBridge_df(df):
             # If BidLvl is None, make Contract None
             pl.when(pl.col('BidLvl').is_null())
             .then(None)
-            .otherwise(pl.col('BidLvl').cast(pl.String)+pl.col('BidSuit')+pl.col('Declarer')+pl.col('Dbl'))
+            .otherwise(pl.col('BidLvl').cast(pl.String)+pl.col('BidSuit')+pl.col('Dbl')+pl.col('Declarer'))
             .alias('Contract'),
         )
         df = df.with_columns(

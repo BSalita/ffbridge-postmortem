@@ -5,6 +5,9 @@
 # assert that column names don't exist in df.columns for all column creation functions.
 # refactor when should *_Dcl columns be created? At end of each func, class, class of it's own?
 # if a column already exists, print a message and skip creation.
+# if a column already exists, generate a new column and assert that the new column is the same as the existing column.
+# print column names and dtypes for all columns generated and skipped.
+# print a list of mandatory columns that must be present in df.columns. many columns can be derived from other columns e.g. scoring columns.
 
 import polars as pl
 from collections import defaultdict
@@ -220,19 +223,18 @@ def calculate_ddtricks_par_scores(hrs_df: pl.DataFrame, hrs_cache_df: pl.DataFra
     print(f"{hrs_df.height=}")
     print(f"{hrs_cache_df.height=}")
     assert hrs_df['PBN'].null_count() == 0, "PBNs in df must be non-null"
+    assert hrs_df.filter(pl.col('PBN').str.len_chars().ne(69)).height == 0, hrs_df.filter(pl.col('PBN').str.len_chars().ne(69))
     assert hrs_cache_df['PBN'].null_count() == 0, "PBNs in hrs_cache_df must be non-null"
-    unique_hrs_df = hrs_df.unique(subset=['PBN']) # could be non-unique PBN with difference Dealer, Vul.
-    print(f"{len(unique_hrs_df)=}")
-    unique_hrs_df_pbns = unique_hrs_df['PBN'] # could be non-unique PBN with difference Dealer, Vul.
+    assert hrs_cache_df.filter(pl.col('PBN').str.len_chars().ne(69)).height == 0, hrs_cache_df.filter(pl.col('PBN').str.len_chars().ne(69))
+    unique_hrs_df_pbns = set(hrs_df['PBN']) # could be non-unique PBN with difference Dealer, Vul.
     print(f"{len(unique_hrs_df_pbns)=}")
     hrs_cache_with_nulls_df = hrs_cache_df.filter(pl.col('DD_N_C').is_null() | pl.col('ParScore').is_null())
     print(f"{len(hrs_cache_with_nulls_df)=}")
     hrs_cache_with_nulls_pbns = hrs_cache_with_nulls_df['PBN']
     print(f"{len(hrs_cache_with_nulls_pbns)=}")
-    unique_hrs_cache_with_nulls_pbns = hrs_cache_with_nulls_pbns.unique()
+    unique_hrs_cache_with_nulls_pbns = set(hrs_cache_with_nulls_pbns)
     print(f"{len(unique_hrs_cache_with_nulls_pbns)=}")
     
-    # FIXED: Correct the logic
     hrs_cache_all_pbns = set(hrs_cache_df['PBN'])
     pbns_to_add = set(unique_hrs_df_pbns) - hrs_cache_all_pbns  # In hrs_df but NOT in hrs_cache_df
     print(f"{len(pbns_to_add)=}")
@@ -267,7 +269,6 @@ def calculate_ddtricks_par_scores(hrs_df: pl.DataFrame, hrs_cache_df: pl.DataFra
     }
 
     # Create dataframe of par scores using double dummy
-    # FIXED: Use hrs_df for Dealer/Vul since it has complete data
     d = defaultdict(list)
     dd_columns = {f'DD_{direction}_{suit}':pl.UInt8 for suit in 'SHDCN' for direction in 'NESW'}
 
@@ -596,15 +597,15 @@ def convert_contract_to_contract(df: pl.DataFrame) -> pl.Series:
 
 # None is used instead of pl.Null because pl.Null becomes 'Null' string in pl.String columns. Not sure what's going on but the solution is to use None.
 def convert_contract_to_declarer(df: pl.DataFrame) -> List[Optional[str]]:
-    return [None if c is None or c == 'PASS' else c[2] for c in df['Contract']] # extract declarer from contract
+    return [None if c is None or c == 'PASS' else c[-1] for c in df['Contract']] # extract declarer from contract
 
 
 def convert_contract_to_pair_declarer(df: pl.DataFrame) -> List[Optional[str]]:
-    return [None if c is None or c == 'PASS' else 'NS' if c[2] in 'NS' else 'EW' for c in df['Contract']] # extract declarer from contract
+    return [None if c is None or c == 'PASS' else 'NS' if c[-1] in 'NS' else 'EW' for c in df['Contract']] # extract declarer from contract
 
 
 def convert_contract_to_vul_declarer(df: pl.DataFrame) -> List[Optional[str]]:
-    return [None if c is None or c == 'PASS' else ns if c[2] in 'NS' else ew for c,ns,ew in zip(df['Contract'],df['Vul_NS'],df['Vul_EW'])] # extract declarer from contract
+    return [None if c is None or c == 'PASS' else bool(v&1) if c[-1] in 'NS' else bool(v&2) for c,v in zip(df['Contract'],df['iVul'])] # extract declarer from contract
 
 
 def convert_contract_to_level(df: pl.DataFrame) -> List[Optional[int]]:
@@ -616,7 +617,7 @@ def convert_contract_to_strain(df: pl.DataFrame) -> List[Optional[str]]:
 
 
 def convert_contract_to_dbl(df: pl.DataFrame) -> List[Optional[str]]:
-    return [None if c is None or c == 'PASS' else c[3:] for c in df['Contract']] # extract dbl from contract
+    return [None if c is None or c == 'PASS' else c[2:-1] for c in df['Contract']] # extract dbl from contract
 
 
 def convert_declarer_to_DeclarerName(df: pl.DataFrame) -> List[Optional[str]]:
@@ -627,8 +628,14 @@ def convert_declarer_to_DeclarerID(df: pl.DataFrame) -> List[Optional[str]]:
     return [None if d is None else df[f'Player_ID_{d}'][i] for i,d in enumerate(df['Declarer_Direction'])] # extract declarer name using declarer direction as the lookup key
 
 
+# convert to ml df needs to perform this.
 def convert_contract_to_result(df: pl.DataFrame) -> List[Optional[int]]:
-    return [None if c is None or c == 'PASS' else 0 if c[-1] in ['=','0'] else int(c[-1]) if c[-2] == '+' else -int(c[-1]) for c in df['Contract']] # create result from contract
+    assert False, "convert_contract_to_result not implemented. Must be done in convert_to_mldf()."
+#    return [None if c is None or c == 'PASS' else 0 if c[-1] in ['=','0'] else int(c[-1]) if c[-2] == '+' else -int(c[-1]) for c in df['Contract']] # create result from contract
+
+
+def convert_tricks_to_result(df: pl.DataFrame) -> List[Optional[int]]:
+    return [None if t is None or c == 'PASS' else t-6-int(c[0]) for c,t in zip(df['Contract'],df['Tricks'])] # create result from contracts and tricks
 
 
 def convert_contract_to_tricks(df: pl.DataFrame) -> List[Optional[int]]:
@@ -652,7 +659,7 @@ def convert_contract_to_DD_Score_Ref(df: pl.DataFrame) -> pl.DataFrame:
     all_scores_d, scores_d, scores_df = calculate_scores()
     # Create all DD_Score columns
     df = df.with_columns([
-        pl.struct([f"DD_{direction}_{strain}", f"Vul_{pair_direction}"])
+        pl.struct([f"DD_{direction}_{strain}", f"Vul_{pair_direction}"]) # todo: change Vul_{pair_direction} to use iVul so brs_df can be used without joining Vul_(NS|EW).
         .map_elements(
             lambda r, lvl=level, strn=strain, dir=direction, pdir=pair_direction: 
                 scores_d.get((lvl, strn, r[f"DD_{dir}_{strn}"], r[f"Vul_{pdir}"]), None),
@@ -1270,6 +1277,13 @@ class DD_SD_Augmenter:
 
         self.df = self.df.join(self.hrs_cache_df, on=['PBN','Dealer','Vul'], how='inner') # on='PBN', how='left' or on=['PBN','Dealer','Vul'], how='inner'
 
+        # create DD_(NS|EW)_[SHDCN] which is the max of NS or EW for each strain
+        self.df = self.df.with_columns(
+            pl.max_horizontal(f"DD_{pair[0]}_{strain}",f"DD_{pair[1]}_{strain}").alias(f"DD_{pair}_{strain}")
+            for pair in ['NS','EW']
+            for strain in "SHDCN"
+        )
+
         self.df = self._time_operation(
             "calculate_sd_expected_values",
             calculate_sd_expected_values,
@@ -1419,6 +1433,7 @@ class FinalContractAugmenter:
         assert 'LHO_Direction' not in self.df.columns
         assert 'Dummy_Direction' not in self.df.columns
         assert 'RHO_Direction' not in self.df.columns
+        print(self.df['Declarer_Direction'].value_counts())
         self.df = self._time_operation(
             "convert_declarer_to_directions",
             lambda df: df.with_columns([
@@ -1471,14 +1486,24 @@ class FinalContractAugmenter:
     # todo: move this to contract established class
     def _create_result_columns(self) -> None:
         if 'Result' not in self.df.columns:
-            assert 'Contract' in self.df.columns, 'Contract column is required to create Result column.'
-            self.df = self._time_operation(
-                "convert_contract_to_result",
-                lambda df: df.with_columns(
-                    pl.Series('Result', convert_contract_to_result(df), pl.Int8, strict=False)
-                ),
-                self.df
-            )
+            if 'Tricks' in self.df.columns:
+                self.df = self._time_operation(
+                    "convert_tricks_to_result",
+                    lambda df: df.with_columns(
+                        pl.Series('Result', convert_tricks_to_result(df), pl.Int8, strict=False)
+                    ),
+                    self.df
+                )
+            else:
+                assert 'Contract' in self.df.columns, 'Contract column is required to create Result column.'
+                # todo: create assert that result is in Contract.
+                self.df = self._time_operation(
+                    "convert_contract_to_result",
+                    lambda df: df.with_columns(
+                        pl.Series('Result', convert_contract_to_result(df), pl.Int8, strict=False)
+                    ),
+                    self.df
+                )
 
         if 'Tricks' not in self.df.columns:
             self.df = self._time_operation(
@@ -1525,7 +1550,7 @@ class FinalContractAugmenter:
         )
 
     # todo: move this to contract established class
-    def _create_ev_expressions_for_pair(self, pd: str) -> list:
+    def _create_ev_expressions_for_pair(self, pd: str) -> List:
         expressions = []
         expressions.extend(self._create_basic_ev_expressions(pd))
         
@@ -1541,7 +1566,7 @@ class FinalContractAugmenter:
         return expressions
 
     # todo: move this to contract established class
-    def _create_basic_ev_expressions(self, pd: str) -> list:
+    def _create_basic_ev_expressions(self, pd: str) -> List:
         return [
             pl.when(self.vul_conditions[pd])
               .then(pl.col(f'EV_{pd}_V_Max'))
@@ -1554,7 +1579,7 @@ class FinalContractAugmenter:
         ]
 
     # todo: move this to contract established class
-    def _create_declarer_ev_expressions(self, pd: str, dd: str) -> list:
+    def _create_declarer_ev_expressions(self, pd: str, dd: str) -> List:
         return [
             pl.when(self.vul_conditions[pd])
               .then(pl.col(f'EV_{pd}_{dd}_V_Max'))
@@ -1567,7 +1592,7 @@ class FinalContractAugmenter:
         ]
 
     # todo: move this to contract established class
-    def _create_strain_ev_expressions(self, pd: str, dd: str, s: str) -> list:
+    def _create_strain_ev_expressions(self, pd: str, dd: str, s: str) -> List:
         return [
             pl.when(self.vul_conditions[pd])
               .then(pl.col(f'EV_{pd}_{dd}_{s}_V_Max'))
@@ -1580,7 +1605,7 @@ class FinalContractAugmenter:
         ]
 
     # todo: move this to contract established class
-    def _create_level_ev_expressions(self, pd: str, dd: str, s: str, l: int) -> list:
+    def _create_level_ev_expressions(self, pd: str, dd: str, s: str, l: int) -> List:
         return [
             pl.when(self.vul_conditions[pd])
             .then(pl.col(f'EV_{pd}_{dd}_{s}_{l}_V'))
@@ -1589,18 +1614,34 @@ class FinalContractAugmenter:
         ]
 
     def _create_score_columns(self) -> None:
-        if 'Score' not in self.df.columns and 'Score_NS' not in self.df.columns:
-            all_scores_d, scores_d, scores_df = calculate_scores()
-            self.df = self._time_operation(
-                "convert_contract_to_score",
-                lambda df: df.with_columns([
-                    pl.struct(['BidLvl', 'BidSuit', 'Tricks', 'Vul_Declarer', 'Dbl'])
-                        .map_elements(lambda x: all_scores_d.get(tuple(x.values()),None),
-                                    return_dtype=pl.Int16)
+
+        if 'Score' not in self.df.columns:
+            if 'Score_NS' in self.df.columns:
+                assert 'Score_EW' in self.df.columns, "Score_EW does not exist but Score_NS does."
+                self.df = self._time_operation(
+                    "convert_score_nsew_to_score",
+                    lambda df: df.with_columns([
+                        pl.when(pl.col('Declarer_Pair_Direction').eq('NS'))
+                        .then(pl.col('Score_NS'))
+                        .otherwise(pl.col('Score_EW')) # assuming Score_EW can be a score, 0 (PASS) or None?
                         .alias('Score'),
-                ]),
-                self.df
-            )
+                    ]),
+                    self.df
+                )
+            else:
+                # neither 'Score' nor 'Score_NS' exist.
+                all_scores_d, scores_d, scores_df = calculate_scores()
+                self.df = self._time_operation(
+                    "convert_contract_to_score",
+                    lambda df: df.with_columns([
+                        pl.struct(['BidLvl', 'BidSuit', 'Tricks', 'Vul_Declarer', 'Dbl'])
+                            .map_elements(lambda x: all_scores_d.get(tuple(x.values()),None),
+                                        return_dtype=pl.Int16)
+                            .alias('Score'),
+                    ]),
+                    self.df
+                )
+
         if 'Score_NS' not in self.df.columns:
             self.df = self._time_operation(
                 "convert_score_to_score",
@@ -2153,9 +2194,11 @@ class AllBoardResultsAugmentations:
     def __init__(self, df: pl.DataFrame):
         self.df = df
 
+
     def perform_all_board_results_augmentations(self) -> pl.DataFrame:
         """Execute all board results augmentation steps. Input is a fully augmented hand record DataFrame.
-        
+        Only relies on columns within brs_df and not any in hrs_df.
+
         Returns:
             The fully joined and augmented hand record and board results DataFrame.
         """
@@ -2206,4 +2249,196 @@ class AllAugmentations:
         print(f"All augmentations completed in {time.time() - t_start:.2f} seconds")
 
         return self.df, self.hrs_cache_df
+
+
+# def read_parquet_sample(file_path, n_rows=1000, method='head'):
+#     """
+#     Read a sample of rows from a parquet file.
     
+#     Args:
+#         file_path: Path to parquet file
+#         n_rows: Number of rows to sample
+#         method: 'head' for first n rows, 'sample' for random sample, 'tail' for last n rows
+    
+#     Returns:
+#         DataFrame with sampled rows
+#     """
+#     if method == 'head':
+#         return pl.scan_parquet(file_path).limit(n_rows).collect()
+#     elif method == 'sample':
+#         return pl.scan_parquet(file_path).sample(n_rows).collect()
+#     elif method == 'tail':
+#         return pl.scan_parquet(file_path).tail(n_rows).collect()
+#     else:
+#         raise ValueError("method must be 'head', 'sample', or 'tail'")
+
+# def read_parquet_slice(file_path, offset=0, length=1000):
+#     """
+#     Read a specific slice of rows from a parquet file.
+    
+#     Args:
+#         file_path: Path to parquet file
+#         offset: Starting row (0-indexed)
+#         length: Number of rows to read
+    
+#     Returns:
+#         DataFrame with sliced rows
+#     """
+#     return pl.scan_parquet(file_path).slice(offset, length).collect()
+
+# def read_parquet_filtered(file_path, filters=None, n_rows=None):
+#     """
+#     Read parquet file with filters and optional row limit.
+    
+#     Args:
+#         file_path: Path to parquet file
+#         filters: Polars expression for filtering
+#         n_rows: Optional limit on number of rows
+    
+#     Returns:
+#         Filtered DataFrame
+#     """
+#     lazy_df = pl.scan_parquet(file_path)
+    
+#     if filters is not None:
+#         lazy_df = lazy_df.filter(filters)
+    
+#     if n_rows is not None:
+#         lazy_df = lazy_df.limit(n_rows)
+    
+#     return lazy_df.collect()
+
+# def read_parquet_every_nth(file_path, n=10):
+#     """
+#     Read every nth row from a parquet file.
+    
+#     Args:
+#         file_path: Path to parquet file
+#         n: Take every nth row
+    
+#     Returns:
+#         DataFrame with every nth row
+#     """
+#     return (pl.scan_parquet(file_path)
+#             .with_row_index()
+#             .filter(pl.col("index") % n == 0)
+#             .drop("index")
+#             .collect())
+
+# def read_parquet_by_percentage(file_path, percentage=0.1):
+#     """
+#     Read a percentage of rows from a parquet file using random sampling.
+    
+#     Args:
+#         file_path: Path to parquet file
+#         percentage: Percentage of rows to sample (0.0 to 1.0)
+    
+#     Returns:
+#         DataFrame with sampled rows
+#     """
+#     return pl.scan_parquet(file_path).sample(fraction=percentage).collect()
+
+# def read_parquet_lazy_info(file_path):
+#     """
+#     Get information about a parquet file without reading data.
+    
+#     Args:
+#         file_path: Path to parquet file
+    
+#     Returns:
+#         Dictionary with file info
+#     """
+#     lazy_df = pl.scan_parquet(file_path)
+#     schema = lazy_df.collect_schema()
+    
+#     # Get row count (this does scan the file but doesn't load data)
+#     row_count = lazy_df.select(pl.len()).collect().item()
+    
+#     return {
+#         'columns': schema.names(),
+#         'dtypes': {name: str(dtype) for name, dtype in schema.items()},
+#         'row_count': row_count,
+#         'column_count': len(schema)
+#     }
+
+# def read_parquet_lazy_select(file_path, columns=None, filters=None, sample_n=None, sample_fraction=None):
+#     """
+#     Read parquet file using lazy evaluation with column selection and optional operations.
+#     This is the PREFERRED approach for reading parquet files.
+    
+#     Args:
+#         file_path: Path to parquet file
+#         columns: List of column names to select
+#         filters: Polars expression for filtering
+#         sample_n: Number of rows to sample
+#         sample_fraction: Fraction of rows to sample (0.0 to 1.0)
+    
+#     Returns:
+#         DataFrame with selected columns and applied operations
+#     """
+#     lazy_df = pl.scan_parquet(file_path)
+    
+#     # Apply column selection (projection pushdown)
+#     if columns is not None:
+#         lazy_df = lazy_df.select(columns)
+    
+#     # Apply filters (predicate pushdown)
+#     if filters is not None:
+#         lazy_df = lazy_df.filter(filters)
+    
+#     # Apply sampling
+#     if sample_n is not None:
+#         lazy_df = lazy_df.sample(n=sample_n)
+#     elif sample_fraction is not None:
+#         lazy_df = lazy_df.sample(fraction=sample_fraction)
+    
+#     # Execute the optimized query plan
+#     return lazy_df.collect()
+
+# def read_parquet_with_sampling(file_path, columns=None, n_rows=None, method='limit', seed=None):
+#     """
+#     Read parquet file with sampling, handling LazyFrame compatibility issues.
+    
+#     Args:
+#         file_path: Path to parquet file
+#         columns: List of column names to select
+#         n_rows: Number of rows to sample/limit
+#         method: 'limit' (first n rows), 'collect_sample' (random), 'systematic' (every nth)
+#         seed: Random seed for sampling
+    
+#     Returns:
+#         DataFrame with sampled rows
+#     """
+#     lazy_df = pl.scan_parquet(file_path)
+    
+#     if columns is not None:
+#         lazy_df = lazy_df.select(columns)
+    
+#     if n_rows is None:
+#         return lazy_df.collect()
+    
+#     if method == 'limit':
+#         # Fastest - first n rows
+#         return lazy_df.limit(n_rows).collect()
+    
+#     elif method == 'collect_sample':
+#         # True random sampling - requires collecting all data first
+#         df = lazy_df.collect()
+#         return df.sample(n=n_rows, seed=seed)
+    
+#     elif method == 'systematic':
+#         # Every nth row - memory efficient
+#         total_rows = lazy_df.select(pl.len()).collect().item()
+#         skip = max(1, total_rows // n_rows)
+#         return (
+#             lazy_df
+#             .with_row_index()
+#             .filter(pl.col("index") % skip == 0)
+#             .drop("index")
+#             .limit(n_rows)
+#             .collect()
+#         )
+    
+#     else:
+#         raise ValueError("method must be 'limit', 'collect_sample', or 'systematic'")
+

@@ -1,50 +1,51 @@
-# for app.py
-streamlit
-streamlit-extras
-streamlit-chat
-stqdm
-openai
-pandas
-polars
-duckdb
-requests
-urllib3
-python-dotenv
-tenacity
-termcolor
-streamlit-chat
-bs4
-endplay
-pyparse
-#pyparse>=3.0.0
-sqlalchemy
-sqlalchemy_utils
-safetensors
-scikit-learn
-fastai
-torch
-torchvision
-torchaudio
+# Core dependencies for app.py
+streamlit>=1.28.0
+streamlit-extras>=0.3.0
+streamlit-chat>=0.1.0
+stqdm>=0.0.5
+openai>=1.0.0
+pandas>=2.0.0
+polars>=0.20.0
+duckdb>=0.9.0
+requests>=2.31.0
+urllib3>=2.0.0
+python-dotenv>=1.0.0
+tenacity>=8.2.0
+termcolor>=2.3.0
+bs4>=4.12.0
+endplay>=0.1.0
+pyparse>=3.0.0
+sqlalchemy>=2.0.0
+sqlalchemy_utils>=0.41.0
+safetensors>=0.4.0
+scikit-learn>=1.3.0
+fastai>=2.7.0
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
 
-# for streamlitlib
-reportlab
-markdown
-aiohttp
+# Type checking and development dependencies
+typing-extensions>=4.8.0
+mypy>=1.5.0
+types-requests>=2.31.0
+types-urllib3>=1.26.0
 
+# Streamlit utilities
+reportlab>=4.0.0
+markdown>=3.5.0
+aiohttp>=3.9.0
 
-# for mlBridgeLib
-numpy
-pathlib
-scikit-learn
-matplotlib
-IPython
-streamlit-aggrid
-seaborn
+# Machine learning and data science
+numpy>=1.24.0
+matplotlib>=3.7.0
+IPython>=8.15.0
+streamlit-aggrid>=0.3.0
+seaborn>=0.12.0
 
-# for acbllib
+# Web automation
+playwright>=1.40.0
 
-# for chatlib
-
-# for pytorch lightning
+# Additional utilities
+werkzeug>=3.0.0
 
 
