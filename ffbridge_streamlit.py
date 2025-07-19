@@ -1,9 +1,19 @@
 # streamlit program to display French Bridge (ffbridge) game results and statistics.
 # Invoke from system prompt using: streamlit run ffbridge_streamlit.py
 
-# todo ffbridge:
-# given a player_id, how to get recent games?
-# unblock my ip address
+# todo (priority):
+# look for errors in report.
+# wrong score inlast dataframe - compute adjustments (only RRN?).
+# 'declarer' stats have empty dataframes.
+
+# todo:
+# tell ffbridge tounblock my ip address
+# move ffbridge legacy api code into mlBridgeFFLib.
+# move any Roy Rene code into mlBridgeBPLib?
+# Refactor common postmortem methods into ml bridge class. Sync with other postmortem projects.
+# Decide on whether to use faster RRN code or slower be-nice-to-server code? Does it matter?
+# Need graceful error handling. Error on 'id' rename: https://api.ffbridge.fr/api/v1/simultaneous-tournaments/2991057. Doesn't work in curl so not my problem.
+# Need graceful error handling. Error on roadsheets: https://api.ffbridge.fr/api/v1/simultaneous-tournaments/32178/teams/4230171/roadsheets. Doesn't work in curl so not my problem.
 
 
 import streamlit as st
@@ -572,7 +582,7 @@ def get_df_from_api_name_licencie(k: str, url: str) -> pl.DataFrame:
             df = pl.DataFrame(pd.json_normalize(json_data, sep='_'))
             
             # Get the struct fields and rename them before unnesting
-            exploded_col = df.explode('roadsheets')
+            exploded_col = df.explode('roadsheets') # https://api.ffbridge.fr/api/v1/simultaneous-tournaments/32178/teams/4230171/roadsheets
             struct_fields = exploded_col['roadsheets'].struct.fields
             
             # Rename struct fields first, then unnest
@@ -623,6 +633,7 @@ def get_df_from_api_name_licencie(k: str, url: str) -> pl.DataFrame:
     
             # Create DataFrame from the JSON response. json_data can be a dict or a list.
             df = pl.DataFrame(pd.json_normalize(json_data, sep='_'))
+            # todo: at least one game doesn't have an 'id' to rename. https://api.ffbridge.fr/api/v1/simultaneous-tournaments/2991057
             df = df.rename({'id': 'simultane_id'})
             
             # Explode to get individual structs, then get struct fields  
@@ -1009,6 +1020,8 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
 
     print(f"Retrieving latest results for {player_id}")
 
+    st.markdown('<div style="height: 50px;"><a name="top-of-report"></a></div>', unsafe_allow_html=True)
+
     con = st.session_state.con
 
     with st.spinner(f"Retrieving a list of games for {player_id} ..."):
@@ -1048,7 +1061,6 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
         st.session_state.player_row = simultaneous_tournaments_df.filter(
             pl.col('team_players_id').cast(pl.Int64) == int(st.session_state.player_id)
         )
-        st.session_state.game_description = simultaneous_tournaments_df['name'].first()
         if st.session_state.debug_mode:
             st.caption(f"player_row")
             st.dataframe(st.session_state.player_row,selection_mode='single-row')
@@ -1068,6 +1080,7 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
         st.session_state.tournament_date = datetime.fromisoformat(st.session_state.player_row['date'].first()).strftime('%Y-%m-%d')
         st.session_state.game_description = st.session_state.player_row['name'].first()
         st.session_state.player_name = st.session_state.player_row['team_players_firstname'].first() + ' ' + st.session_state.player_row['team_players_lastname'].first()
+        st.session_state.game_url = f"https://licencie.ffbridge.fr/#/resultats/simultane/{st.session_state.simultane_id}/details/{st.session_state.team_id}?orgId={st.session_state.org_id}"
         # find same team_id but partner_position
         st.session_state.partner_row = simultaneous_tournaments_df.filter(
             pl.col('team_id').eq(st.session_state.team_id) &
@@ -1082,7 +1095,7 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
         st.session_state.partner_name = st.session_state.partner_row['team_players_firstname'].first() + ' ' + st.session_state.partner_row['team_players_lastname'].first()
         print('get_ffbridge_results_from_player_number time:', time.time()-t) # takes 4s
 
-    with st.spinner(f'Preparing Bridge Game Postmortem Report. Takes 2 minutes total...'):
+    with st.spinner(f'Preparing Bridge Game Postmortem Report...'):
         # Use the entered URL or fallback to default.
         #st.session_state.game_url = st.session_state.game_url_input.strip()
         #if st.session_state.game_url is None or st.session_state.game_url.strip() == "":
@@ -1117,128 +1130,129 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
             max_deals = 36 # todo: is max_deals (number of deals) available in any API at this point?
             deal_numbers = dfs['simultaneous_roadsheets']['roadsheets_deals_dealNumber'].unique().to_list()
             # uses st.session_state.player_license_number to get boards because Roy Rene website works with player_license_number to get boards.
-            if False:
-                # calls internal async version which takes 60s. almost 3x faster than asyncio version below
-                #  -- but this version doesn't show progress bar -- might overwhelm server as I'm getting blacklisted(?).
-                boards_dfs = mlBridgeLib.mlBridgeBPLib.get_all_boards_for_player(st.session_state.tournament_id, st.session_state.organization_code, st.session_state.player_license_number, max_deals=36)
-            else:
-                # Get boards data with progress bar by processing boards one by one using the existing function
-                boards_dfs = {'boards': None, 'score_frequency': None}
-                
-                try:
-                    import asyncio
+            with st.spinner(f"Roy Rene tournaments require an extra step. Takes 1 to 3 minutes..."):
+                if False:
+                    # calls internal async version which takes 60s. almost 3x faster than asyncio version below
+                    #  -- but this version doesn't show progress bar -- might overwhelm server as I'm getting blacklisted(?).
+                    boards_dfs = mlBridgeLib.mlBridgeBPLib.get_all_boards_for_player(st.session_state.tournament_id, st.session_state.organization_code, st.session_state.player_license_number, max_deals=36)
+                else:
+                    # Get boards data with progress bar by processing boards one by one using the existing function
+                    boards_dfs = {'boards': None, 'score_frequency': None}
                     
-                    async def get_boards_with_progress():
-                        # First, get the route data to see which boards this player actually played
-                        # We need to find the player's team first to get the route data
-                        teams_df = await mlBridgeLib.mlBridgeBPLib.get_teams_by_tournament_async(st.session_state.tournament_id, st.session_state.organization_code)
+                    try:
+                        import asyncio
                         
-                        # Normalize player_id by stripping leading zeros for robust string comparison
-                        norm_player_id = st.session_state.player_license_number.lstrip('0')
-                        
-                        # Find the team where the player_id matches either Player1_ID or Player2_ID
-                        player_team = teams_df.filter(
-                            (pl.col('Player1_ID').str.strip_chars_start('0') == norm_player_id) | 
-                            (pl.col('Player2_ID').str.strip_chars_start('0') == norm_player_id)
-                        )
-                        
-                        # Check if player was found
-                        if len(player_team) == 0:
-                            raise ValueError(f"Player {st.session_state.player_license_number} not found in tournament {st.session_state.tournament_id}, club {st.session_state.organization_code}")
-                        
-                        # Get the section and team number from the extracted data
-                        sc = player_team['Section'].first()
-                        team_number = player_team['Team_Number'].first()
-                        
-                        print(f"Found player {st.session_state.player_license_number} in team {team_number}, section {sc}")
-                        
-                        # Get the route data to see which boards this team actually played
-                        route_url = f"https://www.bridgeplus.com/nos-simultanes/resultats/?p=route&res=sim&eq={team_number}&tr={st.session_state.tournament_id}&cl={st.session_state.organization_code}&sc={sc}"
-                        print(f"Getting route data from: {route_url}")
-                        
-                        played_boards = []
-                        async with mlBridgeLib.mlBridgeBPLib.get_browser_context_async() as context:
-                            try:
-                                route_results = await mlBridgeLib.mlBridgeBPLib.request_board_results_dataframe_async(route_url, context)
-                                if len(route_results) == 0:
-                                    st.warning(f"No route data found for team {team_number}")
-                                    return {'boards': pl.DataFrame(), 'score_frequency': pl.DataFrame()}
-                                else:
-                                    played_boards = route_results['Board'].to_list()
-                                    print(f"Found {len(played_boards)} boards played by team {team_number}: {played_boards}")
-                            except Exception as e:
-                                print(f"Error getting route data for team {team_number}: {e}")
-                                raise
-                        
-                        if not played_boards:
-                            print(f"No boards found in route data for team {team_number}, returning empty results")
-                            return {'boards': pl.DataFrame(), 'score_frequency': pl.DataFrame()}
-                        
-                        # Create progress bar for board processing
-                        progress_bar = st.progress(0)
-                        progress_text = st.empty()
-                        
-                        # Now get board data only for the boards that were actually played using the existing function
-                        all_boards = []
-                        all_frequency = []
-                        
-                        async with mlBridgeLib.mlBridgeBPLib.get_browser_context_async() as context:
-                            for idx, deal_num in enumerate(played_boards):
+                        async def get_boards_with_progress():
+                            # First, get the route data to see which boards this player actually played
+                            # We need to find the player's team first to get the route data
+                            teams_df = await mlBridgeLib.mlBridgeBPLib.get_teams_by_tournament_async(st.session_state.tournament_id, st.session_state.organization_code)
+                            
+                            # Normalize player_id by stripping leading zeros for robust string comparison
+                            norm_player_id = st.session_state.player_license_number.lstrip('0')
+                            
+                            # Find the team where the player_id matches either Player1_ID or Player2_ID
+                            player_team = teams_df.filter(
+                                (pl.col('Player1_ID').str.strip_chars_start('0') == norm_player_id) | 
+                                (pl.col('Player2_ID').str.strip_chars_start('0') == norm_player_id)
+                            )
+                            
+                            # Check if player was found
+                            if len(player_team) == 0:
+                                raise ValueError(f"Player {st.session_state.player_license_number} not found in tournament {st.session_state.tournament_id}, club {st.session_state.organization_code}")
+                            
+                            # Get the section and team number from the extracted data
+                            sc = player_team['Section'].first()
+                            team_number = player_team['Team_Number'].first()
+                            
+                            print(f"Found player {st.session_state.player_license_number} in team {team_number}, section {sc}")
+                            
+                            # Get the route data to see which boards this team actually played
+                            route_url = f"https://www.bridgeplus.com/nos-simultanes/resultats/?p=route&res=sim&eq={team_number}&tr={st.session_state.tournament_id}&cl={st.session_state.organization_code}&sc={sc}"
+                            print(f"Getting route data from: {route_url}")
+                            
+                            played_boards = []
+                            async with mlBridgeLib.mlBridgeBPLib.get_browser_context_async() as context:
                                 try:
-                                    # Update progress
-                                    progress = (idx + 1) / len(played_boards)
-                                    progress_bar.progress(progress)
-                                    progress_text.text(f"Processing board {idx + 1}/{len(played_boards)}: Board {deal_num}")
-                                    
-                                    # Use the existing function to get the specific board for this player
-                                    result = await mlBridgeLib.mlBridgeBPLib.get_board_for_player_async(
-                                        st.session_state.tournament_id, 
-                                        st.session_state.organization_code, 
-                                        st.session_state.player_license_number, 
-                                        str(deal_num), 
-                                        context
-                                    )
-                                    
-                                    if len(result['boards']) > 0:
-                                        all_boards.append(result['boards'])
-                                    if len(result['score_frequency']) > 0:
-                                        all_frequency.append(result['score_frequency'])
+                                    route_results = await mlBridgeLib.mlBridgeBPLib.request_board_results_dataframe_async(route_url, context)
+                                    if len(route_results) == 0:
+                                        st.warning(f"No route data found for team {team_number}")
+                                        return {'boards': pl.DataFrame(), 'score_frequency': pl.DataFrame()}
+                                    else:
+                                        played_boards = route_results['Board'].to_list()
+                                        print(f"Found {len(played_boards)} boards played by team {team_number}: {played_boards}")
                                 except Exception as e:
-                                    print(f"Failed to scrape board {deal_num} for player {st.session_state.player_license_number}: {e}")
-                                    continue
+                                    print(f"Error getting route data for team {team_number}: {e}")
+                                    raise
+                            
+                            if not played_boards:
+                                print(f"No boards found in route data for team {team_number}, returning empty results")
+                                return {'boards': pl.DataFrame(), 'score_frequency': pl.DataFrame()}
+                            
+                            # Create progress bar for board processing
+                            progress_bar = st.progress(0)
+                            progress_text = st.empty()
+                            
+                            # Now get board data only for the boards that were actually played using the existing function
+                            all_boards = []
+                            all_frequency = []
+                            
+                            async with mlBridgeLib.mlBridgeBPLib.get_browser_context_async() as context:
+                                for idx, deal_num in enumerate(played_boards):
+                                    try:
+                                        # Update progress
+                                        progress = (idx + 1) / len(played_boards)
+                                        progress_bar.progress(progress)
+                                        progress_text.text(f"Processing board {idx + 1}/{len(played_boards)}: Board {deal_num}")
+                                        
+                                        # Use the existing function to get the specific board for this player
+                                        result = await mlBridgeLib.mlBridgeBPLib.get_board_for_player_async(
+                                            st.session_state.tournament_id, 
+                                            st.session_state.organization_code, 
+                                            st.session_state.player_license_number, 
+                                            str(deal_num), 
+                                            context
+                                        )
+                                        
+                                        if len(result['boards']) > 0:
+                                            all_boards.append(result['boards'])
+                                        if len(result['score_frequency']) > 0:
+                                            all_frequency.append(result['score_frequency'])
+                                    except Exception as e:
+                                        print(f"Failed to scrape board {deal_num} for player {st.session_state.player_license_number}: {e}")
+                                        continue
+                            
+                            # Complete progress bar
+                            progress_bar.progress(1.0)
+                            progress_text.text("✅ All boards processed successfully!")
+                            
+                            # Clean up progress indicators after a brief delay
+                            import time
+                            time.sleep(1)
+                            progress_bar.empty()
+                            progress_text.empty()
+                            
+                            # Combine all boards and frequency data
+                            if all_boards:
+                                combined_boards = pl.concat(all_boards, how='vertical_relaxed')
+                            else:
+                                combined_boards = pl.DataFrame()
+                            
+                            if all_frequency:
+                                combined_frequency = pl.concat(all_frequency, how='vertical_relaxed')
+                            else:
+                                combined_frequency = pl.DataFrame()
+                            
+                            return {
+                                'boards': combined_boards,
+                                'score_frequency': combined_frequency
+                            }
                         
-                        # Complete progress bar
-                        progress_bar.progress(1.0)
-                        progress_text.text("✅ All boards processed successfully!")
+                        # Run the async function
+                        boards_dfs = asyncio.run(get_boards_with_progress())
                         
-                        # Clean up progress indicators after a brief delay
-                        import time
-                        time.sleep(1)
-                        progress_bar.empty()
-                        progress_text.empty()
-                        
-                        # Combine all boards and frequency data
-                        if all_boards:
-                            combined_boards = pl.concat(all_boards, how='vertical_relaxed')
-                        else:
-                            combined_boards = pl.DataFrame()
-                        
-                        if all_frequency:
-                            combined_frequency = pl.concat(all_frequency, how='vertical_relaxed')
-                        else:
-                            combined_frequency = pl.DataFrame()
-                        
-                        return {
-                            'boards': combined_boards,
-                            'score_frequency': combined_frequency
-                        }
-                    
-                    # Run the async function
-                    boards_dfs = asyncio.run(get_boards_with_progress())
-                    
-                except Exception as e:
-                    st.error(f"Error getting boards for player {st.session_state.player_license_number}: {e}")
-                    boards_dfs = {'boards': pl.DataFrame(), 'score_frequency': pl.DataFrame()}
+                    except Exception as e:
+                        st.error(f"Error getting boards for player {st.session_state.player_license_number}: {e}")
+                        boards_dfs = {'boards': pl.DataFrame(), 'score_frequency': pl.DataFrame()}
 
             if st.session_state.debug_mode:
                 for k,v in boards_dfs.items():
@@ -1374,6 +1388,12 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
             #pair_ew_df = pair_ew_df.rename({'team_table_number':'Pair_Number_EW'})
             boards_df = boards_dfs['boards']
             assert boards_df.height > 0, f"No boards found for {st.session_state.tournament_id}"
+            simultaneous_deals_df = dfs['simultaneous_deals']
+            sd_df = simultaneous_deals_df.with_columns([
+                pl.col('frequencies').list.get(0).struct.field('topValue').cast(pl.UInt32).alias('MP_Top'), # todo: problem. only works for common game. might fail otherwise?
+            ])
+            boards_df = boards_df.join(sd_df[['Board','MP_Top']],on='Board',how='left')
+            st.session_state.tournament_top = simultaneous_deals_df['deals_tournament_top'].first()
             boards_df = boards_df.with_columns([
                 pl.lit(st.session_state.tournament_id).alias('tournament_id'),
                 pl.lit(st.session_state.organization_code).alias('club_id'),
@@ -1415,7 +1435,7 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
             'Board','PBN','Pair_Direction','Dealer','Vul','Declarer','Contract','Result',
             'Score_EW','Score_NS',
             'Pct_NS','Pct_EW',
-            'MP_NS','MP_EW',
+            'MP_NS','MP_EW', 'MP_Top',
             'Pair_Number_NS','Pair_Number_EW',
             'Player_ID_N','Player_ID_E','Player_ID_S','Player_ID_W',
             'Player_Name_N','Player_Name_E','Player_Name_S','Player_Name_W',
@@ -1515,6 +1535,11 @@ def create_sidebar() -> None:
     
     read_configs()
 
+    st.sidebar.link_button('View Game Webpage', url=st.session_state.game_url)
+    st.session_state.pdf_link = st.sidebar.empty()
+
+    # create_sidebar_ffbridge_licencie()? create_sidebar_ffbridge_licencie()? neither?
+
     with st.sidebar.expander('Developer Settings', False):
 
         # don't use st.sidebar... in expander.
@@ -1559,6 +1584,7 @@ def create_sidebar() -> None:
     return
 
 
+# disabled for now. not sure if needed. maybe show in developer settings?
 def create_sidebar_ffbridge_licencie() -> None:
     """Create sidebar for FFBridge licencie interface"""
     # st.session_state.simultane_id = 34424 # simultane id for the game
@@ -1569,13 +1595,13 @@ def create_sidebar_ffbridge_licencie() -> None:
     print(f"{st.session_state.simultane_id=} {st.session_state.team_id=} {st.session_state.org_id=} {st.session_state.player_id=} {st.session_state.person_organization_id=}")
 
     # Provide a "Load Game URL" button.
-    if st.sidebar.button("Analyze Game"):
-        st.session_state.sql_query_mode = False
-        if change_game_state(st.session_state.player_id, None):
-            st.session_state.game_url_default = ''
-            reset_game_data()
-    st.sidebar.link_button('View Game Webpage', url=st.session_state.game_url)
-    st.session_state.pdf_link = st.sidebar.empty()
+    # if st.sidebar.button("Analyze Game"):
+    #     st.session_state.sql_query_mode = False
+    #     if change_game_state(st.session_state.player_id, None):
+    #         st.session_state.game_url_default = ''
+    #         reset_game_data()
+    # st.sidebar.link_button('View Game Webpage', url=st.session_state.game_url)
+    # st.session_state.pdf_link = st.sidebar.empty()
     st.sidebar.markdown("#### Game Retrival Settings")
     st.session_state.group_id = st.sidebar.number_input(
         'simultane_id',
@@ -1598,7 +1624,7 @@ def create_sidebar_ffbridge_licencie() -> None:
         on_change=org_id_on_change,
         help='Enter ffbridge org id. e.g. 1634'
     )
-    st.session_state.org_id = st.sidebar.number_input(
+    st.session_state.org_id = st.sidebar.text_input(
         'player_license_number',
         value=st.session_state.player_license_number,
         key='sidebar_player_license_number',
@@ -1612,25 +1638,26 @@ def create_sidebar_ffbridge_licencie() -> None:
     return
 
 
+# disabled for now. not sure if needed. maybe show in developer settings? Only show setting as read-only?
 def create_sidebar_ffbridge() -> None:
     """Create sidebar for FFBridge interface"""
 
-    if extract_group_id_session_id_team_id():
-        st.error("Invalid game URL. Please enter a valid game URL.")
-        return
+    # if extract_group_id_session_id_team_id():
+    #     st.error("Invalid game URL. Please enter a valid game URL.")
+    #     return
 
-    # Provide a "Load Game URL" button.
-    if st.sidebar.button("Analyze Game"):
-        st.session_state.sql_query_mode = False
-        if change_game_state(st.session_state.player_id, None):
-            st.session_state.game_url_default = ''
-            reset_game_data()
+    # # Provide a "Load Game URL" button.
+    # if st.sidebar.button("Analyze Game"):
+    #     st.session_state.sql_query_mode = False
+    #     if change_game_state(st.session_state.player_id, None):
+    #         st.session_state.game_url_default = ''
+    #         reset_game_data()
 
     # When the full sidebar is to be shown:
     # --- Check if the "Analyze Game" button has been hit ---
     #if not st.session_state.analysis_started:
-    st.sidebar.link_button('View Game Webpage', url=st.session_state.game_url)
-    st.session_state.pdf_link = st.sidebar.empty()
+    # st.sidebar.link_button('View Game Webpage', url=st.session_state.game_url)
+    # st.session_state.pdf_link = st.sidebar.empty()
     st.sidebar.markdown("#### Game Retrival Settings")
     st.session_state.group_id = st.sidebar.number_input(
         'Group ID',
@@ -1663,9 +1690,9 @@ def initialize_website_specific() -> None:
     st.session_state.assistant_logo = 'https://github.com/BSalita/ffbridge-postmortem/blob/master/assets/logo_assistant.gif?raw=true', # 🥸 todo: put into config. must have raw=true for github url.
     st.session_state.guru_logo = 'https://github.com/BSalita/ffbridge-postmortem/blob/master/assets/logo_guru.png?raw=true', # 🥷todo: put into config file. must have raw=true for github url.
     #st.session_state.game_url_default = 'https://ffbridge.fr/competitions/results/groups/7878/sessions/107118/pairs/3976783'
-    st.session_state.game_url_default = 'https://licencie.ffbridge.fr/#/resultats/simultane/34424/details/4818526?orgId=1634'
+    #st.session_state.game_url_default = 'https://licencie.ffbridge.fr/#/resultats/simultane/34424/details/4818526?orgId=1634'
     st.session_state.game_name = 'ffbridge'
-    st.session_state.game_url = st.session_state.game_url_default
+    #st.session_state.game_url = st.session_state.game_url_default
     
     # Initialize FFBridge Bearer Token from .env file
     initialize_ffbridge_bearer_token()
@@ -1687,12 +1714,12 @@ def initialize_website_specific() -> None:
         logo=st.session_state.assistant_logo
     )
     streamlit_chat.message(
-        "To start our postmortem chat, I'll need the URL of your ffbridge game. It will be the subject of our chat.",
+        "To start our postmortem chat, I'll need the a player number of your ffbridge game. It will be the subject of our chat.",
         key='intro_message_3',
         logo=st.session_state.assistant_logo
     )
     streamlit_chat.message(
-        "Enter the game URL in the left sidebar or just use the default game URL. Click the Analyze Game button to begin.",
+        "Enter the player number in the left sidebar or just re-enter the default player number. Press the enter key to begin.",
         key='intro_message_4',
         logo=st.session_state.assistant_logo
     )
@@ -1840,7 +1867,7 @@ def write_report() -> None:
         report_event_info = f"{st.session_state.organization_name} {st.session_state.game_description} (event id {st.session_state.session_id})."
         report_game_results_webpage = f"Results Page: {st.session_state.game_url}"
         report_your_match_info = f"Your pair was {st.session_state.team_id} {st.session_state.pair_direction} in section {st.session_state.section_name}. You played {st.session_state.player_direction}. Your partner was {st.session_state.partner_name} ({st.session_state.partner_license_number}) who played {st.session_state.partner_direction}."
-        st.markdown('<div style="height: 50px;"><a name="top-of-report"></a></div>', unsafe_allow_html=True)
+        #st.markdown('<div style="height: 50px;"><a name="top-of-report"></a></div>', unsafe_allow_html=True)
         st.markdown(f"### {report_title}")
         st.markdown(f"#### {report_person}")
         st.markdown(f"##### {report_creator}")
@@ -1874,9 +1901,6 @@ def write_report() -> None:
                     if query_df is not None:
                         pdf_assets.append(query_df)
                     sql_query_count += 1
-
-        # As a text link
-        #st.markdown('[Back to Top](#your-personalized-report)')
 
         # As an html button (needs styling added)
         # can't use link_button() restarts page rendering. markdown() will correctly jump to href.

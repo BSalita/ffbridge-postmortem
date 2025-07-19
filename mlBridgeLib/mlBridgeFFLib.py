@@ -149,8 +149,11 @@ def convert_ffldf_to_mldf(ffldfs):
     sd_df = sd_df.with_columns([
         pl.Series([d for i in range(sd_df.height//4) for d in '1234']).alias('Player_Direction'), # will map indexes to directions later.
     ])
+    sd_df = sd_df.with_columns([
+        pl.col('frequencies').list.get(0).struct.field('topValue').cast(pl.UInt32).alias('MP_Top'), # todo: problem. only works for common game. might fail otherwise?
+    ])
     cols = [
-        'PBN', 'Player_Direction',
+        'PBN', 'Player_Direction', 'MP_Top',
         'tournament_team_section_name', 'tournament_team_section_table_number',
         'deal_dealNumber', 'deal_dealer', 'deal_vulnerability',
         'teams_players_position', 'teams_opponents_position',
@@ -192,7 +195,7 @@ def convert_ffldf_to_mldf(ffldfs):
         pl.col('roadsheets_deals_dealNumber').cast(pl.UInt32).alias('Board'),
     ])
 
-    df = df.join(sd_df['Section_Name','Board','PBN','Dealer','Vul','Pair_Direction','Pair_Number'],on=['Board'],how='inner').unique()
+    df = df.join(sd_df['Section_Name','Board','PBN','Dealer','Vul','Pair_Direction','Pair_Number', 'MP_Top'],on=['Board'],how='inner').unique()
 
     # the row indexes are weirdly tricky. if EW, players are at: E is 1 or 2. W is 3 or 4. opponents are at: N is 1 or 3. S is 2 or 4.
     if df['roadsheets_deals_teamOrientation'].eq('NS').all():
@@ -423,7 +426,7 @@ def convert_ffdf_to_mldf(ffdf):
 
     df = df.with_columns([
         pl.col('section_id_home').alias('section_name'),
-        pl.col('Score_Freq_List').list.sum().sub(1).alias('MP_Top'),
+        pl.col('Score_Freq_List').list.sum().sub(1).alias('MP_Top'), # todo: isn't there a 'top' available?
     ])
 
     # https://ffbridge.fr/competitions/results/groups/7878/sessions/183872/pairs/8413302 shows Pair_Direction_Home can be 'NS' or 'EW' or '' (sitout).

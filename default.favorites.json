@@ -273,7 +273,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, Par, sd score, sd score max, sd contract max. Show those boards opponent declared and score > 0 and score < Par and score < sd score.",
-						"sql": "SELECT Board, Contract, Score_{Opponent_Pair_Direction}, Par_{Opponent_Pair_Direction}, EV_Max_{Opponent_Pair_Direction}, EV_Max_{Opponent_Pair_Direction}, EV_Max_Col FROM self WHERE Boards_Opponent_Declared = True AND Score_{Opponent_Pair_Direction} > 0 AND Score_{Opponent_Pair_Direction} < Par_{Opponent_Pair_Direction} AND Score_{Opponent_Pair_Direction} < EV_Max_{Opponent_Pair_Direction} ORDER BY Board"
+						"sql": "SELECT Board, Contract, Score_{Opponent_Pair_Direction}, Par_{Opponent_Pair_Direction}, EV_Max_{Opponent_Pair_Direction}, EV_Max_Col FROM self WHERE Boards_Opponent_Declared = True AND Score_{Opponent_Pair_Direction} > 0 AND Score_{Opponent_Pair_Direction} < Par_{Opponent_Pair_Direction} AND Score_{Opponent_Pair_Direction} < EV_Max_{Opponent_Pair_Direction} ORDER BY Board"
 					}
 				]
 			},
