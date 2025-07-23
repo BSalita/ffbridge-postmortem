@@ -57,6 +57,10 @@ playwright install chromium
 cp env_template.txt .env
 # Edit .env with your FFBridge credentials
 
+# Run tests to verify installation
+python test_type_definitions.py
+python test_bridge_library.py
+
 # Optional: Run type checking
 mypy ffbridge_streamlit.py
 ```
@@ -99,11 +103,20 @@ streamlit run ffbridge_streamlit.py
 - **[Library Usage Guide](LIBRARY_USAGE_GUIDE.md)**: Comprehensive guide for using the bridge scraping library
 - **[Authentication Guide](old/AUTOMATION_USAGE.md)**: Setup and usage of automated authentication
 - **Test Suite**: Run `python test_bridge_library.py` for comprehensive testing
+- **Type Definitions Test**: Run `python test_type_definitions.py` for type validation
 - **Type Checking**: Run `mypy ffbridge_streamlit.py` for static type analysis
 
 ## Recent Updates
 
-### Version 2.3.0 (Latest)
+### Version 2.4.0 (Latest)
+- **Comprehensive Documentation**: Created detailed LIBRARY_USAGE_GUIDE.md with complete API documentation
+- **Enhanced Type Safety**: Improved TypedDict definitions for API configurations and data structures
+- **Streamlit Interface**: Added comprehensive chat-based postmortem analysis with AI assistance
+- **API Integration**: Enhanced FFBridge API integration with dual token authentication (Lancelot + EASI)
+- **Error Handling**: Improved error handling and validation throughout the application
+- **Testing**: Updated test suite with comprehensive coverage for new functionality
+
+### Version 2.3.0 (Previous)
 - **Comprehensive Type Hints**: Added full type annotations throughout the codebase for better IDE support and code quality
 - **Enhanced Documentation**: Improved function docstrings with detailed parameter and return type descriptions
 - **Type Safety**: Added TypedDict definitions for complex data structures and API configurations
@@ -244,11 +257,26 @@ This project is actively developed and maintained. Key areas for contribution:
 
 ## Testing
 
-Run the comprehensive test suite:
+The project includes comprehensive test suites to ensure code quality and functionality:
 
+### Type Definitions Test
+```bash
+python test_type_definitions.py
+```
+Tests the core type definitions and basic functionality without external dependencies.
+
+### Bridge Library Test
 ```bash
 python test_bridge_library.py
 ```
+Comprehensive test suite for bridge library functionality, API integration, and data processing.
+
+### Test Coverage
+- **Type Definitions**: ApiUrlConfig, ApiUrlsDict, DataFramesDict
+- **API Integration**: Authentication, request handling, error management
+- **Data Processing**: DataFrame operations, validation, augmentation
+- **Bridge Library**: Tournament discovery, data extraction, board analysis
+- **Streamlit Interface**: UI components, session state, report generation
 
 This tests all major functions and provides detailed performance metrics.
 

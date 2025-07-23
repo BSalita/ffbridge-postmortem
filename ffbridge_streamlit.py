@@ -210,12 +210,14 @@ def single_dummy_sample_count_on_change() -> None:
 
 def sql_query_on_change() -> None:
     """Handle SQL query input change event"""
-    st.session_state.sql_query_mode = False
+    st.session_state.show_sql_query = st.session_state.show_sql_query_checkbox
+    #st.session_state.sql_query_mode = False # don't alter sql query mode.
 
 
 def debug_mode_on_change() -> None:
     """Handle debug mode input change event"""
     st.session_state.debug_mode = st.session_state.debug_mode_checkbox
+    #st.session_state.sql_query_mode = False # don't alter sql query mode.
 
 
 def group_id_on_change() -> None:
@@ -294,7 +296,7 @@ def filter_dataframe(df: pl.DataFrame) -> pl.DataFrame:
         pl.col('Declarer_ID').eq(pl.lit(str(st.session_state.player_license_number))).alias('Boards_I_Declared'), # player_id could be numeric
         pl.col('Declarer_ID').eq(pl.lit(str(st.session_state.partner_license_number))).alias('Boards_Partner_Declared'), # partner_id could be numeric
     )
-    elif f"Pair_Direction" in df.columns:
+    elif "Pair_Direction" in df.columns:
         # todo: better way to determine Boards_I_Played than above?
         df = df.with_columns(
             pl.col(f'Player_ID_{st.session_state.player_direction}').eq(pl.lit(str(st.session_state.player_id))).alias('Boards_I_Played'), # player_id could be numeric
@@ -1081,6 +1083,7 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
         st.session_state.game_description = st.session_state.player_row['name'].first()
         st.session_state.player_name = st.session_state.player_row['team_players_firstname'].first() + ' ' + st.session_state.player_row['team_players_lastname'].first()
         st.session_state.game_url = f"https://licencie.ffbridge.fr/#/resultats/simultane/{st.session_state.simultane_id}/details/{st.session_state.team_id}?orgId={st.session_state.org_id}"
+        st.session_state.team_number = st.session_state.player_row['team_table_number'].first()
         # find same team_id but partner_position
         st.session_state.partner_row = simultaneous_tournaments_df.filter(
             pl.col('team_id').eq(st.session_state.team_id) &
@@ -1114,8 +1117,8 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
             'simultaneous_dealsNumber': (f"https://api.ffbridge.fr/api/v1/simultaneous-tournaments/{st.session_state.simultane_id}/teams/{st.session_state.team_id}/dealsNumber", False),
             'simultaneous_deals': (f"https://api.ffbridge.fr/api/v1/simultaneous-tournaments/{st.session_state.simultane_id}/teams/{st.session_state.team_id}/deals/{{i}}", False),
             #'simultaneous_descriptions': (f"https://api.ffbridge.fr/api/v1/simultaneous-tournaments/{st.session_state.simultane_id}/teams/{st.session_state.team_id}/deals/{{i}}/descriptions", False),
-            'simultaneous_description_by_organization_id': (f"https://api.ffbridge.fr/api/v1/simultaneous/{st.session_state.simultane_id}/deals/{{i}}/descriptions?organization/{st.session_state.org_id}", False),
-            'simultaneous_tournaments_by_organization_id': (f"https://api.ffbridge.fr/api/v1/simultaneous-tournaments/{st.session_state.simultane_id}?organization={st.session_state.org_id}", False),
+            'simultaneous_description_by_organization_id': (f"https://api.ffbridge.fr/api/v1/simultaneous/{st.session_state.simultane_id}/deals/{{i}}/descriptions?organization_id={st.session_state.org_id}", False),
+            'simultaneous_tournaments_by_organization_id': (f"https://api.ffbridge.fr/api/v1/simultaneous-tournaments/{st.session_state.simultane_id}?organization_id={st.session_state.org_id}", False),
             'my_infos': (f"https://api.ffbridge.fr/api/v1/users/my/infos", False),
             'members': (f"https://api.ffbridge.fr/api/v1/members/{st.session_state.player_id}", False),
             'person': (f"https://api.ffbridge.fr/api/v1/licensee-results/results/person/{st.session_state.player_id}?date=all&place=0&type=0", False),
@@ -1131,6 +1134,9 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
             deal_numbers = dfs['simultaneous_roadsheets']['roadsheets_deals_dealNumber'].unique().to_list()
             # uses st.session_state.player_license_number to get boards because Roy Rene website works with player_license_number to get boards.
             with st.spinner(f"Roy Rene tournaments require an extra step. Takes 1 to 3 minutes..."):
+                # e.g. "https://www.bridgeplus.com/nos-simultanes/resultats/?p=route&res=sim&tr=S202602&cl=5802079&sc=A&eq=212"
+                st.session_state.route_url = f"https://www.bridgeplus.com/nos-simultanes/resultats/?p=route&res=sim&eq={st.session_state.team_number}&tr={st.session_state.tournament_id}&cl={st.session_state.organization_code}&sc={st.session_state.section_name}"
+                print(f"Getting route data from: {st.session_state.route_url}")
                 if False:
                     # calls internal async version which takes 60s. almost 3x faster than asyncio version below
                     #  -- but this version doesn't show progress bar -- might overwhelm server as I'm getting blacklisted(?).
@@ -1145,47 +1151,45 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
                         async def get_boards_with_progress():
                             # First, get the route data to see which boards this player actually played
                             # We need to find the player's team first to get the route data
-                            teams_df = await mlBridgeLib.mlBridgeBPLib.get_teams_by_tournament_async(st.session_state.tournament_id, st.session_state.organization_code)
+                            # teams_df = await mlBridgeLib.mlBridgeBPLib.get_teams_by_tournament_async(st.session_state.tournament_id, st.session_state.organization_code)
                             
-                            # Normalize player_id by stripping leading zeros for robust string comparison
-                            norm_player_id = st.session_state.player_license_number.lstrip('0')
+                            # # Normalize player_id by stripping leading zeros for robust string comparison
+                            # norm_player_id = st.session_state.player_license_number.lstrip('0')
                             
-                            # Find the team where the player_id matches either Player1_ID or Player2_ID
-                            player_team = teams_df.filter(
-                                (pl.col('Player1_ID').str.strip_chars_start('0') == norm_player_id) | 
-                                (pl.col('Player2_ID').str.strip_chars_start('0') == norm_player_id)
-                            )
+                            # # Find the team where the player_id matches either Player1_ID or Player2_ID
+                            # player_team = teams_df.filter(
+                            #     (pl.col('Player1_ID').str.strip_chars_start('0') == norm_player_id) | 
+                            #     (pl.col('Player2_ID').str.strip_chars_start('0') == norm_player_id)
+                            # )
                             
-                            # Check if player was found
-                            if len(player_team) == 0:
-                                raise ValueError(f"Player {st.session_state.player_license_number} not found in tournament {st.session_state.tournament_id}, club {st.session_state.organization_code}")
+                            # # Check if player was found
+                            # if len(player_team) == 0:
+                            #     raise ValueError(f"Player {st.session_state.player_license_number} not found in tournament {st.session_state.tournament_id}, club {st.session_state.organization_code}")
                             
-                            # Get the section and team number from the extracted data
-                            sc = player_team['Section'].first()
-                            team_number = player_team['Team_Number'].first()
+                            # # Get the section and team number from the extracted data
+                            # sc = player_team['Section'].first()
+                            # team_number = player_team['Team_Number'].first()
                             
-                            print(f"Found player {st.session_state.player_license_number} in team {team_number}, section {sc}")
+                            # print(f"Found player {st.session_state.player_license_number} in team {team_number}, section {sc}")
                             
                             # Get the route data to see which boards this team actually played
-                            route_url = f"https://www.bridgeplus.com/nos-simultanes/resultats/?p=route&res=sim&eq={team_number}&tr={st.session_state.tournament_id}&cl={st.session_state.organization_code}&sc={sc}"
-                            print(f"Getting route data from: {route_url}")
-                            
+                            # e.g. "https://www.bridgeplus.com/nos-simultanes/resultats/?p=route&res=sim&tr=S202602&cl=5802079&sc=A&eq=212"
                             played_boards = []
                             async with mlBridgeLib.mlBridgeBPLib.get_browser_context_async() as context:
                                 try:
-                                    route_results = await mlBridgeLib.mlBridgeBPLib.request_board_results_dataframe_async(route_url, context)
+                                    route_results = await mlBridgeLib.mlBridgeBPLib.request_board_results_dataframe_async(st.session_state.route_url, context)
                                     if len(route_results) == 0:
-                                        st.warning(f"No route data found for team {team_number}")
+                                        st.warning(f"No route data found for team {st.session_state.team_number}")
                                         return {'boards': pl.DataFrame(), 'score_frequency': pl.DataFrame()}
                                     else:
                                         played_boards = route_results['Board'].to_list()
-                                        print(f"Found {len(played_boards)} boards played by team {team_number}: {played_boards}")
+                                        print(f"Found {len(played_boards)} boards played by team {st.session_state.team_number}: {played_boards}")
                                 except Exception as e:
-                                    print(f"Error getting route data for team {team_number}: {e}")
+                                    print(f"Error getting route data for team {st.session_state.team_number}: {e}")
                                     raise
                             
                             if not played_boards:
-                                print(f"No boards found in route data for team {team_number}, returning empty results")
+                                print(f"No boards found in route data for team {st.session_state.team_number}, returning empty results")
                                 return {'boards': pl.DataFrame(), 'score_frequency': pl.DataFrame()}
                             
                             # Create progress bar for board processing
@@ -1388,12 +1392,6 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
             #pair_ew_df = pair_ew_df.rename({'team_table_number':'Pair_Number_EW'})
             boards_df = boards_dfs['boards']
             assert boards_df.height > 0, f"No boards found for {st.session_state.tournament_id}"
-            simultaneous_deals_df = dfs['simultaneous_deals']
-            sd_df = simultaneous_deals_df.with_columns([
-                pl.col('frequencies').list.get(0).struct.field('topValue').cast(pl.UInt32).alias('MP_Top'), # todo: problem. only works for common game. might fail otherwise?
-            ])
-            boards_df = boards_df.join(sd_df[['Board','MP_Top']],on='Board',how='left')
-            st.session_state.tournament_top = simultaneous_deals_df['deals_tournament_top'].first()
             boards_df = boards_df.with_columns([
                 pl.lit(st.session_state.tournament_id).alias('tournament_id'),
                 pl.lit(st.session_state.organization_code).alias('club_id'),
@@ -1440,12 +1438,13 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
             'Player_ID_N','Player_ID_E','Player_ID_S','Player_ID_W',
             'Player_Name_N','Player_Name_E','Player_Name_S','Player_Name_W',
         ]
-        player_id_col = f"Player_ID_{st.session_state.player_direction}"
-        partner_id_col = f"Player_ID_{st.session_state.partner_direction}"
+        # only works if Board_We_Played is desired.
+        # player_id_col = f"Player_ID_{st.session_state.player_direction}"
+        # partner_id_col = f"Player_ID_{st.session_state.partner_direction}"
+        # # todo: following is generic?
+        # assert df[player_id_col].n_unique() == 1, f"{player_id_col} is not unique"
+        # assert df[partner_id_col].n_unique() == 1, f"{partner_id_col} is not unique"
         st.session_state.session_id = st.session_state.simultane_id
-        # todo: following is generic?
-        assert df[player_id_col].n_unique() == 1, f"{player_id_col} is not unique"
-        assert df[partner_id_col].n_unique() == 1, f"{partner_id_col} is not unique"
 
         if not st.session_state.use_historical_data: # historical data is already fully augmented so skip past augmentations
             if st.session_state.do_not_cache_df:
@@ -1535,7 +1534,9 @@ def create_sidebar() -> None:
     
     read_configs()
 
-    st.sidebar.link_button('View Game Webpage', url=st.session_state.game_url)
+    st.sidebar.link_button('View ffbridge Webpage', url=st.session_state.game_url)
+    if st.session_state.route_url is not None:
+        st.sidebar.link_button('View Roy Rene Webpage', url=st.session_state.route_url)
     st.session_state.pdf_link = st.sidebar.empty()
 
     # create_sidebar_ffbridge_licencie()? create_sidebar_ffbridge_licencie()? neither?
@@ -1568,15 +1569,15 @@ def create_sidebar() -> None:
         st.checkbox(
             'Show SQL Query',
             value=st.session_state.show_sql_query,
-            key='sidebar_show_sql_query',
+            key='show_sql_query_checkbox',
             on_change=sql_query_on_change,
             help='Show SQL used to query dataframes.'
         )
 
         st.checkbox(
-            'Debug Mode',
+            'Enable Debug Mode',
             value=st.session_state.debug_mode,
-            key='sidebar_debug_mode',
+            key='debug_mode_checkbox',
             on_change=debug_mode_on_change,
             help='Show SQL used to query dataframes.'
         )
@@ -1865,7 +1866,9 @@ def write_report() -> None:
         report_person = f"Personalized for {st.session_state.player_name} ({st.session_state.player_license_number})"
         report_creator = f"Created by https://{st.session_state.game_name}.postmortem.chat"
         report_event_info = f"{st.session_state.organization_name} {st.session_state.game_description} (event id {st.session_state.session_id})."
-        report_game_results_webpage = f"Results Page: {st.session_state.game_url}"
+        report_game_results_webpage = f"ffbridge Results Page: {st.session_state.game_url}"
+        if st.session_state.route_url is not None:
+            report_roy_rene_game_results_webpage = f"Roy Rene Results Page: {st.session_state.route_url}"
         report_your_match_info = f"Your pair was {st.session_state.team_id} {st.session_state.pair_direction} in section {st.session_state.section_name}. You played {st.session_state.player_direction}. Your partner was {st.session_state.partner_name} ({st.session_state.partner_license_number}) who played {st.session_state.partner_direction}."
         #st.markdown('<div style="height: 50px;"><a name="top-of-report"></a></div>', unsafe_allow_html=True)
         st.markdown(f"### {report_title}")
@@ -1873,6 +1876,8 @@ def write_report() -> None:
         st.markdown(f"##### {report_creator}")
         st.markdown(f"#### {report_event_info}")
         st.markdown(f"##### {report_game_results_webpage}")
+        if st.session_state.route_url is not None:
+            st.markdown(f"##### {report_roy_rene_game_results_webpage}")
         st.markdown(f"#### {report_your_match_info}")
         pdf_assets = st.session_state.pdf_assets
         pdf_assets.clear()
@@ -1973,7 +1978,7 @@ def initialize_session_state() -> None:
     first_time_defaults = {
         'first_time': True,
         'single_dummy_sample_count': 10,
-        'debug_mode': False, # os.getenv('STREAMLIT_ENV') == 'development',
+        'debug_mode': True, # os.getenv('STREAMLIT_ENV') == 'development',
         'show_sql_query': True, # os.getenv('STREAMLIT_ENV') == 'development',
         'use_historical_data': False,
         'do_not_cache_df': True, # todo: set to True for production
@@ -2014,6 +2019,7 @@ def reset_game_data() -> None:
         'team_id_default': None,
         'pair_direction_default': None,
         'opponent_pair_direction_default': None,
+        'route_url_default': None,
     }
     
     # Initialize default values if not already set
@@ -2040,6 +2046,7 @@ def reset_game_data() -> None:
         'team_id': st.session_state.team_id_default,
         'pair_direction': st.session_state.pair_direction_default,
         'opponent_pair_direction': st.session_state.opponent_pair_direction_default,
+        'route_url': st.session_state.route_url_default,
         #'sidebar_loaded': False,
         'analysis_started': False,   # new flag for analysis sidebar rewrite
         'vetted_prompts': [],
