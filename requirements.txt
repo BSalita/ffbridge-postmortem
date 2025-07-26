@@ -5,7 +5,7 @@ streamlit-chat>=0.1.0
 stqdm>=0.0.5
 openai>=1.0.0
 pandas>=2.0.0
-polars>=0.20.0
+polars>=1.30.0
 duckdb>=0.9.0
 requests>=2.31.0
 urllib3>=2.0.0
@@ -42,10 +42,13 @@ IPython>=8.15.0
 streamlit-aggrid>=0.3.0
 seaborn>=0.12.0
 
-# Web automation
+# Web automation and HTML parsing
 playwright>=1.40.0
+lxml>=4.9.0
+html5lib>=1.1
 
 # Additional utilities
 werkzeug>=3.0.0
+regex>=2023.0.0
 
 

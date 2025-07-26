@@ -13,6 +13,8 @@ This project provides a comprehensive toolkit for extracting, analyzing, and pos
 - **Interactive Analysis**: Streamlit-based web interface for post-mortem game analysis
 - **Authentication**: Automated bearer token management for FFBridge API access
 - **Bridge Library**: Comprehensive library for bridge deal analysis and augmentation
+- **Enhanced HTML Parsing**: Robust Unicode-aware parsing with improved French-to-English translation
+- **Type Safety**: Comprehensive type definitions and static analysis support
 
 ## Main Components
 
@@ -24,6 +26,9 @@ This project provides a comprehensive toolkit for extracting, analyzing, and pos
 - All async functions follow `_async` naming convention
 - Enhanced HTML parsing with dynamic board number extraction
 - Robust opponent information extraction using specific HTML structure
+- **NEW**: Improved Unicode handling for French suit symbols (♠♥♦♣)
+- **NEW**: Enhanced contract extraction with comprehensive French-to-English strain mapping
+- **NEW**: Robust vulnerability translation with error handling
 
 ### 2. Interactive Analysis (`ffbridge_streamlit.py`)
 - Web-based interface for game analysis
@@ -108,7 +113,15 @@ streamlit run ffbridge_streamlit.py
 
 ## Recent Updates
 
-### Version 2.4.0 (Latest)
+### Version 2.5.0 (Latest)
+- **Enhanced HTML Parsing**: Improved Unicode handling for French suit symbols (♠♥♦♣)
+- **Robust Contract Extraction**: Comprehensive French-to-English strain mapping with error handling
+- **Improved Vulnerability Translation**: Enhanced error handling for French vulnerability terms
+- **Better Regex Patterns**: Updated regex patterns to handle Unicode characters and complex HTML structures
+- **Type Safety Improvements**: Enhanced type hints and validation throughout the codebase
+- **Documentation Updates**: Comprehensive updates to reflect latest capabilities
+
+### Version 2.4.0 (Previous)
 - **Comprehensive Documentation**: Created detailed LIBRARY_USAGE_GUIDE.md with complete API documentation
 - **Enhanced Type Safety**: Improved TypedDict definitions for API configurations and data structures
 - **Streamlit Interface**: Added comprehensive chat-based postmortem analysis with AI assistance
@@ -164,6 +177,43 @@ data_rows = await page.query_selector_all('div.row')
 for row in data_rows:
     # Extract board number, score, and matchpoints from same row
     # Ensures correspondence between related data
+```
+
+### Enhanced French-to-English Translation
+```python
+# NEW: Comprehensive strain mapping including Unicode symbols
+FRENCH_TO_ENGLISH_STRAIN_MAP = {
+    'P': 'S',    # Spades (Piques)
+    'C': 'H',    # Hearts (Cœurs)
+    'K': 'D',    # Diamonds (Carreau)
+    'T': 'C',    # Clubs (Trèfle)
+    'sa': 'N',   # No Trump (Sans Atout) - lowercase
+    'SA': 'N',   # No Trump (Sans Atout) - uppercase
+    '♠': 'S',    # Unicode spade symbol
+    '♥': 'H',    # Unicode heart symbol
+    '♦': 'D',    # Unicode diamond symbol
+    '♣': 'C',    # Unicode club symbol
+    'pique': 'S',    # French class names
+    'coeur': 'H',    # French class names
+    'carreau': 'D',  # French class names
+    'trefle': 'C',   # French class names
+}
+```
+
+### Robust Contract Extraction
+```python
+# NEW: Enhanced regex pattern for contract extraction
+suit_span_match = re.search(
+    r'Contrat.*?(?:<span class="(pique|coeur|carreau|trefle)">[^<]*</span>|(SA))', 
+    contract_span_html
+)
+if suit_span_match and suit_span_match.group(1):  # Suit class found
+    suit_class = suit_span_match.group(1)
+elif suit_span_match and suit_span_match.group(2):  # SA match found
+    suit_class = suit_span_match.group(2)
+else:
+    raise ValueError(f"Could not find suit in contract span: {contract_span_html}")
+strain = FRENCH_TO_ENGLISH_STRAIN_MAP[suit_class]
 ```
 
 ### Robust Opponent Extraction

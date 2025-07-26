@@ -7,9 +7,9 @@ Supports extraction of Teams, Board Results, and Boards DataFrames with French t
 
 import asyncio
 import re
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any, Tuple
 import polars as pl
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, Page, BrowserContext
 import logging
 from contextlib import asynccontextmanager
 import time
@@ -77,7 +77,7 @@ async def get_browser_context_async():
             logger.error(f"Error closing browser context: {e}")
 
 # Global translation constants to avoid duplication
-FRENCH_TO_ENGLISH_STRAIN_MAP = {
+FRENCH_TO_ENGLISH_STRAIN_MAP: Dict[str, str] = {
     'P': 'S',    # Spades (Piques)
     'C': 'H',    # Hearts (Cœurs)
     'K': 'D',    # Diamonds (Carreau)
@@ -94,20 +94,27 @@ FRENCH_TO_ENGLISH_STRAIN_MAP = {
     'trefle': 'C',   # Clubs
 }
 
-FRENCH_TO_ENGLISH_DIRECTION_MAP = {
+FRENCH_TO_ENGLISH_DIRECTION_MAP: Dict[str, str] = {
     'N': 'N',    # North (Nord)
     'E': 'E',    # East (Est)
     'S': 'S',    # South (Sud)
-    'O': 'W',     # West (Ouest)
-    'W': 'W'     # West (English)
+    'W': 'W',    # West (Ouest)
+    'Nord': 'N',
+    'Est': 'E',
+    'Sud': 'S',
+    'Ouest': 'W',
 }
 
-FRENCH_TO_ENGLISH_CARDS_MAP = {
-    'A': 'A',    # Ace
+FRENCH_TO_ENGLISH_CARD_MAP: Dict[str, str] = {
+    'P': 'S',    # Pique -> Spade
+    'C': 'H',    # Cœur -> Heart
+    'K': 'D',    # Carreau -> Diamond
+    'T': 'C',    # Trèfle -> Club
+    'A': 'A',    # As -> Ace
     'R': 'K',    # Roi -> King
     'D': 'Q',    # Dame -> Queen
     'V': 'J',    # Valet -> Jack
-    '0': 'T',    # 10 -> Ten
+    '10': 'T',   # 10 -> T
     '9': '9',
     '8': '8',
     '7': '7',
@@ -119,14 +126,14 @@ FRENCH_TO_ENGLISH_CARDS_MAP = {
     '1': '',
 }
 
-FRENCH_TO_ENGLISH_VULNERABILITY_MAP = {
+FRENCH_TO_ENGLISH_VULNERABILITY_MAP: Dict[str, str] = {
     'Personne': 'None',
     'Nord-Sud': 'N_S',
     'Est-Ouest': 'E_W',
     'Tous': 'Both',
 }
 
-FRENCH_MONTHS = {
+FRENCH_MONTHS: Dict[str, str] = {
     'janvier': 'january', 'février': 'february', 'mars': 'march', 'avril': 'april',
     'mai': 'may', 'juin': 'june', 'juillet': 'july', 'août': 'august',
     'septembre': 'september', 'octobre': 'october', 'novembre': 'november', 'décembre': 'december'
@@ -212,7 +219,7 @@ def translate_cards(card_text: str) -> str:
         translated = FRENCH_TO_ENGLISH_STRAIN_MAP[first_char] + rest_of_text
     
     # Replace French cards with English equivalents
-    for french_card, english_card in FRENCH_TO_ENGLISH_CARDS_MAP.items():
+    for french_card, english_card in FRENCH_TO_ENGLISH_CARD_MAP.items():
         translated = translated.replace(french_card, english_card)
     
     return translated
@@ -231,7 +238,7 @@ def translate_pbn_cards(pbn_text: str) -> str:
     
     # Replace French cards with English equivalents
     translated = pbn_text
-    for french_card, english_card in FRENCH_TO_ENGLISH_CARDS_MAP.items():
+    for french_card, english_card in FRENCH_TO_ENGLISH_CARD_MAP.items():
         translated = translated.replace(french_card, english_card)
     
     return translated
