@@ -52,11 +52,14 @@ This project provides a comprehensive toolkit for extracting, analyzing, and pos
 ### Installation
 
 ```bash
-# Install dependencies
+# Install core dependencies
 pip install -r requirements.txt
 
 # Install Playwright browsers
 playwright install chromium
+
+# Optional: Install advanced features (machine learning, AI, etc.)
+pip install -r requirements-optional.txt
 
 # Set up environment variables
 cp env_template.txt .env
@@ -103,6 +106,25 @@ data = asyncio.run(extract_tournament_data())
 streamlit run ffbridge_streamlit.py
 ```
 
+## Dependencies
+
+### Core Dependencies
+The main requirements are in `requirements.txt` and include:
+- **Streamlit**: Web interface and data visualization
+- **Polars/Pandas**: Data processing and analysis
+- **Playwright**: Web scraping and automation
+- **Endplay**: Bridge game analysis and double dummy calculations
+- **BeautifulSoup**: HTML parsing
+- **Matplotlib/Seaborn**: Data visualization
+- **ReportLab**: PDF report generation
+
+### Optional Dependencies
+Advanced features require additional packages in `requirements-optional.txt`:
+- **PyTorch/FastAI**: Machine learning capabilities (mlBridgeAiLib.py)
+- **Scikit-learn**: Machine learning utilities
+- **SQLAlchemy**: Database support
+- **OpenAI**: AI integration for chat features
+
 ## Documentation
 
 - **[Library Usage Guide](LIBRARY_USAGE_GUIDE.md)**: Comprehensive guide for using the bridge scraping library
@@ -113,7 +135,13 @@ streamlit run ffbridge_streamlit.py
 
 ## Recent Updates
 
-### Version 2.5.0 (Latest)
+### Version 2.6.0 (Latest)
+- **Streamlined Dependencies**: Reorganized requirements.txt with clear separation of core vs optional dependencies
+- **Optional Features**: Created requirements-optional.txt for advanced features like machine learning
+- **Better Documentation**: Updated installation instructions and dependency documentation
+- **Cleaner Setup**: Removed unused dependencies and improved version constraints
+
+### Version 2.5.0 (Previous)
 - **Enhanced HTML Parsing**: Improved Unicode handling for French suit symbols (♠♥♦♣)
 - **Robust Contract Extraction**: Comprehensive French-to-English strain mapping with error handling
 - **Improved Vulnerability Translation**: Enhanced error handling for French vulnerability terms
