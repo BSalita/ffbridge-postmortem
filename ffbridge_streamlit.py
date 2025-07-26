@@ -1979,8 +1979,8 @@ def initialize_session_state() -> None:
     first_time_defaults = {
         'first_time': True,
         'single_dummy_sample_count': 10,
-        'debug_mode': True, # os.getenv('STREAMLIT_ENV') == 'development',
-        'show_sql_query': True, # os.getenv('STREAMLIT_ENV') == 'development',
+        'debug_mode': os.getenv('STREAMLIT_ENV') == 'development',
+        'show_sql_query': os.getenv('STREAMLIT_ENV') == 'development',
         'use_historical_data': False,
         'do_not_cache_df': True, # todo: set to True for production
         'con': duckdb.connect(), # IMPORTANT: duckdb.connect() hung until previous version was installed.

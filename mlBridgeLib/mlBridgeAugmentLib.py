@@ -594,6 +594,7 @@ def create_best_contracts(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def convert_contract_to_contract(df: pl.DataFrame) -> pl.Series:
+    # todo: use strain to strai dict instead of suit symbol. Replace replace() with replace_strict().
     return df['Contract'].str.to_uppercase().str.replace('♠','S').str.replace('♥','H').str.replace('♦','D').str.replace('♣','C').str.replace('NT','N')
 
 
