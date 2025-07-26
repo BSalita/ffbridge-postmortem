@@ -3,15 +3,16 @@
 
 # todo (priority):
 # look for errors in report.
-# wrong score inlast dataframe - compute adjustments (only RRN?).
-# 'declarer' stats have empty dataframes.
+# wrong score in last dataframe - compute adjustments (only RRN?).
 
 # todo:
-# tell ffbridge tounblock my ip address
+# show df of freq of scores; freq, score, matchpoints
+# tell ffbridge to unblock my ip address
 # move ffbridge legacy api code into mlBridgeFFLib.
 # move any Roy Rene code into mlBridgeBPLib?
 # Refactor common postmortem methods into ml bridge class. Sync with other postmortem projects.
 # Decide on whether to use faster RRN code or slower be-nice-to-server code? Does it matter?
+# Segment lancelot api code into its own methods. Move to mlBridgeFFLib. It's all a bit of a mishmash here.
 # Need graceful error handling. Error on 'id' rename: https://api.ffbridge.fr/api/v1/simultaneous-tournaments/2991057. Doesn't work in curl so not my problem.
 # Need graceful error handling. Error on roadsheets: https://api.ffbridge.fr/api/v1/simultaneous-tournaments/32178/teams/4230171/roadsheets. Doesn't work in curl so not my problem.
 
@@ -1108,7 +1109,7 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
         # if (st.session_state.game_url.startswith('https://ffbridge.fr') or 
         #     st.session_state.game_url.startswith('https://www.ffbridge.fr')):
         #     df = get_ffbridge_data_using_url()
-        #     df = ffbridgelib.convert_ffdf_to_mldf(df) # warning: drops columns from df.
+        #     df = ffbridgelib.convert_ffdf_api_to_mldf(df) # warning: drops columns from df.
         # elif st.session_state.game_url.startswith('https://licencie.ffbridge.fr'):
         # Use the API endpoint instead of the web page
         # api_urls values are tuples of (url, should_cache) where should_cache=False means always request fresh data
@@ -1260,7 +1261,7 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
 
             if st.session_state.debug_mode:
                 for k,v in boards_dfs.items():
-                    st.caption(f"{k}: Shape:{dfs[k].shape}")
+                    st.caption(f"{k}: Shape:{v.shape}")
                     st.dataframe(v,selection_mode='single-row')
 
             df = dfs['simultaneous_roadsheets']
@@ -1422,7 +1423,7 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
                 ])
             df = boards_df.join(df, on='Board', how='left')
         else:
-            df = mlBridgeFFLib.convert_ffldf_to_mldf(dfs)
+            df = mlBridgeFFLib.convert_ffdf_api_to_mldf(dfs)
 
         if st.session_state.debug_mode:
             st.caption(f"Final dataframe: Shape:{df.shape}")

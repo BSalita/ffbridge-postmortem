@@ -101,7 +101,7 @@ def FrenchCardsToPBN(df):
     
     return df.with_columns(pl.concat_str([pl.lit('N:'), pl.concat_str(direction_parts, separator=' ')]).alias('PBN'))
 
-def convert_ffldf_to_mldf(ffldfs):
+def convert_ffdf_api_to_mldf(ffldfs):
 
     # simultaneous_tournaments columns:
     # ['simultane_id', 'nb_days_blocked_results', 'date', 'type', 'type_code', 'name', 'moment', 'moment_code', 'code', 'co_organizer_name',
@@ -139,10 +139,12 @@ def convert_ffldf_to_mldf(ffldfs):
     # 'teams_opponents_name_gender', 'teams_opponents_name_lastname', 'teams_opponents_name_oppo_id', 'teams_opponents_position']
 
     st_df = ffldfs['simultaneous_tournaments_by_organization_id']
-    cols = ['team_section_name', 'team_table_number', 'team_orientation', 'team_players_position', 'team_players_id', 'team_organization_code', 'team_organization_id']
-    st_df = st_df[cols].unique() # st_df was exploded so must now deduplicate. height should be 4 x number of tables.
-    player_to_pair_d = dict(zip(st_df['team_players_id'],st_df[('team_section_name','team_orientation','team_table_number')].rows()))
-    pair_number_to_player_d = dict(zip(st_df[('team_section_name','team_orientation','team_table_number')].rows(),st_df['team_players_id']))
+    cols = ['team_organization_code', 'team_organization_id', 'team_section_name',
+            'team_orientation', 'team_table_number', 'team_players_position',
+            'team_players_id', 'team_players_firstname', 'team_players_lastname']
+    st_df = st_df[cols].unique() # st_df was exploded so must now deduplicate. height should be 4 x number of simultaneous pairs.
+    #player_to_pair_d = dict(zip(st_df['team_players_id'],st_df[('team_section_name','team_orientation','team_table_number')].rows()))
+    #pair_number_to_player_d = dict(zip(st_df[('team_section_name','team_orientation','team_table_number')].rows(),st_df['team_players_id']))
 
     sd_df = ffldfs['simultaneous_deals'] # todo: use hand record info e.g. deal_vulnerability, deal_dealer, deal_dealNumber, tournament_team_section_position
     sd_df = sd_df.filter(pl.col('teams_players_position').ne(pl.col('teams_opponents_position'))) # hack to drop unplayed boards. Otherwise boards become Boards_I_Played.
@@ -198,16 +200,17 @@ def convert_ffldf_to_mldf(ffldfs):
    # reduce height to 1/4 of original (only the boards played by home pair) by removing non-unique columns.
     sd_df = sd_df['Section_Name','Board','PBN','Dealer','Vul','Pair_Direction','Pair_Number','MP_Top'].unique().sort('Board')
 
-    df = ffldfs['simultaneous_roadsheets']
+    # df = ffldfs['simultaneous_roadsheets']
 
-    df = df.with_columns([
-        pl.col('roadsheets_deals_dealNumber').cast(pl.UInt32).alias('Board'), # cast and rename to Board
-    ])
+    # df = df.with_columns([
+    #     pl.col('roadsheets_deals_dealNumber').cast(pl.UInt32).alias('Board'), # cast and rename to Board
+    # ])
 
-    # result height should be equal to the number of boards played by home pair.
-    df = sd_df.join(df,on='Board',how='inner').unique().sort('Board')
+    # # result height should be equal to the number of boards played by home pair.
+    # df = sd_df.join(df,on='Board',how='inner').unique().sort('Board')
 
     # result height should be equal to the number of boards played at all tables.
+    # todo: renaming is only needed when dealing with roadsheet naming conventions. But we've moved away from roadsheets so maybe should use simultaneous_description_by_organization_id names.
     simultaneous_description_by_organization_id_df = ffldfs['simultaneous_description_by_organization_id']
     simultaneous_description_by_organization_id_df = simultaneous_description_by_organization_id_df.with_columns([
         pl.col('section').alias('Section_Name'),
@@ -247,31 +250,46 @@ def convert_ffldf_to_mldf(ffldfs):
         sd_df,
         on=['Section_Name','Board'], how='inner'
     ).sort('Board')
+    
+    # Create lookup dictionaries from st_df using one-liners
+    # First create the full name column
+    full_names = st_df.with_columns([
+        (pl.col('team_players_firstname') + pl.lit(' ') + pl.col('team_players_lastname')).alias('full_name')
+    ])['full_name']
+    
+    player_id_lookup = dict(zip(
+        st_df[('team_section_name','team_orientation','team_players_position','team_table_number')].rows(),
+        st_df['team_players_id'].cast(pl.Utf8)
+    ))
 
-    # Add all player ID columns using a single join with loop
-    player_configs = [
-        ('N', 1, 'Pair_Number_NS'),
-        ('E', 1, 'Pair_Number_EW'),
-        ('S', 2, 'Pair_Number_NS'),
-        ('W', 2, 'Pair_Number_EW')
+    player_name_lookup = dict(zip(
+        st_df['team_section_name','team_orientation','team_players_position','team_table_number'].rows(),
+        full_names # cannot be done directly. must convert to series or list.
+    ))
+    
+    print(f"Created player lookups with {len(player_id_lookup)} entries")
+    
+    # Define player mappings
+    player_mappings = [
+        ('NS', 1, 'Pair_Number_NS', 'N'),  # North: NS orientation, position 1
+        ('EW', 1, 'Pair_Number_EW', 'E'),  # East: EW orientation, position 1
+        ('NS', 2, 'Pair_Number_NS', 'S'),  # South: NS orientation, position 2
+        ('EW', 2, 'Pair_Number_EW', 'W')   # West: EW orientation, position 2
     ]
-
-    for direction, position, pair_col in player_configs:
+    
+    # Add player ID and name columns using dictionary lookup
+    for orientation, position, pair_col, direction in player_mappings:
+        # Add columns using the lookup dictionaries
         df = df.with_columns([
-            df.join(
-                st_df.filter(pl.col('team_players_position').eq(position))['team_section_name','team_orientation','team_table_number','team_players_id'],
-                left_on=['Section_Name','Pair_Direction', pair_col],
-                right_on=['team_section_name','team_orientation','team_table_number'],
-                how='left'
-            )['team_players_id'].cast(pl.Utf8).alias(f'Player_ID_{direction}'),
+            pl.struct(['Section_Name', pair_col]).map_elements(
+                lambda x: player_id_lookup.get((x['Section_Name'], orientation, position, x[pair_col]), None), 
+                return_dtype=pl.Utf8
+            ).alias(f'Player_ID_{direction}'),
+            pl.struct(['Section_Name', pair_col]).map_elements(
+                lambda x: player_name_lookup.get((x['Section_Name'], orientation, position, x[pair_col]), None), 
+                return_dtype=pl.Utf8
+            ).alias(f'Player_Name_{direction}')
         ])
-   
-    df = df.with_columns([
-        pl.col('Player_ID_N').alias('Player_Name_N'),
-        pl.col('Player_ID_E').alias('Player_Name_E'),
-        pl.col('Player_ID_S').alias('Player_Name_S'),
-        pl.col('Player_ID_W').alias('Player_Name_W')
-    ])
 
     df = df.with_columns([
         pl.col('roadsheets_deals_declarant').replace_strict(FrenchDirectionToDirection_d, return_dtype=pl.Utf8).alias('Declarer'),
@@ -303,7 +321,7 @@ def convert_ffldf_to_mldf(ffldfs):
             .alias('Result'),
     ])
 
-    # todo: just need orientation for alias. otherwise the same code for NS and EO.
+    # todo: need 'if' test for different values (team home/opponents) to create NS/EW/EO aliases. otherwise the same code.
     # todo: debug not all pairs are NS or EW.
     if df['Pair_Direction'].eq('NS').all():
         df = df.with_columns([
@@ -324,21 +342,6 @@ def convert_ffldf_to_mldf(ffldfs):
                 .cast(pl.Int16)
                 .alias('Score_EW'),
         ])
-        df = df.with_columns(
-            (pl.col('roadsheets_deals_teamAvgNote')/100).round(2).alias('Pct_NS'),
-            (pl.col('roadsheets_deals_opponentsAvgNote')/100).round(2).alias('Pct_EW'),
-        )
-        if 'roadsheets_deals_teamNote' in df.columns:
-            df = df.with_columns([
-                pl.col('roadsheets_deals_teamNote').cast(pl.Float32).alias('MP_NS'),
-                pl.col('roadsheets_deals_opponentsNote').cast(pl.Float32).alias('MP_EW'),
-            ])
-        else:
-            # todo: should use roadsheets_deals_teamNote from roadsheets instead of this workaround.
-            df = df.with_columns([
-                (pl.col('Pct_NS').mul(pl.col('MP_Top'))).alias('MP_NS'),
-                (pl.col('Pct_EW').mul(pl.col('MP_Top'))).alias('MP_EW'),
-            ])
     elif df['Pair_Direction'].eq('EW').all():
         df = df.with_columns([
             pl.when(pl.col('roadsheets_deals_teamScore').str.contains(r'^\d+$'))
@@ -358,28 +361,39 @@ def convert_ffldf_to_mldf(ffldfs):
                 .cast(pl.Int16)
                 .alias('Score_NS'),
         ])
-        df = df.with_columns(
-            (pl.col('roadsheets_deals_teamAvgNote')/100).round(2).alias('Pct_EW'),
-            (pl.col('roadsheets_deals_opponentsAvgNote')/100).round(2).alias('Pct_NS'),
-        )
-        if 'roadsheets_deals_teamNote' in df.columns:
-            df = df.with_columns([
-                pl.col('roadsheets_deals_teamNote').cast(pl.Float32).alias('MP_EW'),
-                pl.col('roadsheets_deals_opponentsNote').cast(pl.Float32).alias('MP_NS'),
-            ])
-        else:
-            # todo: should use roadsheets_deals_teamNote from roadsheets instead of this workaround.
-            df = df.with_columns([
-                (pl.col('Pct_NS').mul(pl.col('MP_Top'))).alias('MP_NS'),
-                (pl.col('Pct_EW').mul(pl.col('MP_Top'))).alias('MP_EW'),
-            ])
     else:
         raise ValueError(f"Invalid Pair_Direction: {df['Pair_Direction'].unique()}")
+    
+    # Ignoring existing simultaneous MP_Top column. Use window function over Board count to calculate MP_Top.
+    # Could have issues with director adjustments.
+    df = df.with_columns([
+            (pl.col('Board').count().over('Board') - 1).alias('MP_Top')
+        ])
+
+    # Ignoring existing simultaneous MP_(NS|EW) columns. Use window function over Board count to calculate MP_NS. MP_EW is derived from MP_Top - MP_NS.
+    # Could have issues with director adjustments.
+    df = df.with_columns([
+        (pl.col('Score_NS').rank().over('Board') - 1).alias('MP_NS'),
+    ])
+    df = df.with_columns([
+        (pl.col('MP_Top') - pl.col('MP_NS')).alias('MP_EW'),
+    ])
+
+    # Ignoring existing simultaneous Pct_(NS|EW) columns. Calculate by using MP_Top.
+    # Could have issues with director adjustments.
+    df = df.with_columns([
+        (pl.col('MP_NS')/pl.col('MP_Top')).alias('Pct_NS'),
+    ])
+    df = df.with_columns([
+        (1 - pl.col('Pct_NS')).alias('Pct_EW'),
+    ])
 
     return df
 
 
-def convert_ffdf_to_mldf(ffdf):
+# this function uses lancelot api to create mldf.
+# todo: update with newer algorithms from convert_ffdf_to_mldf().
+def convert_ffdf_lancelot_to_mldf(ffdf):
 
     # assignments are broken into parts for polars compatibility (could be parallelized).
     #for col in ffdf.columns:

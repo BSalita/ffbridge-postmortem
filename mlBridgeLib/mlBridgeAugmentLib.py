@@ -2,6 +2,7 @@
 # mostly polars functions
 
 # todo:
+# since some columns can be derived from other columns, we should assert that input df has at least on column in each group of derived columns.
 # assert that column names don't exist in df.columns for all column creation functions.
 # refactor when should *_Dcl columns be created? At end of each func, class, class of it's own?
 # if a column already exists, print a message and skip creation.
@@ -525,6 +526,16 @@ def calculate_sd_expected_values(df: pl.DataFrame, scores_df: pl.DataFrame) -> p
     return df
 
 
+# Function to create columns of max values from various regexes of columns. also creates columns of the column names of the max value.
+def max_horizontal_and_col(df, pattern):
+    cols = df.select(pl.col(pattern)).columns
+    max_expr = pl.max_horizontal(pl.col(pattern))
+    col_expr = pl.when(pl.col(cols[0]) == max_expr).then(pl.lit(cols[0]))
+    for col in cols[1:]:
+        col_expr = col_expr.when(pl.col(col) == max_expr).then(pl.lit(col))
+    return max_expr, col_expr.otherwise(pl.lit(""))
+
+
 # calculate EV max scores for various regexes including all vulnerabilities. also create columns of the column names of the max values.
 def create_best_contracts(df: pl.DataFrame) -> pl.DataFrame:
 
@@ -533,15 +544,6 @@ def create_best_contracts(df: pl.DataFrame) -> pl.DataFrame:
     declarer_directions = 'NESW'
     strains = 'SHDCN'
     vulnerabilities = ['NV', 'V']
-
-    # Function to create columns of max values from various regexes of columns. also creates columns of the column names of the max value.
-    def max_and_col(df, pattern):
-        cols = df.select(pl.col(pattern)).columns
-        max_expr = pl.max_horizontal(pl.col(pattern))
-        col_expr = pl.when(pl.col(cols[0]) == max_expr).then(pl.lit(cols[0]))
-        for col in cols[1:]:
-            col_expr = col_expr.when(pl.col(col) == max_expr).then(pl.lit(col))
-        return max_expr, col_expr.otherwise(pl.lit(""))
 
     # Dictionary to store expressions with their aliases as keys
     max_ev_dict = {}
@@ -552,28 +554,28 @@ def create_best_contracts(df: pl.DataFrame) -> pl.DataFrame:
     for v in vulnerabilities:
         # Level 4: Overall Max EV for each vulnerability
         ev_columns = f'^EV_(NS|EW)_[NESW]_[SHDCN]_[1-7]_{v}$'
-        max_expr, col_expr = max_and_col(df, ev_columns)
+        max_expr, col_expr = max_horizontal_and_col(df, ev_columns)
         max_ev_dict[f'EV_{v}_Max'] = max_expr
         max_ev_dict[f'EV_{v}_Max_Col'] = col_expr
 
         for pd in pair_directions:
             # Level 3: Max EV for each pair direction and vulnerability
             ev_columns = f'^EV_{pd}_[NESW]_[SHDCN]_[1-7]_{v}$'
-            max_expr, col_expr = max_and_col(df, ev_columns)
+            max_expr, col_expr = max_horizontal_and_col(df, ev_columns)
             max_ev_dict[f'EV_{pd}_{v}_Max'] = max_expr
             max_ev_dict[f'EV_{pd}_{v}_Max_Col'] = col_expr
 
             for dd in pd: #declarer_directions:
                 # Level 2: Max EV for each pair direction, declarer direction, and vulnerability
                 ev_columns = f'^EV_{pd}_{dd}_[SHDCN]_[1-7]_{v}$'
-                max_expr, col_expr = max_and_col(df, ev_columns)
+                max_expr, col_expr = max_horizontal_and_col(df, ev_columns)
                 max_ev_dict[f'EV_{pd}_{dd}_{v}_Max'] = max_expr
                 max_ev_dict[f'EV_{pd}_{dd}_{v}_Max_Col'] = col_expr
 
                 for s in strains:
                     # Level 1: Max EV for each combination
                     ev_columns = f'^EV_{pd}_{dd}_{s}_[1-7]_{v}$'
-                    max_expr, col_expr = max_and_col(df, ev_columns)
+                    max_expr, col_expr = max_horizontal_and_col(df, ev_columns)
                     max_ev_dict[f'EV_{pd}_{dd}_{s}_{v}_Max'] = max_expr
                     max_ev_dict[f'EV_{pd}_{dd}_{s}_{v}_Max_Col'] = col_expr
 
@@ -651,13 +653,13 @@ def convert_contract_to_DD_Tricks_Dummy(df: pl.DataFrame) -> List[Optional[int]]
 
 
 def convert_contract_to_DD_Score_Ref(df: pl.DataFrame) -> pl.DataFrame:
-    # create a column which contains the name of the column which contains the double dummy score for the contract.
+    # create DD_Score_Refs which contains the name of the DD_Score_[1-7][CDHSN]_[NESW] column which contains the double dummy score for the contract.
     # could use pl.str_concat() instead
     df = df.with_columns(
         (pl.lit('DD_Score_')+pl.col('BidLvl').cast(pl.String)+pl.col('BidSuit')+pl.lit('_')+pl.col('Declarer_Direction')).alias('DD_Score_Refs'),
     )
     all_scores_d, scores_d, scores_df = calculate_scores()
-    # Create all DD_Score columns
+    # Create scores for columns: DD_Score_[1-7][CDHSN]_[NESW]. Calculated in respect to the player's direction. e.g. DD_Score_1N_E is the score given E as the declarer.
     df = df.with_columns([
         pl.struct([f"DD_{direction}_{strain}", f"Vul_{pair_direction}"]) # todo: change Vul_{pair_direction} to use iVul so brs_df can be used without joining Vul_(NS|EW).
         .map_elements(
@@ -671,12 +673,12 @@ def convert_contract_to_DD_Score_Ref(df: pl.DataFrame) -> pl.DataFrame:
         for direction, pair_direction in [('N','NS'), ('E','EW'), ('S','NS'), ('W','EW')]
     ])
 
-    # Create list of all DD_Score column names
+    # Create list of column names: DD_Score_[1-7][CDHSN]_[NESW]
     dd_score_columns = [f"DD_Score_{level}{strain}_{direction}" 
                         for level in range(1, 8)
                         for strain in mlBridgeLib.CDHSN  
                         for direction in mlBridgeLib.NESW]
-    # Create DD_Score_Declarer using struct with all columns
+    # Create DD_Score_Declarer by selecting the DD_Score_[1-7][CDHSN]_[NESW] column for the given Declarer_Direction.
     df = df.with_columns([
         pl.struct(['BidLvl', 'BidSuit', 'Declarer_Direction'] + dd_score_columns)
         .map_elements(
@@ -691,14 +693,14 @@ def convert_contract_to_DD_Score_Ref(df: pl.DataFrame) -> pl.DataFrame:
             .then(pl.col('DD_Score_Declarer'))
             .when(pl.col('Declarer_Pair_Direction').eq('EW'))
             .then(pl.col('DD_Score_Declarer').neg())
-            .otherwise(None)
+            .otherwise(0) # we want PASS to have a score of 0, right?
             .alias('DD_Score_NS'),
         
         pl.when(pl.col('Declarer_Pair_Direction').eq('EW'))
             .then(pl.col('DD_Score_Declarer'))
             .when(pl.col('Declarer_Pair_Direction').eq('NS'))
             .then(pl.col('DD_Score_Declarer').neg())
-            .otherwise(None)
+            .otherwise(0) # we want PASS to have a score of 0, right?
             .alias('DD_Score_EW')
     )
     return df
@@ -1537,17 +1539,25 @@ class FinalContractAugmenter:
         max_expressions = []
         for pd in ['NS', 'EW']:
             max_expressions.extend(self._create_ev_expressions_for_pair(pd))
+
+        self.df = self.df.with_columns(max_expressions)
+
+        ev_columns = f'^EV_Max_(NS|EW)$'
+        max_expr, col_expr = max_horizontal_and_col(self.df, ev_columns)
+        self.df = self.df.with_columns([
+            max_expr.alias('EV_Max'),
+            col_expr.alias('EV_Max_Col'),
+        ])
         
         self.df = self._time_operation(
             "create_ev_columns",
-            lambda df: df.with_columns(max_expressions).with_columns([
-                pl.max_horizontal('EV_Max_NS','EV_Max_EW').alias('EV_Max'),
-                pl.max_horizontal('EV_Max_Col_NS','EV_Max_Col_EW').alias('EV_Max_Col'),
+            lambda df: df.with_columns([
                 pl.when(pl.col('Declarer_Pair_Direction').eq('NS')).then(pl.col('EV_Max_NS')).otherwise(pl.col('EV_Max_EW')).alias('EV_Max_Declarer'),
                 pl.when(pl.col('Declarer_Pair_Direction').eq('NS')).then(pl.col('EV_Max_Col_NS')).otherwise(pl.col('EV_Max_Col_EW')).alias('EV_Max_Col_Declarer'),
             ]),
             self.df
         )
+
 
     # todo: move this to contract established class
     def _create_ev_expressions_for_pair(self, pd: str) -> List:
@@ -1940,7 +1950,6 @@ class MatchPointAugmenter:
                 self.df
             )
 
-
     def _calculate_matchpoints_group(self, series_list: list[pl.Series]) -> pl.Series:
         col_values = series_list[0]
         score_ns_values = series_list[1]
@@ -1957,7 +1966,6 @@ class MatchPointAugmenter:
             for val in col_values
         ])
 
-
     def _calculate_all_score_matchpoints(self) -> None:
         t = time.time()
         # if 'Expanded_Scores_List' in self.df.columns: # todo: obsolete?
@@ -1966,19 +1974,19 @@ class MatchPointAugmenter:
         # else:
         print('Calculate matchpoints over session, PBN, and Board.')
         # calc matchpoints on row-by-row basis
-        if self.df['Score_NS'].is_null().sum() > 0:
+        if self.df['Score_NS'].null_count() > 0:
             print(f"Warning: Null values in score_ns_values: {self.df['Score_NS'].is_null().sum()}")
-        # for NS scores
-        for col in self.all_score_columns + ['DD_Score_NS', 'Par_NS']:
+        # compute matchpoints for DD_Score_[1-7][CDHSN]_[NESW] and EV_(NS|EW)_[NESW]_[CDHSN]_[1-7] and misc columns.
+        for col in self.all_score_columns + ['DD_Score_NS', 'DD_Score_EW', 'Par_NS', 'Par_EW']:
             assert 'MP_'+col not in self.df.columns, f"Column 'MP_{col}' already exists in DataFrame"
             self.df = self.df.with_columns([
                     pl.map_groups(
-                        exprs=[col, 'Score_NS'],
+                        exprs=[col, 'Score_NS' if '_NS' in col or col[-1] in 'NS' else 'Score_EW'],
                         function=self._calculate_matchpoints_group,
                         return_dtype=pl.Float64,
-                    ).over(['session_id', 'PBN', 'Board']).alias('MP_'+col)
+                    ).over(['session_id', 'PBN', 'Board']).alias(f'MP_{col}')
                 ])
-        # for declarer orientation scores
+        # compute matchpoints for declarer orientation columns
         for col in [('DD_Score_Declarer','Score_Declarer'),('Par_Declarer','Score_Declarer'),('EV_Score_Declarer','Score_Declarer'),('EV_Max_Declarer','Score_Declarer')]:
             assert 'MP_'+col[0] not in self.df.columns, f"Column 'MP_{col[0]}' already exists in DataFrame"
             self.df = self.df.with_columns([
@@ -1986,33 +1994,70 @@ class MatchPointAugmenter:
                         exprs=col,
                         function=self._calculate_matchpoints_group,
                         return_dtype=pl.Float64,
-                    ).over(['session_id', 'PBN', 'Board']).alias('MP_'+col[0])
+                    ).over(['session_id', 'PBN', 'Board']).alias(f'MP_{col[0]}')
                 ])
         print(f"calculate matchpoints all_score_columns: time:{time.time()-t} seconds")
+
+    def _calculate_mp_pct_from_new_score(self, col: str) -> pl.Series:
+        return (pl.col(f'MP_{col}')+pl.col(f'MP_{col}').gt(pl.col(col))+(pl.col(f'MP_{col}').eq(pl.col(col))/2))/(pl.col('MP_Top')+1)
 
     def _calculate_final_scores(self) -> None:
         t = time.time()
         
-        # Calculate MP and percentages for discrete scores
-        for col_ns in ['DD_Score_NS','Par_NS']:
-            col_ew = col_ns.replace('NS','EW')
-            self.df = self.df.with_columns(
-                (pl.col('MP_Top')-pl.col(f'MP_{col_ns}')).alias(f'MP_{col_ew}')
-            ).with_columns([
-                (pl.col(f'MP_{col_ns}')/pl.col('MP_Top')).alias(col_ns.replace('_NS','_Pct_NS')),
-                (pl.col(f'MP_{col_ew}')/pl.col('MP_Top')).alias(col_ew.replace('_EW','_Pct_EW')),
-            ])
+        # Calculate DD and Par percentages. Technique is to start calc matchpoints then compare dd/par score with all Score values for the same board and then divide by MP_Top + 1.
+        # SELECT Board, Score_NS, DD_Score_NS, MP_DD_Score_NS, DD_Score_Pct_NS, DD_Score_EW, MP_DD_Score_EW, DD_Score_Pct_EW, Par_NS, MP_Par_NS, Par_Pct_NS
+        for col in ['DD_Score']:
+            for pair in ['NS','EW']:
+                col_pair = col + '_' + pair
+                # Calculate matchpoints: compare each row's DD_Score with all Score values for the same board.
+                board_scores_tuples = self.df.group_by('Board').agg(pl.col(f'Score_{pair}')).rows()
+                board_to_scores_d = {board: scores for board, scores in board_scores_tuples}
+                self.df = self.df.with_columns(
+                    pl.struct([col_pair, 'Board']).map_elements(
+                        lambda row: sum(
+                            1.0 if row[col_pair] > score else 0.5 if row[col_pair] == score else 0.0
+                            for score in board_to_scores_d[row['Board']]
+                        ),
+                        return_dtype=pl.Float64
+                    ).alias(f'MP_{col_pair}')
+                )
+                self.df = self.df.with_columns([
+                    (pl.col(f'MP_{col_pair}')/(pl.col('MP_Top')+1)).alias(f'{col}_Pct_{pair}')
+                ])
+                assert self.df[f'{col}_Pct_{pair}'].is_between(0,1).all()
+        # calculate Par percentages.
+        for col in ['Par']:
+            for pair in ['NS','EW']:
+                col_pair = col + '_' + pair
+                self.df = self.df.with_columns([
+                    pl.when(pl.col(col_pair) > pl.col(f'Score_{pair}')).then(1.0)
+                    .when(pl.col(col_pair) == pl.col(f'Score_{pair}')).then(0.5)
+                    .otherwise(0.0)
+                    .alias(f"MP_Rank_{col_pair}")
+                ])
+                self.df = self.df.with_columns([
+                    (pl.col(f"MP_Rank_{col_pair}").sum().over('Board')).alias(f'MP_{col_pair}'),
+                ])
+                self.df = self.df.with_columns([
+                    (pl.col(f'MP_{col_pair}')/(pl.col('MP_Top')+1)).alias(f'{col}_Pct_{pair}')
+                ])
+                assert self.df[f'{col}_Pct_{pair}'].is_between(0,1).all()
+
         # for declarer orientation scores
         self.df = self.df.with_columns(
-            (pl.col(f'MP_DD_Score_Declarer')/pl.col('MP_Top')).alias('MP_DD_Pct_Declarer'),
-            (pl.col(f'MP_Par_Declarer')/pl.col('MP_Top')).alias('MP_Par_Pct_Declarer'),
-            (pl.col(f'MP_EV_Score_Declarer')/pl.col('MP_Top')).alias('MP_EV_Pct_Declarer'),
-            (pl.col(f'MP_EV_Max_Declarer')/pl.col('MP_Top')).alias('MP_EV_Max_Pct_Declarer')
+            self._calculate_mp_pct_from_new_score('DD_Score_Declarer').alias('MP_DD_Pct_Declarer'),
+            self._calculate_mp_pct_from_new_score('Par_Declarer').alias('MP_Par_Pct_Declarer'),
+            self._calculate_mp_pct_from_new_score('EV_Score_Declarer').alias('MP_EV_Pct_Declarer'),
+            self._calculate_mp_pct_from_new_score('EV_Max_Declarer').alias('MP_EV_Max_Pct_Declarer')
         )
+        # todo: assert self.df['MP_DD_Pct_Declarer'].between(0,1).all()
+        # todo: assert self.df['MP_Par_Pct_Declarer'].between(0,1).all()
+        # todo: assert self.df['MP_EV_Pct_Declarer'].between(0,1).all()
+        # todo: assert self.df['MP_EV_Max_Pct_Declarer'].between(0,1).all()
 
         # Calculate remaining scores and percentages
         operations = [
-            lambda df: df.with_columns((1-pl.col('Par_Pct_NS')).alias('Par_Pct_EW')),
+            #lambda df: df.with_columns((1-pl.col('Par_Pct_NS')).alias('Par_Pct_EW')),
             lambda df: df.with_columns(pl.max_horizontal(f'^MP_DD_Score_[1-7][SHDCN]_[NS]$').alias(f'MP_DD_Score_NS_Max')),
             lambda df: df.with_columns(pl.max_horizontal(f'^MP_DD_Score_[1-7][SHDCN]_[EW]$').alias(f'MP_DD_Score_EW_Max')),
             lambda df: df.with_columns(pl.max_horizontal(f'^MP_EV_NS_[NS]_[SHDCN]_[1-7]$').alias(f'MP_EV_Max_NS')),
@@ -2020,20 +2065,18 @@ class MatchPointAugmenter:
             lambda df: df.with_columns([
                 (pl.col('MP_DD_Score_NS_Max')/pl.col('MP_Top')).alias('DD_Score_Pct_NS_Max'),
                 (pl.col('MP_DD_Score_EW_Max')/pl.col('MP_Top')).alias('DD_Score_Pct_EW_Max'),
-                (pl.col('MP_EV_Max_NS')/pl.col('MP_Top')).alias('EV_Pct_Max_NS'),
-                (pl.col('MP_EV_Max_EW')/pl.col('MP_Top')).alias('EV_Pct_Max_EW'),
-                #pl.col('DD_Score_Pct_NS').alias('DD_Pct_NS'),
-                #pl.col('DD_Score_Pct_EW').alias('DD_Pct_EW'),
-                #pl.col('MP_NS').alias('Matchpoints_NS'),
-                #pl.col('MP_EW').alias('Matchpoints_EW'),
-                #pl.col('MP_EV_Max_NS').alias('SD_MP_Max_NS'),
-                #pl.col('MP_Top').sub(pl.col('MP_EV_Max_NS')).alias('SD_MP_Max_EW'),
+                #(pl.col('MP_EV_Max_NS')/pl.col('MP_Top')).alias('EV_Pct_Max_NS'),
+                #(pl.col('MP_EV_Max_EW')/pl.col('MP_Top')).alias('EV_Pct_Max_EW'),
+                # self._calculate_pct_from_new_score('DD_Score_NS_Max').alias('DD_Score_Pct_NS_Max'),
+                # self._calculate_pct_from_new_score('DD_Score_EW_Max').alias('DD_Score_Pct_EW_Max'),
+                self._calculate_mp_pct_from_new_score('EV_Max_NS').alias('EV_Pct_Max_NS'),
+                self._calculate_mp_pct_from_new_score('EV_Max_EW').alias('EV_Pct_Max_EW'),
             ]),
+            # todo: assert self.df['DD_Score_Pct_NS_Max'].between(0,1).all()
+            # todo: assert self.df['DD_Score_Pct_EW_Max'].between(0,1).all()
+            # todo: assert self.df['EV_Pct_Max_NS'].between(0,1).all()
+            # todo: assert self.df['EV_Pct_Max_EW'].between(0,1).all()
             lambda df: df.with_columns([
-                #pl.col('EV_Pct_Max_NS').alias('SD_Pct_NS'),
-                #pl.col('EV_Pct_Max_EW').alias('SD_Pct_EW'),
-                #pl.col('EV_Pct_Max_NS').alias('SD_Pct_Max_NS'),
-                #pl.col('EV_Pct_Max_EW').alias('SD_Pct_Max_EW'),
                 (pl.col('EV_Pct_Max_NS')-pl.col('Pct_NS')).alias('EV_Pct_Max_Diff_NS'), # todo: suspect this is wrong
                 (pl.col('EV_Pct_Max_EW')-pl.col('Pct_EW')).alias('EV_Pct_Max_Diff_EW'), # todo: suspect this is wrong
                 (pl.col('DD_Score_Pct_NS_Max')-pl.col('Par_Pct_NS')).alias('EV_Par_Pct_Diff_NS'), # todo: suspect this is wrong
