@@ -198,7 +198,7 @@
 				"help": "**Showing boards we declared which underperformed Expected Value (EV).**",
 				"prompts": [
 					{
-						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Par_{Pair_Direction}, Pct_{Pair_Direction}, Par_Pct_{Pair_Direction}, EV_Max_Col, EV_Max_{Pair_Direction}, EV_Pct_Max_{Pair_Direction}, EV_Max_Diff_{Pair_Direction}, EV_Pct_Max_Diff_{Pair_Direction}, EV_Par_Pct_Max_Diff_{Pair_Direction} FROM self WHERE Boards_We_Declared = True AND (Score_{Pair_Direction} < EV_Score_Declarer OR Score_{Pair_Direction} < EV_Max_Declarer) ORDER BY Board"
+						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Par_{Pair_Direction}, Pct_{Pair_Direction}, Par_Pct_{Pair_Direction}, EV_Max_Col, EV_Max_{Pair_Direction}, EV_Pct_Max_{Pair_Direction}, EV_Max_Diff_{Pair_Direction}, EV_Pct_Max_Diff_{Pair_Direction}, EV_Pct_Max_Diff_{Pair_Direction} FROM self WHERE Boards_We_Declared = True AND (Score_{Pair_Direction} < EV_Score_Declarer OR Score_{Pair_Direction} < EV_Max_Declarer) ORDER BY Board"
 					}
 				]
 			},
