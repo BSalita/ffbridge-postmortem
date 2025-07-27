@@ -109,7 +109,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, Par, pct, Par pct, sd pct, DD score, tricks, DD tricks. Boards_We_Played=True",
-						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Par_{Pair_Direction}, Pct_{Pair_Direction}, Par_Pct_{Pair_Direction}, EV_Pct_Max_{Pair_Direction}, DD_Score_{Pair_Direction}, Tricks, DD_Tricks, AVG(Pct_{Pair_Direction}) OVER (ORDER BY Board ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as Running_Avg_Pct FROM self WHERE Boards_We_Played = True ORDER BY Board"
+						"sql": "SELECT Board, PBN, Dealer, Vul, Contract, Score_{Pair_Direction}, Par_{Pair_Direction}, Pct_{Pair_Direction}, Par_Pct_{Pair_Direction}, EV_Pct_Max_{Pair_Direction}, DD_Score_{Pair_Direction}, Tricks, DD_Tricks, AVG(Pct_{Pair_Direction}) OVER (ORDER BY Board ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as Running_Avg_Pct FROM self WHERE Boards_We_Played = True ORDER BY Board"
 					}
 				]
 			},
@@ -363,7 +363,7 @@
 				"prompts": [
 					{
 						"prompt": "Show board, bidsuit, contract, score, pct, section_name, pair_number_ns, pair_number_ew, sd score, sd pct diff, sd pct, dd tricks, sd probs taking_* sort by board, bidsuit, sd pct diff descending.",
-						"sql": "SELECT Board, BidSuit, Contract, Score_{Pair_Direction}, Pct_{Pair_Direction}, section_name, Pair_Number_NS, Pair_Number_EW, EV_Max_{Pair_Direction}, EV_Pct_Max_{Pair_Direction}, EV_Pct_Max_Diff_{Pair_Direction}, DD_Tricks, Prob_Taking_0, Prob_Taking_1, Prob_Taking_2, Prob_Taking_3, Prob_Taking_4, Prob_Taking_5, Prob_Taking_6, Prob_Taking_7, Prob_Taking_8, Prob_Taking_9, Prob_Taking_10, Prob_Taking_11, Prob_Taking_12, Prob_Taking_13 FROM self WHERE Pair_Number_{Pair_Direction} IS NOT NULL ORDER BY Board, BidSuit, EV_Pct_Max_Diff_{Pair_Direction} DESC"
+						"sql": "SELECT Board, BidSuit, Contract, Score_{Pair_Direction}, Pct_{Pair_Direction}, section_name, Pair_Number_NS, Pair_Number_EW, EV_Max_{Pair_Direction}, EV_Pct_Max_{Pair_Direction}, EV_Pct_Max_Diff_{Pair_Direction}, DD_Pct_Max_Diff_{Pair_Direction}, DD_EV_Pct_Max_Diff_{Pair_Direction}, DD_Tricks, Prob_Taking_0, Prob_Taking_1, Prob_Taking_2, Prob_Taking_3, Prob_Taking_4, Prob_Taking_5, Prob_Taking_6, Prob_Taking_7, Prob_Taking_8, Prob_Taking_9, Prob_Taking_10, Prob_Taking_11, Prob_Taking_12, Prob_Taking_13 FROM self WHERE Pair_Number_{Pair_Direction} IS NOT NULL ORDER BY Board, BidSuit, EV_Pct_Max_Diff_{Pair_Direction} DESC"
 					}
 				]
 			},
