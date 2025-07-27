@@ -7,6 +7,7 @@
 
 # todo:
 # show df of freq of scores; freq, score, matchpoints
+# implement ffbridge_auth_playwright.py code to get bearer token. use it if .env doesn't exist or hatch a scheme to refresh token.(?)
 # tell ffbridge to unblock my ip address
 # move ffbridge legacy api code into mlBridgeFFLib.
 # move any Roy Rene code into mlBridgeBPLib?
@@ -1911,7 +1912,7 @@ def write_report() -> None:
         # As an html button (needs styling added)
         # can't use link_button() restarts page rendering. markdown() will correctly jump to href.
         # st.link_button('Go to top of report',url='#your-personalized-report')\
-        report_title_anchor = report_title.replace(' ','-').lower()
+        # report_title_anchor = report_title.replace(' ','-').lower()
         # Go to top button using simple anchor link (centered)
         st.markdown('''
             <div style="text-align: center; margin: 20px 0;">
