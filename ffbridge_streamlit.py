@@ -2,20 +2,15 @@
 # Invoke from system prompt using: streamlit run ffbridge_streamlit.py
 
 # todo (priority):
-# look for errors in report.
-# wrong score in last dataframe - compute adjustments (only RRN?).
 
 # todo:
+# move any Roy Rene code into mlBridgeBPLib
+# get lancelot api working again modeling on ffbridge (legacy?) api.
 # show df of freq of scores; freq, score, matchpoints
 # implement ffbridge_auth_playwright.py code to get bearer token. use it if .env doesn't exist or hatch a scheme to refresh token.(?)
 # tell ffbridge to unblock my ip address
-# move ffbridge legacy api code into mlBridgeFFLib.
-# move any Roy Rene code into mlBridgeBPLib?
 # Refactor common postmortem methods into ml bridge class. Sync with other postmortem projects.
 # Decide on whether to use faster RRN code or slower be-nice-to-server code? Does it matter?
-# Segment lancelot api code into its own methods. Move to mlBridgeFFLib. It's all a bit of a mishmash here.
-# Need graceful error handling. Error on 'id' rename: https://api.ffbridge.fr/api/v1/simultaneous-tournaments/2991057. Doesn't work in curl so not my problem.
-# Need graceful error handling. Error on roadsheets: https://api.ffbridge.fr/api/v1/simultaneous-tournaments/32178/teams/4230171/roadsheets. Doesn't work in curl so not my problem.
 
 
 import streamlit as st
