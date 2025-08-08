@@ -18,6 +18,7 @@ FrenchDirectionToDirection_d = { # convert mlBridgeLib dealer to endplay dealer
     'S':'S',
     'W':'W',
     'O':'W',
+    '-':None, # happened when computer failed to communicate with bridgemates.
     None:None,  # Map 'Unknown' to None/NULL
 }
 FrenchStrainToStrain_d = { # convert mlBridgeLib dealer to endplay dealer
@@ -314,6 +315,8 @@ def convert_ffdf_api_to_mldf(ffldfs):
     df = df.with_columns([
         pl.when(pl.col('roadsheets_deals_result').str.starts_with('+'))
             .then(pl.col('roadsheets_deals_result').str.slice(1))  # Remove '+'
+            .when(pl.col('roadsheets_deals_result').eq('-')) # happened when computer failed to communicate with bridgemates.
+            .then(None)
             .when(pl.col('roadsheets_deals_result').str.starts_with('-'))
             .then(pl.col('roadsheets_deals_result'))
             .otherwise(pl.lit('0'))  # Replace '=' with '0'
@@ -329,7 +332,9 @@ def convert_ffdf_api_to_mldf(ffldfs):
                 .then(pl.col('roadsheets_deals_teamScore'))
                 .when(pl.col('roadsheets_deals_teamScore').str.to_uppercase().str.starts_with('PASS')) # e.g. 'PASS' or 'passe' or 'PASSE'
                 .then(pl.lit('0'))
-                .otherwise('-'+pl.col('roadsheets_deals_opponentsScore'))
+                .when(pl.col('roadsheets_deals_opponentsScore').str.contains(r'^\d+$'))
+                .then('-'+pl.col('roadsheets_deals_opponentsScore'))
+                .otherwise(pl.lit(None))
                 .cast(pl.Int16)
                 .alias('Score_NS'),
         ])
@@ -338,7 +343,9 @@ def convert_ffdf_api_to_mldf(ffldfs):
                 .then(pl.col('roadsheets_deals_opponentsScore'))
                 .when(pl.col('roadsheets_deals_opponentsScore').str.to_uppercase().str.starts_with('PASS')) # e.g. 'PASS' or 'passe' or 'PASSE'
                 .then(pl.lit('0'))
-                .otherwise('-'+pl.col('roadsheets_deals_teamScore'))
+                .when(pl.col('roadsheets_deals_teamScore').str.contains(r'^\d+$'))
+                .then('-'+pl.col('roadsheets_deals_teamScore'))
+                .otherwise(pl.lit(None))
                 .cast(pl.Int16)
                 .alias('Score_EW'),
         ])
@@ -348,7 +355,9 @@ def convert_ffdf_api_to_mldf(ffldfs):
                 .then(pl.col('roadsheets_deals_teamScore'))
                 .when(pl.col('roadsheets_deals_teamScore').str.to_uppercase().str.starts_with('PASS')) # e.g. 'PASS' or 'passe' or 'PASSE'
                 .then(pl.lit('0'))
-                .otherwise('-'+pl.col('roadsheets_deals_opponentsScore'))
+                .when(pl.col('roadsheets_deals_opponentsScore').str.contains(r'^\d+$'))
+                .then('-'+pl.col('roadsheets_deals_opponentsScore'))
+                .otherwise(pl.lit(None))
                 .cast(pl.Int16)
                 .alias('Score_EW'),
         ])
@@ -357,7 +366,9 @@ def convert_ffdf_api_to_mldf(ffldfs):
                 .then(pl.col('roadsheets_deals_opponentsScore'))
                 .when(pl.col('roadsheets_deals_opponentsScore').str.to_uppercase().str.starts_with('PASS')) # e.g. 'PASS' or 'passe' or 'PASSE'
                 .then(pl.lit('0'))
-                .otherwise('-'+pl.col('roadsheets_deals_teamScore'))
+                .when(pl.col('roadsheets_deals_teamScore').str.contains(r'^\d+$'))
+                .then('-'+pl.col('roadsheets_deals_teamScore'))
+                .otherwise(pl.lit(None))
                 .cast(pl.Int16)
                 .alias('Score_NS'),
         ])

@@ -1045,7 +1045,10 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
         if len(game_urls) == 0:
             st.error(f"Could not find any games for {player_id}.")
         elif session_id is None:
-            session_id = next(iter(game_urls))  # default to most recent club game
+            iterator = iter(game_urls)
+            next(iterator)  # Skip first
+            session_id = next(iterator)  # Get second
+            #session_id = next(iter(game_urls))  # default to most recent club game
         st.session_state.player_id = player_id
         print(f"session_id:{session_id}")
         st.session_state.session_id = session_id

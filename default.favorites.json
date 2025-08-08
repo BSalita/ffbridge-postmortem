@@ -462,7 +462,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT Name_Declarer AS Name, CASE WHEN Declarer_Direction IN ('N', 'S') THEN AVG(Pct_NS) ELSE AVG(Pct_EW) END AS Avg_Pct, COUNT(*) AS Count, Number_Declarer AS Declarer, Declarer_Direction AS Direction, AVG(CAST(Tricks > DD_Tricks AS INT)) AS Pct_GT_DD, AVG(CAST(Tricks = DD_Tricks AS INT)) AS Pct_EQ_DD, AVG(CAST(Score_Declarer > Par_Declarer AS INT)) AS Pct_GT_Par, AVG(CAST(Score_Declarer = Par_Declarer AS INT)) AS Pct_EQ_Par FROM self GROUP BY Number_Declarer, Name_Declarer, Declarer_Direction HAVING COUNT(*) >= 4 ORDER BY Avg_Pct DESC"
+						"sql": "SELECT Declarer_Name AS Name, CASE WHEN Declarer_Direction IN ('N', 'S') THEN AVG(Pct_NS) ELSE AVG(Pct_EW) END AS Avg_Pct, COUNT(*) AS Count, Declarer_ID AS Declarer, Declarer_Direction AS Direction, AVG(CAST(Tricks > DD_Tricks AS INT)) AS Pct_GT_DD, AVG(CAST(Tricks = DD_Tricks AS INT)) AS Pct_EQ_DD, AVG(CAST(Score_Declarer > Par_Declarer AS INT)) AS Pct_GT_Par, AVG(CAST(Score_Declarer = Par_Declarer AS INT)) AS Pct_EQ_Par FROM self GROUP BY Declarer_ID, Declarer_Name, Declarer_Direction HAVING COUNT(*) >= 4 ORDER BY Avg_Pct DESC"
 					}
 				]
 			},
@@ -541,7 +541,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT CONCAT(Number_Declarer, ' - ', Name_Declarer, ' - ', Declarer_Direction) AS Player, SUM(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN 1 ELSE 0 END) AS Correct_Preds, COUNT() AS Boards_Declared, STRING_AGG(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN Board END, ', ') AS Correctly_Pred_Boards, STRING_AGG(CASE WHEN Declarer_Direction <> Declarer_Direction_Pred THEN Board END, ', ') AS Declared_Not_Predicted, Correct_Preds/Boards_Declared AS Correct_Direction_Pct, SUM(CASE WHEN (Declarer_Direction IN ('N','S') AND Declarer_Direction_Pred IN ('N', 'S')) OR (Declarer_Direction IN ('E','W') AND Declarer_Direction_Pred IN ('E', 'W')) THEN 1 ELSE 0 END) AS Correct_Pair_Preds, Correct_Pair_Preds/Boards_Declared AS Correct_Pair_Pct FROM self GROUP BY Number_Declarer, Name_Declarer, Declarer_Direction ORDER BY Correct_Direction_Pct DESC, Boards_Declared DESC"
+						"sql": "SELECT CONCAT(Declarer_ID, ' - ', Declarer_Name, ' - ', Declarer_Direction) AS Player, SUM(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN 1 ELSE 0 END) AS Correct_Preds, COUNT() AS Boards_Declared, STRING_AGG(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN Board END, ', ') AS Correctly_Pred_Boards, STRING_AGG(CASE WHEN Declarer_Direction <> Declarer_Direction_Pred THEN Board END, ', ') AS Declared_Not_Predicted, Correct_Preds/Boards_Declared AS Correct_Direction_Pct, SUM(CASE WHEN (Declarer_Direction IN ('N','S') AND Declarer_Direction_Pred IN ('N', 'S')) OR (Declarer_Direction IN ('E','W') AND Declarer_Direction_Pred IN ('E', 'W')) THEN 1 ELSE 0 END) AS Correct_Pair_Preds, Correct_Pair_Preds/Boards_Declared AS Correct_Pair_Pct FROM self GROUP BY Declarer_ID, Declarer_Name, Declarer_Direction ORDER BY Correct_Direction_Pct DESC, Boards_Declared DESC"
 					}
 				]
 			},
@@ -594,11 +594,11 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT Number_Declarer AS Declarer_NS, Name_Declarer AS Name_NS, AVG(Pct_NS) AS Pct_NS_Actual, AVG(Pct_NS_Pred) AS Pct_NS_Pred,  COUNT() AS Boards_Declared, AVG(CAST(Tricks > DD_Tricks AS INT)) AS Pct_GT_DD, AVG(CAST(Tricks = DD_Tricks AS INT)) AS Pct_EQ_DD FROM self WHERE Declarer_Pair_Direction='NS' GROUP BY Number_Declarer, Name_Declarer ORDER BY Pct_NS_Actual DESC, Boards_Declared DESC"
+						"sql": "SELECT Declarer_ID AS Declarer_NS, Declarer_Name AS Name_NS, AVG(Pct_NS) AS Pct_NS_Actual, AVG(Pct_NS_Pred) AS Pct_NS_Pred,  COUNT() AS Boards_Declared, AVG(CAST(Tricks > DD_Tricks AS INT)) AS Pct_GT_DD, AVG(CAST(Tricks = DD_Tricks AS INT)) AS Pct_EQ_DD FROM self WHERE Declarer_Pair_Direction='NS' GROUP BY Declarer_ID, Declarer_Name ORDER BY Pct_NS_Actual DESC, Boards_Declared DESC"
 					},
 					{
 						"prompt": "",
-						"sql": "SELECT Number_Declarer AS Declarer_EW, Name_Declarer AS Name_EW, AVG(Pct_EW) AS Pct_EW_Actual, AVG(Pct_EW_Pred) AS Pct_EW_Pred,  COUNT() AS Boards_Declared, AVG(CAST(Tricks > DD_Tricks AS INT)) AS Pct_GT_DD, AVG(CAST(Tricks = DD_Tricks AS INT)) AS Pct_EQ_DD FROM self WHERE Declarer_Pair_Direction='EW' GROUP BY Number_Declarer, Name_Declarer ORDER BY Pct_EW_Actual DESC, Boards_Declared DESC"
+						"sql": "SELECT Declarer_ID AS Declarer_EW, Declarer_Name AS Name_EW, AVG(Pct_EW) AS Pct_EW_Actual, AVG(Pct_EW_Pred) AS Pct_EW_Pred,  COUNT() AS Boards_Declared, AVG(CAST(Tricks > DD_Tricks AS INT)) AS Pct_GT_DD, AVG(CAST(Tricks = DD_Tricks AS INT)) AS Pct_EQ_DD FROM self WHERE Declarer_Pair_Direction='EW' GROUP BY Declarer_ID, Declarer_Name ORDER BY Pct_EW_Actual DESC, Boards_Declared DESC"
 					}
 				]
 			}

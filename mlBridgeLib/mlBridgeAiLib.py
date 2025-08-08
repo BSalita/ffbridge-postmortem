@@ -123,9 +123,8 @@ def define_layer_sizes(input_size: int, num_layers: int = 3, shrink_factor: int 
     return layer_sizes
 
 # create a test set using date and sample size. current default is 10k samples ge 2024-07-01.
-def split_by_date(df: Any, include_dates: str) -> Tuple[Any, Any]:
-    include_date = datetime.strptime(include_dates, '%Y-%m-%d') # i'm not getting why datetime.datetime.strptime isn't working here but the only thing that works elsewhere?
-    date_filter = df['Date'] >= include_date
+def split_by_date(df: Any, split_date: pl.Date) -> Tuple[Any, Any]:
+    date_filter = df['Date'] >= split_date
     return df.filter(~date_filter), df.filter(date_filter)
 
 def get_device() -> str:
@@ -1121,9 +1120,9 @@ def predict_pct(learn_dict: Dict[str, Any], df: Any, session_col: str = 'Session
         unique_sessions = df[session_col].unique().to_list()
         print_to_log_info(f"✅ Found {len(unique_sessions)} unique sessions: {unique_sessions}")
         session_counts = df.group_by(session_col).agg(pl.count().alias('count')).sort(session_col)
-        print_to_log_info(f"Session distribution:")
-        for row in session_counts.iter_rows():
-            print_to_log_info(f"  Session {row[0]}: {row[1]} boards")
+        # print_to_log_info(f"Session distribution:")
+        # for row in session_counts.iter_rows():
+        #     print_to_log_info(f"  Session {row[0]}: {row[1]} boards")
     else:
         print_to_log_info("⚠️  No session column found - treating as single session")
         df = df.with_columns(pl.lit(1).alias(session_col))
@@ -1256,7 +1255,7 @@ def predict_pct(learn_dict: Dict[str, Any], df: Any, session_col: str = 'Session
     for stat in session_stats:
         error = abs(stat['final_mean'] - 0.5)
         session_constraint_errors.append(error)
-        print_to_log_info(f"✅ Session {stat['session']} mean constraint: {stat['final_mean']:.6f} (error: {error:.2e})")
+        # print_to_log_info(f"✅ Session {stat['session']} mean constraint: {stat['final_mean']:.6f} (error: {error:.2e})")
     
     max_session_constraint_error = max(session_constraint_errors) if session_constraint_errors else 0
     constraint_info['max_session_constraint_error'] = max_session_constraint_error
