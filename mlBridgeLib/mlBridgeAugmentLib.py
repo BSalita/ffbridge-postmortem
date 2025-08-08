@@ -17,7 +17,7 @@
 # use .pipe() to chain other lambdas as is done in _create_prob_taking_columns()?
 # should *_Declarer be the pattern or omit _Declarer where declarer would be implied?
 # change *_Declarer to *_Dcl?
-# disambiguate MP_ between matchpoints and masterpoints.
+# looks like Friday simultaneous doesn't have Contracts? 8-Aug-2025 did not. Is it posted with a 7+ day delay?
 
 import polars as pl
 from collections import defaultdict
@@ -893,16 +893,8 @@ def convert_contract_to_dbl(df: pl.DataFrame) -> pl.DataFrame:
 def convert_player_name_to_player_names(df: pl.DataFrame) -> pl.DataFrame:
     """Optimized version using vectorized operations."""
     return df.with_columns([
-        pl.concat_str([
-            pl.col("Player_Name_N").cast(pl.Utf8).fill_null(""),
-            pl.lit(" - "),
-            pl.col("Player_Name_S").cast(pl.Utf8).fill_null(""),
-        ]).alias("Player_Names_NS"),
-        pl.concat_str([
-            pl.col("Player_Name_E").cast(pl.Utf8).fill_null(""),
-            pl.lit(" "),
-            pl.col("Player_Name_W").cast(pl.Utf8).fill_null(""),
-        ]).alias("Player_Names_EW"),
+        pl.concat_list([pl.col("Player_Name_N"), pl.col("Player_Name_S")]).alias("Player_Names_NS"),
+        pl.concat_list([pl.col("Player_Name_E"), pl.col("Player_Name_W")]).alias("Player_Names_EW"),
     ])
 
 def convert_declarer_to_DeclarerName(df: pl.DataFrame) -> pl.DataFrame:
