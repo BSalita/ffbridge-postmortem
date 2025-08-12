@@ -11,6 +11,7 @@
 # tell ffbridge to unblock my ip address
 # Refactor common postmortem methods into ml bridge class. Sync with other postmortem projects.
 # Decide on whether to use faster RRN code or slower be-nice-to-server code? Does it matter?
+# Some tournament result pages (Monday Simultané Octopus) omit Contract e.g. 34350. lancelot api doesn't know of the event.
 
 
 import streamlit as st
@@ -1046,7 +1047,7 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
             st.error(f"Could not find any games for {player_id}.")
         elif session_id is None:
             iterator = iter(game_urls)
-            next(iterator)  # Skip first
+            #next(iterator)  # Skip first
             session_id = next(iterator)  # Get second
             #session_id = next(iter(game_urls))  # default to most recent club game
         st.session_state.player_id = player_id
@@ -1113,6 +1114,7 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
         # Use the API endpoint instead of the web page
         # api_urls values are tuples of (url, should_cache) where should_cache=False means always request fresh data
         api_urls_d = {
+            'roadsheets': (f"https://api.ffbridge.fr/api/v1/simultaneous-tournaments/{st.session_state.simultane_id}/teams/{st.session_state.team_id}/roadsheets", False),
             'simultaneous_roadsheets': (f"https://api.ffbridge.fr/api/v1/simultaneous-tournaments/{st.session_state.simultane_id}/teams/{st.session_state.team_id}/roadsheets", False),
             'simultaneous_dealsNumber': (f"https://api.ffbridge.fr/api/v1/simultaneous-tournaments/{st.session_state.simultane_id}/teams/{st.session_state.team_id}/dealsNumber", False),
             'simultaneous_deals': (f"https://api.ffbridge.fr/api/v1/simultaneous-tournaments/{st.session_state.simultane_id}/teams/{st.session_state.team_id}/deals/{{i}}", False),
@@ -1395,6 +1397,8 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
             boards_df = boards_df.with_columns([
                 pl.lit(st.session_state.tournament_id).alias('tournament_id'),
                 pl.lit(st.session_state.organization_code).alias('club_id'),
+                pl.lit(st.session_state.tournament_date).alias('Date'),
+                pl.lit(st.session_state.section_name).alias('Section_Name'),
                 #pl.lit(st.session_state.team_id).alias('team_id'),
                 pl.lit(st.session_state.player_license_number).cast(pl.Int64).alias('team_license_number'),
                 pl.lit(st.session_state.player_id).cast(pl.Int64).alias('Player_ID'),
@@ -1428,8 +1432,13 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
             st.caption(f"Final dataframe: Shape:{df.shape}")
             st.dataframe(df,selection_mode='single-row')
 
+        if df['Contract'].is_null().all(): # ouch. e.g. Monday Simultané Octopus
+            st.error("No Contract data available. Unable to proceed.")
+            return True
+
         # Only use columns that are required by augmentation. Drop all other columns.
         df = df[
+            'Date','Section_Name',
             'Board','PBN','Pair_Direction','Dealer','Vul','Declarer','Contract','Result',
             'Score_EW','Score_NS',
             'Pct_NS','Pct_EW',

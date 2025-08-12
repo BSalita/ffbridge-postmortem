@@ -2,6 +2,7 @@
 # mostly polars functions
 
 # todo:
+# don't automatically report on the most recent game. If the game is errors, it's inconvenient to selecting others.
 # optimize _create_dd_columns() and calculate_final_scores()
 # since some columns can be derived from other columns, we should assert that input df has at least one column in each group of mutually derivable columns.
 # assert that column names don't exist in df.columns for all column creation functions.
@@ -18,8 +19,12 @@
 # should *_Declarer be the pattern or omit _Declarer where declarer would be implied?
 # change *_Declarer to *_Dcl?
 # looks like Friday simultaneous doesn't have Contracts? 8-Aug-2025 did not. Is it posted with a 7+ day delay?
+# create a function which creates a column of the weighted moving average of (double dummy tricks for declarer's contract minus tricks taken) per start of session. Each row of the session has the same start of session value.
+# Rename to title case for column names. e.g. session_id to Session_ID
 
 import polars as pl
+import numpy as np
+import warnings
 from collections import defaultdict
 from typing import Optional, Union, Callable, Type, Dict, List, Tuple, Any
 import time
@@ -1530,6 +1535,383 @@ def create_direction_summary_columns(df: pl.DataFrame) -> pl.DataFrame:
     
     return df
 
+import polars as pl
+import math
+from collections import defaultdict
+
+# todo: gpt5 offered: Optional: JIT the loop with numba for 10–100x speedup on large datasets.
+def compute_elo_pair_matchpoint_ratings(
+    df: pl.DataFrame,
+    *,
+    initial_rating: float = 1500.0,
+    k_base: float = 24.0,
+    provisional_boost_until: int = 100  # boards per pair-direction
+) -> pl.DataFrame:
+    # Ensure schema
+    need_cols = {"Date", "Pair_Number_NS", "Pair_Number_EW", "Pct_NS"}
+    missing = need_cols - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing columns: {missing}")
+
+    # Sort to preserve temporal order
+    sort_keys = [c for c in ["Date", "session_id", "Round", "Board"] if c in df.columns]
+    if not sort_keys:
+        sort_keys = ["Date"]
+    df_sorted = df.sort(sort_keys)
+
+    n_rows = df_sorted.height
+    ns_pairs = df_sorted["Pair_Number_NS"].to_numpy()
+    ew_pairs = df_sorted["Pair_Number_EW"].to_numpy()
+    pct_ns = df_sorted["Pct_NS"].to_numpy()
+
+    # Section-size scaling vector
+    scale = np.ones(n_rows, dtype=np.float64)
+    if "Section_Pairs" in df_sorted.columns:
+        pairs = df_sorted["Section_Pairs"].cast(pl.Float64).to_numpy()
+    elif "Num_Pairs" in df_sorted.columns:
+        pairs = df_sorted["Num_Pairs"].cast(pl.Float64).to_numpy()
+    elif "MP_Top" in df_sorted.columns:
+        pairs = (df_sorted["MP_Top"].cast(pl.Float64).to_numpy() / 2.0) + 1.0
+    else:
+        pairs = None
+    if pairs is not None:
+        with np.errstate(invalid="ignore"):
+            valid = pairs > 1.0
+        scale_valid = np.sqrt(np.maximum(pairs[valid] - 1.0, 1.0) / 11.0)
+        scale[valid] = scale_valid
+
+    # Map pair ids to contiguous indices per direction
+    ns_unique = df_sorted["Pair_Number_NS"].unique().to_list()
+    ew_unique = df_sorted["Pair_Number_EW"].unique().to_list()
+    ns_index = {pid: i for i, pid in enumerate(ns_unique)}
+    ew_index = {pid: i for i, pid in enumerate(ew_unique)}
+
+    ratings_ns = np.full(len(ns_unique), initial_rating, dtype=np.float64)
+    ratings_ew = np.full(len(ew_unique), initial_rating, dtype=np.float64)
+    counts_ns = np.zeros(len(ns_unique), dtype=np.int32)
+    counts_ew = np.zeros(len(ew_unique), dtype=np.int32)
+
+    # Outputs
+    r_ns_before_arr = np.empty(n_rows, dtype=np.float64)
+    r_ew_before_arr = np.empty(n_rows, dtype=np.float64)
+    e_ns_arr = np.empty(n_rows, dtype=np.float64)
+    e_ew_arr = np.empty(n_rows, dtype=np.float64)
+    r_ns_after_arr = np.empty(n_rows, dtype=np.float64)
+    r_ew_after_arr = np.empty(n_rows, dtype=np.float64)
+    n_ns_arr = np.empty(n_rows, dtype=np.int32)
+    n_ew_arr = np.empty(n_rows, dtype=np.int32)
+    delta_before_arr = np.empty(n_rows, dtype=np.float64)
+    delta_after_arr = np.empty(n_rows, dtype=np.float64)
+
+    for i in range(n_rows):
+        ns = ns_pairs[i]
+        ew = ew_pairs[i]
+        idx_ns = ns_index[ns]
+        idx_ew = ew_index[ew]
+
+        r_ns = ratings_ns[idx_ns]
+        r_ew = ratings_ew[idx_ew]
+
+        # Expected
+        e_ns = 1.0 / (1.0 + 10.0 ** (-(r_ns - r_ew) / 400.0))
+        e_ew = 1.0 - e_ns
+
+        # K with provisional boost and section size scale
+        k_ns = k_base * (1.5 if counts_ns[idx_ns] < provisional_boost_until else 1.0) * scale[i]
+        k_ew = k_base * (1.5 if counts_ew[idx_ew] < provisional_boost_until else 1.0) * scale[i]
+
+        r_ns_before = r_ns
+        r_ew_before = r_ew
+
+        s_ns = pct_ns[i]
+        if s_ns is not None and not (isinstance(s_ns, float) and np.isnan(s_ns)):
+            s_ns_f = float(s_ns)
+            s_ew_f = 1.0 - s_ns_f
+            r_ns = r_ns + k_ns * (s_ns_f - e_ns)
+            r_ew = r_ew + k_ew * (s_ew_f - e_ew)
+            ratings_ns[idx_ns] = r_ns
+            ratings_ew[idx_ew] = r_ew
+            counts_ns[idx_ns] += 1
+            counts_ew[idx_ew] += 1
+
+        # Save outputs
+        r_ns_before_arr[i] = r_ns_before
+        r_ew_before_arr[i] = r_ew_before
+        e_ns_arr[i] = e_ns
+        e_ew_arr[i] = e_ew
+        r_ns_after_arr[i] = r_ns
+        r_ew_after_arr[i] = r_ew
+        n_ns_arr[i] = counts_ns[idx_ns]
+        n_ew_arr[i] = counts_ew[idx_ew]
+        delta_before_arr[i] = r_ns_before - r_ew_before
+        delta_after_arr[i] = r_ns - r_ew
+
+    out_df = pl.DataFrame({
+        "Elo_R_NS_Before": r_ns_before_arr,
+        "Elo_R_EW_Before": r_ew_before_arr,
+        "Elo_E_Pair_NS": e_ns_arr,
+        "Elo_E_Pair_EW": e_ew_arr,
+        "Elo_R_NS": r_ns_after_arr,
+        "Elo_R_EW": r_ew_after_arr,
+        "Elo_N_NS": n_ns_arr,
+        "Elo_N_EW": n_ew_arr,
+        "Elo_Delta_Before": delta_before_arr,
+        "Elo_Delta_After": delta_after_arr,
+    })
+    return df_sorted.hstack(out_df)
+
+
+def compute_elo_player_matchpoint_ratings(
+    df: pl.DataFrame,
+    *,
+    initial_rating: float = 1500.0,
+    k_base: float = 24.0,
+    provisional_boost_until: int = 100,  # boards per player-direction
+) -> pl.DataFrame:
+    """
+    Compute leakage-safe player Elo-style ratings for duplicate boards.
+
+    Required columns:
+      - 'Date'
+      - 'Player_ID_N', 'Player_ID_S', 'Player_ID_E', 'Player_ID_W'
+      - 'Pct_NS' in [0, 1]
+
+    Returns the original DataFrame with appended columns (aligned by row):
+      - R_N_NS_Before, R_S_NS_Before, R_E_EW_Before, R_W_EW_Before
+      - NS_side_Before, EW_side_Before, Elo_Delta_Before
+      - E_NS, E_EW (expected scores from pre-board ratings)
+      - R_N_NS_after, R_S_NS_after, R_E_EW_after, R_W_EW_after
+      - N_N_NS, N_S_NS, N_E_EW, N_W_EW (played counts per player-direction)
+    """
+    need_cols = {
+        "Date",
+        "Player_ID_N",
+        "Player_ID_S",
+        "Player_ID_E",
+        "Player_ID_W",
+        "Pct_NS",
+    }
+    missing = need_cols - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing columns: {missing}")
+
+    # Sort by available stable keys to preserve temporal order
+    sort_keys = [c for c in ["Date", "session_id", "Round", "Board"] if c in df.columns]
+    if not sort_keys:
+        sort_keys = ["Date"]
+    df_sorted = df.sort(sort_keys)
+
+    # Extract arrays
+    n_rows = df_sorted.height
+    pid_n_arr = df_sorted["Player_ID_N"].to_numpy()
+    pid_s_arr = df_sorted["Player_ID_S"].to_numpy()
+    pid_e_arr = df_sorted["Player_ID_E"].to_numpy()
+    pid_w_arr = df_sorted["Player_ID_W"].to_numpy()
+    pct_ns = df_sorted["Pct_NS"].to_numpy()
+
+    # Section-size scaling vector (same precedence as pair Elo)
+    scale = np.ones(n_rows, dtype=np.float64)
+    if "Section_Pairs" in df_sorted.columns:
+        pairs = df_sorted["Section_Pairs"].cast(pl.Float64).to_numpy()
+    elif "Num_Pairs" in df_sorted.columns:
+        pairs = df_sorted["Num_Pairs"].cast(pl.Float64).to_numpy()
+    elif "MP_Top" in df_sorted.columns:
+        pairs = (df_sorted["MP_Top"].cast(pl.Float64).to_numpy() / 2.0) + 1.0
+    else:
+        pairs = None
+    if pairs is not None:
+        with np.errstate(invalid="ignore"):
+            valid = pairs > 1.0
+        scale_valid = np.sqrt(np.maximum(pairs[valid] - 1.0, 1.0) / 11.0)
+        scale[valid] = scale_valid
+
+    # Map player ids to contiguous indices per direction
+    ns_player_unique = pl.concat([
+        df_sorted["Player_ID_N"],
+        df_sorted["Player_ID_S"],
+    ]).unique().to_list()
+    ew_player_unique = pl.concat([
+        df_sorted["Player_ID_E"],
+        df_sorted["Player_ID_W"],
+    ]).unique().to_list()
+
+    idx_ns_map = {pid: i for i, pid in enumerate(ns_player_unique)}
+    idx_ew_map = {pid: i for i, pid in enumerate(ew_player_unique)}
+
+    ratings_ns = np.full(len(ns_player_unique), initial_rating, dtype=np.float64)
+    ratings_ew = np.full(len(ew_player_unique), initial_rating, dtype=np.float64)
+    counts_ns = np.zeros(len(ns_player_unique), dtype=np.int32)
+    counts_ew = np.zeros(len(ew_player_unique), dtype=np.int32)
+
+    # Outputs
+    R_N_Before = np.empty(n_rows, dtype=np.float64)
+    R_S_Before = np.empty(n_rows, dtype=np.float64)
+    R_E_Before = np.empty(n_rows, dtype=np.float64)
+    R_W_Before = np.empty(n_rows, dtype=np.float64)
+    NS_side_Before = np.empty(n_rows, dtype=np.float64)
+    EW_side_Before = np.empty(n_rows, dtype=np.float64)
+    E_NS = np.empty(n_rows, dtype=np.float64)
+    E_EW = np.empty(n_rows, dtype=np.float64)
+    R_N_after = np.empty(n_rows, dtype=np.float64)
+    R_S_after = np.empty(n_rows, dtype=np.float64)
+    R_E_after = np.empty(n_rows, dtype=np.float64)
+    R_W_after = np.empty(n_rows, dtype=np.float64)
+    N_N = np.empty(n_rows, dtype=np.int32)
+    N_S = np.empty(n_rows, dtype=np.int32)
+    N_E = np.empty(n_rows, dtype=np.int32)
+    N_W = np.empty(n_rows, dtype=np.int32)
+    Elo_Delta_Before = np.empty(n_rows, dtype=np.float64)
+
+    for i in range(n_rows):
+        pid_n = pid_n_arr[i]
+        pid_s = pid_s_arr[i]
+        pid_e = pid_e_arr[i]
+        pid_w = pid_w_arr[i]
+
+        idx_n = idx_ns_map[pid_n]
+        idx_s = idx_ns_map[pid_s]
+        idx_e = idx_ew_map[pid_e]
+        idx_w = idx_ew_map[pid_w]
+
+        r_n_ns = ratings_ns[idx_n]
+        r_s_ns = ratings_ns[idx_s]
+        r_e_ew = ratings_ew[idx_e]
+        r_w_ew = ratings_ew[idx_w]
+
+        ns_before = (r_n_ns + r_s_ns) / 2.0
+        ew_before = (r_e_ew + r_w_ew) / 2.0
+
+        e_ns = 1.0 / (1.0 + 10.0 ** (-(ns_before - ew_before) / 400.0))
+        e_ew = 1.0 - e_ns
+
+        # K per player with provisional boost and section-size scale
+        k_n = k_base * (1.5 if counts_ns[idx_n] < provisional_boost_until else 1.0) * scale[i]
+        k_s = k_base * (1.5 if counts_ns[idx_s] < provisional_boost_until else 1.0) * scale[i]
+        k_e = k_base * (1.5 if counts_ew[idx_e] < provisional_boost_until else 1.0) * scale[i]
+        k_w = k_base * (1.5 if counts_ew[idx_w] < provisional_boost_until else 1.0) * scale[i]
+
+        r_n_before = r_n_ns
+        r_s_before = r_s_ns
+        r_e_before = r_e_ew
+        r_w_before = r_w_ew
+
+        s_ns = pct_ns[i]
+        if s_ns is not None and not (isinstance(s_ns, float) and np.isnan(s_ns)):
+            delta = float(s_ns) - e_ns
+            r_n_ns = r_n_ns + 0.5 * k_n * delta
+            r_s_ns = r_s_ns + 0.5 * k_s * delta
+            r_e_ew = r_e_ew - 0.5 * k_e * delta
+            r_w_ew = r_w_ew - 0.5 * k_w * delta
+            ratings_ns[idx_n] = r_n_ns
+            ratings_ns[idx_s] = r_s_ns
+            ratings_ew[idx_e] = r_e_ew
+            ratings_ew[idx_w] = r_w_ew
+            counts_ns[idx_n] += 1
+            counts_ns[idx_s] += 1
+            counts_ew[idx_e] += 1
+            counts_ew[idx_w] += 1
+
+        # Save outputs
+        R_N_Before[i] = r_n_before
+        R_S_Before[i] = r_s_before
+        R_E_Before[i] = r_e_before
+        R_W_Before[i] = r_w_before
+        NS_side_Before[i] = ns_before
+        EW_side_Before[i] = ew_before
+        E_NS[i] = e_ns
+        E_EW[i] = e_ew
+        R_N_after[i] = r_n_ns
+        R_S_after[i] = r_s_ns
+        R_E_after[i] = r_e_ew
+        R_W_after[i] = r_w_ew
+        N_N[i] = counts_ns[idx_n]
+        N_S[i] = counts_ns[idx_s]
+        N_E[i] = counts_ew[idx_e]
+        N_W[i] = counts_ew[idx_w]
+        Elo_Delta_Before[i] = ns_before - ew_before
+
+    out_df = pl.DataFrame({
+        "Elo_R_N_Before": R_N_Before,
+        "Elo_R_E_Before": R_E_Before,
+        "Elo_R_S_Before": R_S_Before,
+        "Elo_R_W_Before": R_W_Before,
+        "Elo_E_Players_NS": E_NS,
+        "Elo_E_Players_EW": E_EW,
+        "Elo_R_N": R_N_after,
+        "Elo_R_E": R_E_after,
+        "Elo_R_S": R_S_after,
+        "Elo_R_W": R_W_after,
+        "Elo_N_N": N_N,
+        "Elo_N_E": N_E,
+        "Elo_N_S": N_S,
+        "Elo_N_W": N_W,
+    })
+    return df_sorted.hstack(out_df)
+
+
+def compute_event_start_end_elo_columns(df: pl.DataFrame) -> pl.DataFrame:
+    """Add constant per-session Elo columns for each seat and pair.
+    Adds both EventStart (pre-board at first appearance) and EventEnd
+    (post-update at last appearance) values for players and pairs, and
+    propagates them across all rows in the session for each entity.
+    """
+    t = time.time()
+    sort_keys = [c for c in ["Date", "session_id", "Round", "Board"] if c in df.columns]
+    if not sort_keys:
+        sort_keys = ["Date"]
+    df = df.sort(sort_keys)
+
+    # Player start
+    seat_before_cols = {
+        "N": ("Player_ID_N", "Elo_R_N_Before", "Elo_R_Player_N_EventStart"),
+        "S": ("Player_ID_S", "Elo_R_S_Before", "Elo_R_Player_S_EventStart"),
+        "E": ("Player_ID_E", "Elo_R_E_Before", "Elo_R_Player_E_EventStart"),
+        "W": ("Player_ID_W", "Elo_R_W_Before", "Elo_R_Player_W_EventStart"),
+    }
+    for _, (pid_col, before_col, out_col) in seat_before_cols.items():
+        if pid_col in df.columns and before_col in df.columns:
+            df = df.with_columns(
+                pl.col(before_col).first().over(["session_id", pid_col]).alias(out_col)
+            )
+
+    # Pair start
+    pair_before_cols = {
+        "NS": ("Pair_Number_NS", "Elo_R_NS_Before", "Elo_R_Pair_NS_EventStart"),
+        "EW": ("Pair_Number_EW", "Elo_R_EW_Before", "Elo_R_Pair_EW_EventStart"),
+    }
+    for _, (pair_col, before_col, out_col) in pair_before_cols.items():
+        if pair_col in df.columns and before_col in df.columns:
+            df = df.with_columns(
+                pl.col(before_col).first().over(["session_id", pair_col]).alias(out_col)
+            )
+
+    # Player end
+    seat_after_cols = {
+        "N": ("Player_ID_N", "Elo_R_N", "Elo_R_Player_N_EventEnd"),
+        "S": ("Player_ID_S", "Elo_R_S", "Elo_R_Player_S_EventEnd"),
+        "E": ("Player_ID_E", "Elo_R_E", "Elo_R_Player_E_EventEnd"),
+        "W": ("Player_ID_W", "Elo_R_W", "Elo_R_Player_W_EventEnd"),
+    }
+    for _, (pid_col, after_col, out_col) in seat_after_cols.items():
+        if pid_col in df.columns and after_col in df.columns:
+            df = df.with_columns(
+                pl.col(after_col).last().over(["session_id", pid_col]).alias(out_col)
+            )
+
+    # Pair end
+    pair_after_cols = {
+        "NS": ("Pair_Number_NS", "Elo_R_NS", "Elo_R_Pair_NS_EventEnd"),
+        "EW": ("Pair_Number_EW", "Elo_R_EW", "Elo_R_Pair_EW_EventEnd"),
+    }
+    for _, (pair_col, after_col, out_col) in pair_after_cols.items():
+        if pair_col in df.columns and after_col in df.columns:
+            df = df.with_columns(
+                pl.col(after_col).last().over(["session_id", pair_col]).alias(out_col)
+            )
+
+    print(f"Event start/end Elo columns: {time.time()-t:.3f} seconds")
+    return df
+
 
 class DealAugmenter:
     def __init__(self, df: pl.DataFrame):
@@ -2456,25 +2838,43 @@ class FinalContractAugmenter:
         )
 
     def _create_prob_taking_columns(self) -> None:
-        t = time.time()
+        t0 = time.time()
+        # Valid (pair, declarer) combinations
+        pd_pairs = [("NS", "N"), ("NS", "S"), ("EW", "E"), ("EW", "W")]
+        suits = list("CDHSN")
+
+        def build_prob_expr(current_t: int) -> pl.Expr:
+            # Weighted sum: select matching Probs_{pair}_{decl}_{suit}_{t}
+            terms = []
+            for pair, decl in pd_pairs:
+                for s in suits:
+                    prob_col = f"Probs_{pair}_{decl}_{s}_{current_t}"
+                    # Only add term if the probability column exists to avoid ColumnNotFound errors
+                    if prob_col in self.df.columns:
+                        terms.append(
+                            pl.when(
+                                (pl.col("Declarer_Pair_Direction") == pair)
+                                & (pl.col("Declarer_Direction") == decl)
+                                & (pl.col("BidSuit") == s)
+                            )
+                            .then(pl.col(prob_col))
+                            .otherwise(0.0)
+                        )
+            # If no matching columns exist, return Nulls
+            if not terms:
+                return pl.lit(None).alias(f"Prob_Taking_{current_t}")
+            return (
+                pl.when(pl.col("BidSuit").is_null())
+                .then(None)
+                .otherwise(pl.sum_horizontal(terms))
+                .alias(f"Prob_Taking_{current_t}")
+            )
+
+        # Create all Prob_Taking_{t} columns in one with_columns
         self.df = self.df.with_columns([
-            pl.concat_str([
-                pl.lit("Probs_"),
-                pl.col("Declarer_Pair_Direction"),
-                pl.lit("_"),
-                pl.col("Declarer_Direction"),
-                pl.lit("_"),
-                pl.col("BidSuit")
-            ]).alias("prob_column_prefix")
-        ]).pipe(lambda df: df.with_columns([
-            pl.when(pl.col("BidSuit").is_null())
-            .then(None)
-            .otherwise(
-                pl.concat_str([pl.col("prob_column_prefix"), pl.lit(f"_{t}")])
-            ).alias(f'Prob_Taking_{t}')
-            for t in range(14)
-        ]))
-        print(f"create prob_taking columns: time:{time.time()-t} seconds")
+            build_prob_expr(t) for t in range(14)
+        ])
+        print(f"create prob_taking columns: time:{time.time()-t0} seconds")
 
     # def _create_prob_taking_columns(self) -> None:
     #     self.df = self._time_operation(
@@ -2756,6 +3156,24 @@ class MatchPointAugmenter:
         """Calculate matchpoint percentage from MP column."""
         return pl.col(f'MP_{col}') / (pl.col('MP_Top') + 1)
 
+    def _calculate_elo_pair_matchpoint_ratings(self) -> None:
+        """Calculate Elo pair matchpoint ratings."""
+        t = time.time()
+        self.df = compute_elo_pair_matchpoint_ratings(self.df)
+        print(f"calculate Elo pair matchpoint ratings: time:{time.time()-t} seconds")
+
+    def _calculate_elo_player_matchpoint_ratings(self) -> None:
+        """Calculate Elo player matchpoint ratings."""
+        t = time.time()
+        self.df = compute_elo_player_matchpoint_ratings(self.df)
+        print(f"calculate Elo player matchpoint ratings: time:{time.time()-t} seconds")
+
+    def _calculate_event_start_end_elo_columns(self) -> None:
+        """Calculate Elo start/end columns."""
+        t = time.time()
+        self.df = compute_event_start_end_elo_columns(self.df)
+        print(f"calculate event start end Elo columns: time:{time.time()-t} seconds")
+
     def _calculate_final_scores(self) -> None:
         """Calculate final scores and percentages using optimized vectorized operations."""
         t = time.time()
@@ -2776,49 +3194,91 @@ class MatchPointAugmenter:
     def _calculate_dd_score_percentages(self) -> None:
         """Calculate DD Score percentages using optimized vectorized operations."""
         t = time.time()
+        # Preserve original order since join_asof requires sorting
+        self.df = self.df.with_row_index(name='__row_nr')
         
-        # Pre-compute board score statistics for efficient lookups
-        board_stats = self.df.group_by('Board').agg([
-            pl.col('Score_NS').alias('board_scores_ns'),
-            pl.col('Score_EW').alias('board_scores_ew'),
-            pl.col('Score_NS').count().alias('board_count')
-        ])
-        
-        # Join board statistics back to main DataFrame for efficient calculations
-        self.df = self.df.join(board_stats, on='Board', how='left')
-        
-        # Calculate DD Score percentages using vectorized operations
+        # Use an asof-join against per-board score frequency tables.
+        # This avoids Python lambdas and list.eval cross-column references.
         for pair in ['NS', 'EW']:
+            score_col = f'Score_{pair}'
             dd_score_col = f'DD_Score_{pair}'
-            board_scores_col = f'board_scores_{pair.lower()}'
-            
-            # Validate that required columns exist
+            assert score_col in self.df.columns, f"Required column {score_col} not found"
             assert dd_score_col in self.df.columns, f"Required column {dd_score_col} not found"
-            assert board_scores_col in self.df.columns, f"Required column {board_scores_col} not found"
-            
-            # Calculate matchpoints using vectorized operations
+
+            # Build per-board frequency and cumulative frequency table for actual scores
+            freq_name = f'__freq_{pair.lower()}'
+            cum_name = f'__cum_{pair.lower()}'
+            key_name = f'__score_key_{pair}'
+
+            lookup = (
+                self.df.select(['Board', score_col])
+                .group_by(['Board', score_col])
+                .agg(pl.count().alias(freq_name))
+                .rename({score_col: key_name})
+                .sort(['Board', key_name])
+                .with_columns([
+                    pl.col(freq_name).cum_sum().over('Board').alias(cum_name)
+                ])
+            )
+
+            # Ensure DD score dtype matches right key dtype for asof join
+            right_key_dtype = lookup.schema[key_name]
+            dd_tmp = f'__dd_tmp_{pair}'
             self.df = self.df.with_columns([
-                # Count how many scores are less than DD_Score (1 point each)
-                pl.struct([dd_score_col, board_scores_col]).map_elements(
-                    lambda r: sum(1.0 for score in r[board_scores_col] if r[dd_score_col] > (0 if score is None else score)),
-                    return_dtype=pl.Float64
-                ).alias(f'MP_{dd_score_col}_wins'),
-                
-                # Count how many scores are equal to DD_Score (0.5 points each)
-                pl.struct([dd_score_col, board_scores_col]).map_elements(
-                    lambda r: sum(0.5 for score in r[board_scores_col] if r[dd_score_col] == (0 if score is None else score)),
-                    return_dtype=pl.Float64
-                ).alias(f'MP_{dd_score_col}_ties')
+                pl.col(dd_score_col).cast(right_key_dtype).alias(dd_tmp)
             ])
-            
-            # Combine wins and ties, then calculate percentage
+
+            # Sort left side by group and asof key to satisfy join_asof requirements
+            self.df = self.df.sort(['Board', dd_tmp])
+
+            # Asof join to get cumulative count up to the largest score <= DD
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="Sortedness of columns cannot be checked when 'by' groups provided",
+                    category=UserWarning,
+                )
+                self.df = self.df.join_asof(
+                    lookup,
+                    left_on=dd_tmp,
+                    right_on=key_name,
+                    by='Board',
+                    strategy='backward'
+                )
+
+            # Compute wins and ties from the joined stats
+            mp_col = f'MP_{dd_score_col}'
             self.df = self.df.with_columns([
-                (pl.col(f'MP_{dd_score_col}_wins') + pl.col(f'MP_{dd_score_col}_ties')).alias(f'MP_{dd_score_col}'),
-                ((pl.col(f'MP_{dd_score_col}_wins') + pl.col(f'MP_{dd_score_col}_ties')) / (pl.col('MP_Top') + 1)).alias(f'DD_Score_Pct_{pair}')
+                # wins: count of scores strictly less than DD
+                pl.when(pl.col(cum_name).is_null())
+                .then(0.0)
+                .otherwise(
+                    pl.when(pl.col(dd_tmp) == pl.col(key_name))
+                    .then((pl.col(cum_name) - pl.col(freq_name)).cast(pl.Float64))
+                    .otherwise(pl.col(cum_name).cast(pl.Float64))
+                ).alias(f'{mp_col}_wins'),
+
+                # ties: 0.5 per equal score
+                pl.when((pl.col(dd_tmp) == pl.col(key_name)) & pl.col(freq_name).is_not_null())
+                .then((pl.col(freq_name) * 0.5).cast(pl.Float64))
+                .otherwise(0.0)
+                .alias(f'{mp_col}_ties')
             ])
-            
-            # Clean up intermediate columns
-            self.df = self.df.drop([f'MP_{dd_score_col}_wins', f'MP_{dd_score_col}_ties'])
+
+            # Total MP and percentage
+            self.df = self.df.with_columns([
+                (pl.col(f'{mp_col}_wins') + pl.col(f'{mp_col}_ties')).alias(mp_col),
+                (pl.col(mp_col) / (pl.col('MP_Top') + 1)).alias(f'DD_Score_Pct_{pair}')
+            ])
+
+            # Drop temporaries for this pair
+            drop_cols = [c for c in [dd_tmp, key_name, freq_name, cum_name, f'{mp_col}_wins', f'{mp_col}_ties'] if c in self.df.columns]
+            if drop_cols:
+                self.df = self.df.drop(drop_cols)
+
+        # Restore original order
+        if '__row_nr' in self.df.columns:
+            self.df = self.df.sort('__row_nr').drop('__row_nr')
         
         print(f"DD score percentages: {time.time()-t:.3f} seconds")
 
@@ -2882,8 +3342,14 @@ class MatchPointAugmenter:
         
         # Calculate percentages for max scores
         self.df = self.df.with_columns([
-            (pl.col('MP_DD_Score_Max_NS') / pl.col('MP_Top')).alias('DD_Pct_Max_NS'),
-            (pl.col('MP_DD_Score_Max_EW') / pl.col('MP_Top')).alias('DD_Pct_Max_EW'),
+            pl.when(pl.col('MP_Top') > 0)
+            .then(pl.coalesce([pl.col('MP_DD_Score_Max_NS').cast(pl.Float64), pl.lit(0.0)]) / pl.col('MP_Top'))
+            .otherwise(0.0)
+            .alias('DD_Pct_Max_NS'),
+            pl.when(pl.col('MP_Top') > 0)
+            .then(pl.coalesce([pl.col('MP_DD_Score_Max_EW').cast(pl.Float64), pl.lit(0.0)]) / pl.col('MP_Top'))
+            .otherwise(0.0)
+            .alias('DD_Pct_Max_EW'),
             self._calculate_mp_pct_from_new_score('EV_Max_NS').alias('EV_Pct_Max_NS'),
             self._calculate_mp_pct_from_new_score('EV_Max_EW').alias('EV_Pct_Max_EW'),
         ])
@@ -2895,19 +3361,80 @@ class MatchPointAugmenter:
         t = time.time()
         
         # Calculate difference columns in a single operation
+        zero = pl.lit(0.0)
         self.df = self.df.with_columns([
-            (pl.col('Pct_NS') - pl.col('EV_Pct_Max_NS')).alias('EV_Pct_Max_Diff_NS'),
-            (pl.col('Pct_EW') - pl.col('EV_Pct_Max_EW')).alias('EV_Pct_Max_Diff_EW'),
-            (pl.col('Pct_NS') - pl.col('DD_Pct_Max_NS')).alias('DD_Pct_Max_Diff_NS'),
-            (pl.col('Pct_EW') - pl.col('DD_Pct_Max_EW')).alias('DD_Pct_Max_Diff_EW'),
-            (pl.col('DD_Pct_Max_NS') - pl.col('EV_Pct_Max_NS')).alias('DD_EV_Pct_Max_Diff_NS'),
-            (pl.col('DD_Pct_Max_EW') - pl.col('EV_Pct_Max_EW')).alias('DD_EV_Pct_Max_Diff_EW'),
+            (pl.coalesce([pl.col('Pct_NS').cast(pl.Float64), zero]) - pl.coalesce([pl.col('EV_Pct_Max_NS').cast(pl.Float64), zero])).alias('EV_Pct_Max_Diff_NS'),
+            (pl.coalesce([pl.col('Pct_EW').cast(pl.Float64), zero]) - pl.coalesce([pl.col('EV_Pct_Max_EW').cast(pl.Float64), zero])).alias('EV_Pct_Max_Diff_EW'),
+            (pl.coalesce([pl.col('Pct_NS').cast(pl.Float64), zero]) - pl.coalesce([pl.col('DD_Pct_Max_NS').cast(pl.Float64), zero])).alias('DD_Pct_Max_Diff_NS'),
+            (pl.coalesce([pl.col('Pct_EW').cast(pl.Float64), zero]) - pl.coalesce([pl.col('DD_Pct_Max_EW').cast(pl.Float64), zero])).alias('DD_Pct_Max_Diff_EW'),
+            (pl.coalesce([pl.col('DD_Pct_Max_NS').cast(pl.Float64), zero]) - pl.coalesce([pl.col('EV_Pct_Max_NS').cast(pl.Float64), zero])).alias('DD_EV_Pct_Max_Diff_NS'),
+            (pl.coalesce([pl.col('DD_Pct_Max_EW').cast(pl.Float64), zero]) - pl.coalesce([pl.col('EV_Pct_Max_EW').cast(pl.Float64), zero])).alias('DD_EV_Pct_Max_Diff_EW'),
         ])
         
-        # Clean up temporary columns
-        self.df = self.df.drop(['board_scores_ns', 'board_scores_ew', 'board_count'])
-        
         print(f"Difference scores: {time.time()-t:.3f} seconds")
+
+    def _add_event_start_end_elo_columns(self) -> None:
+        """Add constant per-session Elo columns for each seat and pair.
+        Adds both EventStart (pre-board at first appearance) and EventEnd
+        (post-update at last appearance) values for players and pairs, and
+        propagates them across all rows in the session for each entity.
+        """
+        t = time.time()
+        # Ensure sorting to define session start order
+        sort_keys = [c for c in ["Date", "session_id", "Round", "Board"] if c in self.df.columns]
+        if not sort_keys:
+            sort_keys = ["Date"]
+        self.df = self.df.sort(sort_keys)
+
+        # Player Elo at session start (direction-agnostic per person, but taken from seat)
+        seat_before_cols = {
+            "N": ("Player_ID_N", "Elo_R_N_Before", "Elo_R_Player_N_EventStart"),
+            "S": ("Player_ID_S", "Elo_R_S_Before", "Elo_R_Player_S_EventStart"),
+            "E": ("Player_ID_E", "Elo_R_E_Before", "Elo_R_Player_E_EventStart"),
+            "W": ("Player_ID_W", "Elo_R_W_Before", "Elo_R_Player_W_EventStart"),
+        }
+        for seat, (pid_col, before_col, out_col) in seat_before_cols.items():
+            if pid_col in self.df.columns and before_col in self.df.columns:
+                self.df = self.df.with_columns(
+                    pl.col(before_col).first().over(["session_id", pid_col]).alias(out_col)
+                )
+
+        # Pair Elo at session start (directional pairing id)
+        pair_before_cols = {
+            "NS": ("Pair_Number_NS", "Elo_R_NS_Before", "Elo_R_Pair_NS_EventStart"),
+            "EW": ("Pair_Number_EW", "Elo_R_EW_Before", "Elo_R_Pair_EW_EventStart"),
+        }
+        for side, (pair_col, before_col, out_col) in pair_before_cols.items():
+            if pair_col in self.df.columns and before_col in self.df.columns:
+                self.df = self.df.with_columns(
+                    pl.col(before_col).first().over(["session_id", pair_col]).alias(out_col)
+                )
+
+        # Player Elo at session end (post-update at last appearance)
+        seat_after_cols = {
+            "N": ("Player_ID_N", "Elo_R_N", "Elo_R_Player_N_EventEnd"),
+            "S": ("Player_ID_S", "Elo_R_S", "Elo_R_Player_S_EventEnd"),
+            "E": ("Player_ID_E", "Elo_R_E", "Elo_R_Player_E_EventEnd"),
+            "W": ("Player_ID_W", "Elo_R_W", "Elo_R_Player_W_EventEnd"),
+        }
+        for seat, (pid_col, after_col, out_col) in seat_after_cols.items():
+            if pid_col in self.df.columns and after_col in self.df.columns:
+                self.df = self.df.with_columns(
+                    pl.col(after_col).last().over(["session_id", pid_col]).alias(out_col)
+                )
+
+        # Pair Elo at session end (directional pairing id)
+        pair_after_cols = {
+            "NS": ("Pair_Number_NS", "Elo_R_NS", "Elo_R_Pair_NS_EventEnd"),
+            "EW": ("Pair_Number_EW", "Elo_R_EW", "Elo_R_Pair_EW_EventEnd"),
+        }
+        for side, (pair_col, after_col, out_col) in pair_after_cols.items():
+            if pair_col in self.df.columns and after_col in self.df.columns:
+                self.df = self.df.with_columns(
+                    pl.col(after_col).last().over(["session_id", pair_col]).alias(out_col)
+                )
+
+        print(f"Event start/end Elo columns: {time.time()-t:.3f} seconds")
 
     def perform_matchpoint_augmentations(self) -> pl.DataFrame:
         t_start = time.time()
@@ -2919,7 +3446,10 @@ class MatchPointAugmenter:
         self._create_declarer_pct() # 1s
         self._calculate_all_score_matchpoints() # 3m
         self._calculate_final_scores() # ?
-        
+        self._calculate_elo_pair_matchpoint_ratings() # 1s
+        self._calculate_elo_player_matchpoint_ratings() # 1s
+        self._calculate_event_start_end_elo_columns()
+
         print(f"Matchpoint augmentations complete: {time.time() - t_start:.2f} seconds")
         return self.df
 

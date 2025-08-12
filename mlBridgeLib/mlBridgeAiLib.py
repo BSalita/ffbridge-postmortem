@@ -117,10 +117,19 @@ def calculate_input_size(embedding_sizes: List[Tuple[int, int]], n_continuous: i
 
 # Function to define optimal layer sizes (similar to fastai version)
 def define_layer_sizes(input_size: int, num_layers: int = 3, shrink_factor: int = 2) -> List[int]:
-    layer_sizes = [input_size]
-    for i in range(1, num_layers):
-        layer_sizes.append(layer_sizes[-1] // shrink_factor)
-    return layer_sizes
+    """Derive a compact MLP width schedule from the input size.
+
+    Notes:
+    - Do NOT include the raw input size as a hidden layer. A first hidden layer equal
+      to the input dimensionality greatly increases parameter count and slows training.
+    - Start from input_size // shrink_factor and keep shrinking.
+    """
+    layers: List[int] = []
+    current = max(4, input_size // shrink_factor)
+    for _ in range(max(1, num_layers)):
+        layers.append(max(4, current))
+        current = max(4, current // shrink_factor)
+    return layers
 
 # create a test set using date and sample size. current default is 10k samples ge 2024-07-01.
 def split_by_date(df: Any, split_date: pl.Date) -> Tuple[Any, Any]:
@@ -150,9 +159,28 @@ def get_device() -> str:
         print_to_log_info("No GPU available, using CPU")
     return device
 
-def train_model(df: Any, y_names: List[str], cat_names: Optional[List[str]] = None, cont_names: Optional[List[str]] = None, nsamples: Optional[int] = None, 
-                procs: Optional[Any] = None, valid_pct: float = 0.2, bs: int = 1024*10, layers: Optional[List[int]] = None, epochs: int = 3, 
-                device: Optional[str] = None, y_range: Tuple[float, float] = (0,1), lr: float = 1e-3, patience: int = 3, min_delta: float = 0.001, seed: int = 42) -> Dict[str, Any]:
+def train_model(
+    df: Any,
+    y_names: List[str],
+    cat_names: Optional[List[str]] = None,
+    cont_names: Optional[List[str]] = None,
+    nsamples: Optional[int] = None,
+    procs: Optional[Any] = None,
+    valid_pct: float = 0.2,
+    bs: int = 1024 * 2,
+    layers: Optional[List[int]] = None,
+    epochs: int = 3,
+    device: Optional[str] = None,
+    y_range: Tuple[float, float] = (0, 1),
+    lr: float = 1e-3,
+    patience: int = 3,
+    min_delta: float = 0.001,
+    seed: int = 42,
+    num_workers: int = 4,
+    prefetch_factor: int = 2,
+    use_amp: bool = True,
+    grad_accum_steps: int = 1,
+) -> Dict[str, Any]:
     """
     Train a PyTorch tabular model similar to the fastai implementation.
     
@@ -182,7 +210,7 @@ def train_model(df: Any, y_names: List[str], cat_names: Optional[List[str]] = No
         device = get_device()
     
     t = time.time()
-    print_to_log_info(f"{y_names=} {cat_names=} {cont_names=} {nsamples=} {valid_pct=} {bs=} {layers=} {epochs=} {device=} {y_range=} {lr=} {patience=} {min_delta=} {seed=}")
+    print_to_log_info(f"{y_names=} {cat_names=} {cont_names=} {nsamples=} {valid_pct=} {bs=} {layers=} {epochs=} {device=} {y_range=} {lr=} {patience=} {min_delta=} {seed=} {num_workers=} {prefetch_factor=} {use_amp=} {grad_accum_steps=}")
 
     # Validate inputs
     assert isinstance(y_names, list) and len(y_names) == 1, 'Only one target variable is supported.'
@@ -215,19 +243,63 @@ def train_model(df: Any, y_names: List[str], cat_names: Optional[List[str]] = No
     is_classification = pandas_df[y_names[0]].dtype.name in ['boolean','category','object','string','uint8']
     
     if is_classification:
-        return train_classifier_pytorch(pandas_df, y_names, cat_names, cont_names, 
-                                      valid_pct=valid_pct, bs=bs, layers=layers, 
-                                      epochs=epochs, device=device, lr=lr, 
-                                      patience=patience, min_delta=min_delta)
+        return train_classifier_pytorch(
+            pandas_df,
+            y_names,
+            cat_names,
+            cont_names,
+            valid_pct=valid_pct,
+            bs=bs,
+            layers=layers,
+            epochs=epochs,
+            device=device,
+            lr=lr,
+            patience=patience,
+            min_delta=min_delta,
+            num_workers=num_workers,
+            prefetch_factor=prefetch_factor,
+            use_amp=use_amp,
+            grad_accum_steps=grad_accum_steps,
+        )
     else:
-        return train_regression_pytorch(pandas_df, y_names, cat_names, cont_names, 
-                                      valid_pct=valid_pct, bs=bs, layers=layers, 
-                                      epochs=epochs, device=device, lr=lr, 
-                                      patience=patience, min_delta=min_delta, y_range=y_range)
+        return train_regression_pytorch(
+            pandas_df,
+            y_names,
+            cat_names,
+            cont_names,
+            valid_pct=valid_pct,
+            bs=bs,
+            layers=layers,
+            epochs=epochs,
+            device=device,
+            lr=lr,
+            patience=patience,
+            min_delta=min_delta,
+            y_range=y_range,
+            num_workers=num_workers,
+            prefetch_factor=prefetch_factor,
+            use_amp=use_amp,
+            grad_accum_steps=grad_accum_steps,
+        )
 
-def train_classifier_pytorch(df: Any, y_names: List[str], cat_names: List[str], cont_names: List[str], valid_pct: float = 0.2,
-                           bs: int = 1024*5, layers: Optional[List[int]] = None, epochs: int = 3, device: Optional[str] = None, 
-                           lr: float = 1e-3, patience: int = 3, min_delta: float = 0.001) -> Dict[str, Any]:
+def train_classifier_pytorch(
+    df: Any,
+    y_names: List[str],
+    cat_names: List[str],
+    cont_names: List[str],
+    valid_pct: float = 0.2,
+    bs: int = 1024 * 5,
+    layers: Optional[List[int]] = None,
+    epochs: int = 3,
+    device: Optional[str] = None,
+    lr: float = 1e-3,
+    patience: int = 3,
+    min_delta: float = 0.001,
+    num_workers: int = 4,
+    prefetch_factor: int = 2,
+    use_amp: bool = True,
+    grad_accum_steps: int = 1,
+) -> Dict[str, Any]:
     """Train a classification model using PyTorch."""
     # Auto-detect device if not specified
     if device is None:
@@ -280,7 +352,8 @@ def train_classifier_pytorch(df: Any, y_names: List[str], cat_names: List[str], 
     embedding_sizes = []
     for col in cat_names:
         num_categories = len(artifacts['categorical_encoders'][col].classes_)
-        embed_dim = max(4, min(300, int(num_categories / 2)))
+        # Smaller, log-scaled embedding size for stability and speed
+        embed_dim = max(2, min(32, int(np.ceil(np.log2(num_categories + 1)))))
         embedding_sizes.append((num_categories, embed_dim))
 
     artifacts['embedding_sizes'] = embedding_sizes
@@ -312,9 +385,26 @@ def train_classifier_pytorch(df: Any, y_names: List[str], cat_names: List[str], 
     
     train_dataset = TabularDataset(X_cat[train_idx], X_cont[train_idx], y[train_idx])
     val_dataset = TabularDataset(X_cat[val_idx], X_cont[val_idx], y[val_idx])
-    
-    train_loader = DataLoader(train_dataset, batch_size=bs, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=bs, shuffle=False)
+
+    use_cuda = device == 'cuda'
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=bs,
+        shuffle=True,
+        pin_memory=use_cuda,
+        num_workers=num_workers,
+        prefetch_factor=prefetch_factor if num_workers > 0 else None,
+        persistent_workers=(num_workers > 0)
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=bs,
+        shuffle=False,
+        pin_memory=use_cuda,
+        num_workers=num_workers,
+        prefetch_factor=prefetch_factor if num_workers > 0 else None,
+        persistent_workers=(num_workers > 0)
+    )
 
     # Create model
     model = TabularNNModel(embedding_sizes, n_continuous, n_classes, layers)
@@ -332,25 +422,39 @@ def train_classifier_pytorch(df: Any, y_names: List[str], cat_names: List[str], 
     early_stopped = False
     
     for epoch in range(epochs):
+        epoch_start_time = time.time()
         # Training
         model.train()
         train_loss = 0.0
         train_correct = 0
         train_total = 0
         
-        for batch in train_loader:
-            optimizer.zero_grad()
-            
-            outputs = model(batch['categorical'].to(device), batch['continuous'].to(device))
-            loss = criterion(outputs, batch['labels'].to(device))
-            
-            loss.backward()
-            optimizer.step()
+        batch_log_interval = max(1, len(train_loader) // 20)
+        scaler = torch.amp.GradScaler('cuda', enabled=use_amp and (device == 'cuda'))
+        for batch_idx, batch in enumerate(train_loader):
+            optimizer.zero_grad(set_to_none=True)
+            with torch.amp.autocast('cuda', enabled=use_amp and (device == 'cuda')):
+                outputs = model(
+                    batch['categorical'].to(device, non_blocking=True),
+                    batch['continuous'].to(device, non_blocking=True)
+                )
+                loss = criterion(outputs, batch['labels'].to(device, non_blocking=True))
+
+            # Gradient accumulation
+            loss = loss / max(1, grad_accum_steps)
+            scaler.scale(loss).backward()
+            if ((batch_idx + 1) % max(1, grad_accum_steps)) == 0:
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad(set_to_none=True)
             
             train_loss += loss.item()
             _, predicted = torch.max(outputs.data, 1)
             train_total += batch['labels'].size(0)
             train_correct += (predicted == batch['labels'].to(device)).sum().item()
+
+            if (batch_idx % batch_log_interval) == 0:
+                print_to_log_info(f"Train epoch {epoch+1}/{epochs} - batch {batch_idx}/{len(train_loader)}")
         
         # Validation
         model.eval()
@@ -359,14 +463,21 @@ def train_classifier_pytorch(df: Any, y_names: List[str], cat_names: List[str], 
         val_total = 0
         
         with torch.no_grad():
-            for batch in val_loader:
-                outputs = model(batch['categorical'].to(device), batch['continuous'].to(device))
-                loss = criterion(outputs, batch['labels'].to(device))
+            for batch_idx, batch in enumerate(val_loader):
+                with torch.amp.autocast('cuda', enabled=use_amp and (device == 'cuda')):
+                    outputs = model(
+                        batch['categorical'].to(device, non_blocking=True),
+                        batch['continuous'].to(device, non_blocking=True)
+                    )
+                    loss = criterion(outputs, batch['labels'].to(device, non_blocking=True))
                 
                 val_loss += loss.item()
                 _, predicted = torch.max(outputs.data, 1)
                 val_total += batch['labels'].size(0)
                 val_correct += (predicted == batch['labels'].to(device)).sum().item()
+                
+                if (batch_idx % batch_log_interval) == 0:
+                    print_to_log_info(f"Val   epoch {epoch+1}/{epochs} - batch {batch_idx}/{len(val_loader)}")
         
         train_loss /= len(train_loader)
         val_loss /= len(val_loader)
@@ -381,7 +492,8 @@ def train_classifier_pytorch(df: Any, y_names: List[str], cat_names: List[str], 
             'val_acc': val_acc
         })
         
-        print_to_log_info(f"Epoch {epoch+1}/{epochs}: Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
+        epoch_time = time.time() - epoch_start_time
+        print_to_log_info(f"Epoch {epoch+1}/{epochs}: Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f} | {epoch_time:.1f}s")
         
         # Save best model (based on validation accuracy)
         if val_acc > best_val_acc:
@@ -424,9 +536,25 @@ def train_classifier_pytorch(df: Any, y_names: List[str], cat_names: List[str], 
         'device': device
     }
 
-def train_regression_pytorch(df: Any, y_names: List[str], cat_names: List[str], cont_names: List[str], valid_pct: float = 0.2, 
-                           bs: int = 1024*5, layers: Optional[List[int]] = None, epochs: int = 3, device: Optional[str] = None, 
-                           lr: float = 1e-3, patience: int = 3, min_delta: float = 0.001, y_range: Tuple[float, float] = (0,1)) -> Dict[str, Any]:
+def train_regression_pytorch(
+    df: Any,
+    y_names: List[str],
+    cat_names: List[str],
+    cont_names: List[str],
+    valid_pct: float = 0.2,
+    bs: int = 1024 * 5,
+    layers: Optional[List[int]] = None,
+    epochs: int = 3,
+    device: Optional[str] = None,
+    lr: float = 1e-3,
+    patience: int = 3,
+    min_delta: float = 0.001,
+    y_range: Tuple[float, float] = (0, 1),
+    num_workers: int = 4,
+    prefetch_factor: int = 2,
+    use_amp: bool = True,
+    grad_accum_steps: int = 1,
+) -> Dict[str, Any]:
     """Train a regression model using PyTorch."""
     # Auto-detect device if not specified
     if device is None:
@@ -438,7 +566,6 @@ def train_regression_pytorch(df: Any, y_names: List[str], cat_names: List[str], 
     artifacts = {
         'categorical_encoders': {col: LabelEncoder() for col in cat_names},
         'continuous_scalers': {col: StandardScaler() for col in cont_names},
-        'target_scaler': StandardScaler(),
         'na_fills': {},
         'categorical_feature_names': cat_names,
         'continuous_feature_names': cont_names,
@@ -449,9 +576,8 @@ def train_regression_pytorch(df: Any, y_names: List[str], cat_names: List[str], 
         'y_range': y_range
     }
 
-    # Target scaling
-    y_scaled = artifacts['target_scaler'].fit_transform(df[y_names].values)
-    df[y_names[0]] = y_scaled.flatten()
+    # Do not scale the target for regression when using y_range in the model.
+    # Train directly on the original target in [0, 1].
 
     # Categorical feature encoding and NA handling
     for col in cat_names:
@@ -477,7 +603,8 @@ def train_regression_pytorch(df: Any, y_names: List[str], cat_names: List[str], 
     embedding_sizes = []
     for col in cat_names:
         num_categories = len(artifacts['categorical_encoders'][col].classes_)
-        embed_dim = max(4, min(300, int(num_categories / 2)))
+        # Smaller, log-scaled embedding size for stability and speed
+        embed_dim = max(2, min(32, int(np.ceil(np.log2(num_categories + 1)))))
         embedding_sizes.append((num_categories, embed_dim))
 
     artifacts['embedding_sizes'] = embedding_sizes
@@ -499,9 +626,26 @@ def train_regression_pytorch(df: Any, y_names: List[str], cat_names: List[str], 
     
     train_dataset = TabularDataset(X_cat[train_idx], X_cont[train_idx], y[train_idx])
     val_dataset = TabularDataset(X_cat[val_idx], X_cont[val_idx], y[val_idx])
-    
-    train_loader = DataLoader(train_dataset, batch_size=bs, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=bs, shuffle=False)
+
+    use_cuda = device == 'cuda'
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=bs,
+        shuffle=True,
+        pin_memory=use_cuda,
+        num_workers=num_workers,
+        prefetch_factor=prefetch_factor if num_workers > 0 else None,
+        persistent_workers=(num_workers > 0)
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=bs,
+        shuffle=False,
+        pin_memory=use_cuda,
+        num_workers=num_workers,
+        prefetch_factor=prefetch_factor if num_workers > 0 else None,
+        persistent_workers=(num_workers > 0)
+    )
 
     # Create model (output size 1 for regression)
     model = TabularNNModel(embedding_sizes, n_continuous, 1, layers, y_range=y_range)
@@ -518,30 +662,49 @@ def train_regression_pytorch(df: Any, y_names: List[str], cat_names: List[str], 
     early_stopped = False
     
     for epoch in range(epochs):
+        epoch_start_time = time.time()
         # Training
         model.train()
         train_loss = 0.0
         
-        for batch in train_loader:
-            optimizer.zero_grad()
-            
-            outputs = model(batch['categorical'].to(device), batch['continuous'].to(device))
-            loss = criterion(outputs.squeeze(), batch['labels'].to(device))
-            
-            loss.backward()
-            optimizer.step()
+        batch_log_interval = max(1, len(train_loader) // 20)
+        scaler = torch.amp.GradScaler('cuda', enabled=use_amp and (device == 'cuda'))
+        for batch_idx, batch in enumerate(train_loader):
+            optimizer.zero_grad(set_to_none=True)
+            with torch.amp.autocast('cuda', enabled=use_amp and (device == 'cuda')):
+                outputs = model(
+                    batch['categorical'].to(device, non_blocking=True),
+                    batch['continuous'].to(device, non_blocking=True)
+                )
+                loss = criterion(outputs.squeeze(), batch['labels'].to(device, non_blocking=True))
+
+            loss = loss / max(1, grad_accum_steps)
+            scaler.scale(loss).backward()
+            if ((batch_idx + 1) % max(1, grad_accum_steps)) == 0:
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad(set_to_none=True)
             
             train_loss += loss.item()
+
+            if (batch_idx % batch_log_interval) == 0:
+                print_to_log_info(f"Train epoch {epoch+1}/{epochs} - batch {batch_idx}/{len(train_loader)}")
         
         # Validation
         model.eval()
         val_loss = 0.0
         
         with torch.no_grad():
-            for batch in val_loader:
-                outputs = model(batch['categorical'].to(device), batch['continuous'].to(device))
-                loss = criterion(outputs.squeeze(), batch['labels'].to(device))
+            for batch_idx, batch in enumerate(val_loader):
+                with torch.amp.autocast('cuda', enabled=use_amp and (device == 'cuda')):
+                    outputs = model(
+                        batch['categorical'].to(device, non_blocking=True),
+                        batch['continuous'].to(device, non_blocking=True)
+                    )
+                    loss = criterion(outputs.squeeze(), batch['labels'].to(device, non_blocking=True))
                 val_loss += loss.item()
+                if (batch_idx % batch_log_interval) == 0:
+                    print_to_log_info(f"Val   epoch {epoch+1}/{epochs} - batch {batch_idx}/{len(val_loader)}")
         
         train_loss /= len(train_loader)
         val_loss /= len(val_loader)
@@ -550,8 +713,11 @@ def train_regression_pytorch(df: Any, y_names: List[str], cat_names: List[str], 
         train_rmse_scaled = train_loss ** 0.5
         val_rmse_scaled = val_loss ** 0.5
         
-        # Convert to original units using target scaler
-        original_std = artifacts['target_scaler'].scale_[0]
+        # Convert to original units if a target scaler exists; otherwise use identity
+        if 'target_scaler' in artifacts and hasattr(artifacts['target_scaler'], 'scale_'):
+            original_std = artifacts['target_scaler'].scale_[0]
+        else:
+            original_std = 1.0
         train_rmse_original = train_rmse_scaled * original_std
         val_rmse_original = val_rmse_scaled * original_std
         
@@ -565,9 +731,12 @@ def train_regression_pytorch(df: Any, y_names: List[str], cat_names: List[str], 
             'val_rmse_original': val_rmse_original
         })
         
-        print_to_log_info(f"Epoch {epoch+1}/{epochs}: Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, "
-                          f"Train RMSE: {train_rmse_scaled:.4f} (scaled) / {train_rmse_original:.4f} (original), "
-                          f"Val RMSE: {val_rmse_scaled:.4f} (scaled) / {val_rmse_original:.4f} (original)")
+        epoch_time = time.time() - epoch_start_time
+        print_to_log_info(
+            f"Epoch {epoch+1}/{epochs}: Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, "
+            f"Train RMSE: {train_rmse_scaled:.4f} (scaled) / {train_rmse_original:.4f} (original), "
+            f"Val RMSE: {val_rmse_scaled:.4f} (scaled) / {val_rmse_original:.4f} (original) | {epoch_time:.1f}s"
+        )
         
         # Early stopping and model saving logic
         improvement_threshold = best_val_loss - min_delta
@@ -595,6 +764,48 @@ def train_regression_pytorch(df: Any, y_names: List[str], cat_names: List[str], 
     else:
         print_to_log_info("Warning: No best model state found, using final model")
     
+    # Compute validation statistics (mean/std) and simple accuracy bands
+    try:
+        model.eval()
+        all_val_targets: List[torch.Tensor] = []
+        all_val_preds: List[torch.Tensor] = []
+        with torch.no_grad():
+            for batch in val_loader:
+                preds = model(
+                    batch['categorical'].to(device, non_blocking=True),
+                    batch['continuous'].to(device, non_blocking=True)
+                )
+                all_val_preds.append(preds.detach().squeeze().cpu())
+                all_val_targets.append(batch['labels'].detach().cpu())
+        if all_val_targets and all_val_preds:
+            y_val = torch.cat(all_val_targets)
+            yhat_val = torch.cat(all_val_preds)
+            # Means
+            val_target_mean = float(torch.mean(y_val))
+            val_pred_mean = float(torch.mean(yhat_val))
+            # Stddevs
+            val_target_std = float(torch.std(y_val))
+            val_pred_std = float(torch.std(yhat_val))
+            # Accuracy-style bands
+            abs_err = torch.abs(y_val - yhat_val)
+            acc_within_5pct = float((abs_err <= 0.05).float().mean())
+            acc_within_10pct = float((abs_err <= 0.10).float().mean())
+
+            print_to_log_info(
+                f"Validation stats -> target_mean: {val_target_mean:.6f}, pred_mean: {val_pred_mean:.6f}, "
+                f"target_std: {val_target_std:.6f}, pred_std: {val_pred_std:.6f}, "
+                f"acc@±5%: {acc_within_5pct:.3f}, acc@±10%: {acc_within_10pct:.3f}"
+            )
+
+            artifacts['val_target_mean'] = val_target_mean
+            artifacts['val_pred_mean'] = val_pred_mean
+            artifacts['val_target_std'] = val_target_std
+            artifacts['val_pred_std'] = val_pred_std
+            artifacts['val_accuracy_within_5pct'] = acc_within_5pct
+            artifacts['val_accuracy_within_10pct'] = acc_within_10pct
+    except Exception as e:
+        print_to_log_info(f"Warning: could not compute validation stddevs: {e}")
+
     artifacts['training_history'] = training_history
     artifacts['early_stopped'] = early_stopped
     artifacts['model_params'] = {
@@ -622,10 +833,19 @@ def save_model(learn_dict: Dict[str, Any], f: str) -> None:
     """
     t = time.time()
     
-    # Prepare save dictionary
+    # Prepare save dictionary with provenance
+    artifacts = learn_dict['artifacts']
+    # Record provenance for debugging/versioning
+    try:
+        from uuid import uuid4
+        artifacts['run_id'] = artifacts.get('run_id') or str(uuid4())
+    except Exception:
+        pass
+    artifacts['saved_at'] = datetime.now().isoformat()
+
     save_dict = {
         'model_state_dict': learn_dict['model'].state_dict(),
-        'artifacts': learn_dict['artifacts'],
+        'artifacts': artifacts,
         'device': learn_dict['device']
     }
     
@@ -678,6 +898,17 @@ def load_model(f: str) -> Dict[str, Any]:
         'device': save_dict['device']
     }
     
+    # Log provenance and key settings to confirm correct model was loaded
+    try:
+        run_id = artifacts.get('run_id')
+        saved_at = artifacts.get('saved_at')
+        y_range = artifacts.get('y_range')
+        training_history = artifacts.get('training_history') or []
+        print_to_log_info(f"Model provenance: run_id={run_id}, saved_at={saved_at}")
+        print_to_log_info(f"Model settings: y_range={y_range}, training_epochs_recorded={len(training_history)}")
+    except Exception:
+        pass
+
     print_to_log_info('load_model time:', time.time()-t)
     return learn_dict
 
@@ -702,18 +933,19 @@ def preprocess_inference_data(df: Any, artifacts: Dict[str, Any]) -> Dict[str, t
             # Fill missing values
             fill_val = artifacts['na_fills'][col]
             df[col] = df[col].fillna(fill_val).infer_objects(copy=False)
-            
-            # Handle unseen categories by mapping them to a default value
+
+            # Handle unseen categories by mapping them to the training-time placeholder
             encoder = artifacts['categorical_encoders'][col]
             known_categories = set(encoder.classes_)
-            
-            # Vectorized approach: replace unknown categories with first known category
+
             unknown_mask = ~df[col].isin(known_categories)
             if unknown_mask.any():
-                unknown_values = df[col][unknown_mask].unique()
-                print_to_log_info(f'Warning: Column {col} contains {len(unknown_values)} unknown values, mapping to default')
-                df.loc[unknown_mask, col] = encoder.classes_[0]
-            
+                unknown_rows = int(unknown_mask.sum())
+                # Prefer the training-time fill value; otherwise use 'MISSING_CAT' if present; else fallback to first class
+                default_category = fill_val if fill_val in known_categories else ('MISSING_CAT' if 'MISSING_CAT' in known_categories else encoder.classes_[0])
+                print_to_log_info(f"Warning: Column {col} has {unknown_rows} unseen rows; mapping them to '{default_category}'")
+                df.loc[unknown_mask, col] = default_category
+
             # Now transform all values at once (much faster than apply)
             df[col] = encoder.transform(df[col])
     
@@ -1058,19 +1290,26 @@ def chart_feature_importance(learn_dict: Dict[str, Any], topn: Optional[int] = N
     except Exception as e:
         print_to_log_info(f"Error creating plot: {e}")
 
-def predict_pct(learn_dict: Dict[str, Any], df: Any, session_col: str = 'Session', target_col: str = 'Pct_Target', device: Optional[str] = None) -> Any:
+def predict_pct(
+    learn_dict: Dict[str, Any],
+    df: Any,
+    session_col: str = 'Session',
+    target_col: str = 'Pct_Target',
+    device: Optional[str] = None,
+    enforce_session_mean: bool = False,
+) -> Any:
     """
     Comprehensive Pct_NS/Pct_EW prediction function with constraint enforcement.
     
     Adds prediction columns to df_test:
-    - Pct_NS_Pred, Pct_EW_Pred: Final constrained predictions
+    - Pct_NS_Pred, Pct_EW_Pred: Final raw predictions
     - Pct_NS_Pred_Error, Pct_EW_Pred_Error: Prediction errors (if actuals available)
     - Pct_NS_Pred_Absolute_Error, Pct_EW_Pred_Absolute_Error: Absolute errors
     
     Enforces constraints:
-    - Row-wise: Pct_NS_Pred + Pct_EW_Pred = 1.0 for each board
-    - Session-wise: mean(Pct_NS_Pred) = 0.5 within each session
-    - Session-wise: mean(Pct_EW_Pred) = 0.5 within each session
+    - Row-wise: Pct_NS_Pred + Pct_EW_Pred = 1.0 for each board (always)
+    - Session-wise: mean(Pct_NS_Pred) = 0.5 within each session (if enforce_session_mean=True)
+    - Session-wise: mean(Pct_EW_Pred) = 0.5 within each session (if enforce_session_mean=True)
     
     Args:
         model_file: Path to saved PyTorch model file
@@ -1087,7 +1326,7 @@ def predict_pct(learn_dict: Dict[str, Any], df: Any, session_col: str = 'Session
         - 'sessions': List of session statistics
     """
     print_to_log_info("=== PREDICT_PCT: Comprehensive Pct_NS/EW Prediction with Constraints ===")
-    
+
     assert isinstance(df, pl.DataFrame), "df_test must be a Polars DataFrame"
     
     # Extract model features with robust error handling
@@ -1109,8 +1348,22 @@ def predict_pct(learn_dict: Dict[str, Any], df: Any, session_col: str = 'Session
     
     model_features = cat_names + cont_names
     print_to_log_info(f"Model expects {len(model_features)} features: {len(cat_names)} categorical, {len(cont_names)} continuous")
-    
-    # ASSERTION 1: Check all training features are present
+
+    # Auto-add any missing training features using training-time defaults
+    na_fills = artifacts.get('na_fills', {}) or {}
+    new_cols = []
+    for col in cat_names:
+        if col not in df.columns:
+            fill_val = na_fills.get(col, "MISSING_CAT")
+            new_cols.append(pl.lit(fill_val).alias(col))
+    for col in cont_names:
+        if col not in df.columns:
+            fill_val = na_fills.get(col, 0.0)
+            new_cols.append(pl.lit(fill_val).alias(col))
+    if new_cols:
+        df = df.with_columns(new_cols)
+
+    # ASSERTION 1: Check all training features are present (after auto-add)
     missing_features = [f for f in model_features if f not in df.columns]
     assert len(missing_features) == 0, f"Missing required features in df_test: {missing_features}"
     print_to_log_info(f"✅ All {len(model_features)} training features present in test data")
@@ -1158,17 +1411,21 @@ def predict_pct(learn_dict: Dict[str, Any], df: Any, session_col: str = 'Session
     
     raw_predictions = df_predictions[pred_col_name].values
     print_to_log_info(f"Raw predictions - mean: {np.mean(raw_predictions):.6f}, std: {np.std(raw_predictions):.6f}")
-    
-    # Normalize predictions by session to enforce constraints
+
     sessions = df[session_col].to_numpy()
-    constrained_predictions, session_stats = normalize_predictions_by_session(raw_predictions, sessions)
-    
-    # Create final constrained Pct_NS and Pct_EW predictions
-    final_pct_ns = constrained_predictions
+    raw_predictions = np.clip(raw_predictions, 0.0, 1.0)
+
+    # Optionally normalize per-session to mean 0.5
+    if enforce_session_mean:
+        final_pct_ns, session_stats = normalize_predictions_by_session(raw_predictions, sessions)
+        print_to_log_info("\n=== PREDICTION SUMMARY (SESSION-NORMALIZED) ===")
+    else:
+        final_pct_ns = raw_predictions
+        session_stats = []
+        print_to_log_info("\n=== PREDICTION SUMMARY (RAW) ===")
     final_pct_ew = 1.0 - final_pct_ns
-    
-    print_to_log_info(f"Constrained predictions - NS mean: {np.mean(final_pct_ns):.6f}, EW mean: {np.mean(final_pct_ew):.6f}")
-    
+    print_to_log_info(f"Predictions - NS mean: {np.mean(final_pct_ns):.6f}, EW mean: {np.mean(final_pct_ew):.6f}")
+
     # Add prediction columns to original DataFrame
     df_result = df.with_columns([
         pl.Series('Pct_NS_Pred', final_pct_ns),
@@ -1190,16 +1447,21 @@ def predict_pct(learn_dict: Dict[str, Any], df: Any, session_col: str = 'Session
     # Calculate comprehensive metrics
     metrics = {}
     constraint_info = {}
-    
-    # Overall constraint verification
     row_sums = final_pct_ns + final_pct_ew
     max_row_error = np.max(np.abs(row_sums - 1.0))
     constraint_info['row_sum_constraint_satisfied'] = max_row_error < 1e-10
     constraint_info['max_row_sum_error'] = max_row_error
-    constraint_info['ns_mean'] = np.mean(final_pct_ns)
-    constraint_info['ew_mean'] = np.mean(final_pct_ew)
-    constraint_info['mean_constraint_satisfied'] = abs(np.mean(final_pct_ns) - 0.5) < 1e-6
-    
+    constraint_info['ns_mean'] = float(np.mean(final_pct_ns))
+    constraint_info['ew_mean'] = float(np.mean(final_pct_ew))
+    constraint_info['mean_constraint_satisfied'] = abs(constraint_info['ns_mean'] - 0.5) < 1e-6
+    if enforce_session_mean and len(sessions) > 0:
+        session_constraint_errors = [abs(stat['final_mean'] - 0.5) for stat in session_stats]
+        constraint_info['max_session_constraint_error'] = float(max(session_constraint_errors) if session_constraint_errors else 0.0)
+        constraint_info['session_constraints_satisfied'] = constraint_info['max_session_constraint_error'] < 1e-6
+    else:
+        constraint_info['max_session_constraint_error'] = None
+        constraint_info['session_constraints_satisfied'] = None
+
     # Per-session and overall metrics
     if has_actuals:
         from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
@@ -1249,18 +1511,13 @@ def predict_pct(learn_dict: Dict[str, Any], df: Any, session_col: str = 'Session
     print_to_log_info("\n=== CONSTRAINT VERIFICATION ===")
     print_to_log_info(f"✅ Row-wise constraint: Pct_NS + Pct_EW = 1.0 (max error: {max_row_error:.2e})")
     print_to_log_info(f"✅ Overall mean constraint: NS={constraint_info['ns_mean']:.6f}, EW={constraint_info['ew_mean']:.6f}")
-    
+
     # Session constraint verification
-    session_constraint_errors = []
-    for stat in session_stats:
-        error = abs(stat['final_mean'] - 0.5)
-        session_constraint_errors.append(error)
-        # print_to_log_info(f"✅ Session {stat['session']} mean constraint: {stat['final_mean']:.6f} (error: {error:.2e})")
-    
-    max_session_constraint_error = max(session_constraint_errors) if session_constraint_errors else 0
-    constraint_info['max_session_constraint_error'] = max_session_constraint_error
-    constraint_info['session_constraints_satisfied'] = max_session_constraint_error < 1e-6
-    
+    if enforce_session_mean and session_stats:
+        session_constraint_errors = [abs(stat['final_mean'] - 0.5) for stat in session_stats]
+        constraint_info['max_session_constraint_error'] = float(max(session_constraint_errors))
+        constraint_info['session_constraints_satisfied'] = constraint_info['max_session_constraint_error'] < 1e-6
+
     if has_actuals:
         print_to_log_info("\n=== PERFORMANCE METRICS ===")
         overall = metrics['overall']
@@ -1268,13 +1525,13 @@ def predict_pct(learn_dict: Dict[str, Any], df: Any, session_col: str = 'Session
         print_to_log_info(f"  NS: RMSE={overall['ns_rmse']:.6f}, MAE={overall['ns_mae']:.6f}, R²={overall['ns_r2']:.6f}")
         print_to_log_info(f"  EW: RMSE={overall['ew_rmse']:.6f}, MAE={overall['ew_mae']:.6f}, R²={overall['ew_r2']:.6f}")
     
-    print_to_log_info(f"\n✅ PREDICT_PCT COMPLETE: {len(df_result)} boards with constrained predictions")
-    
+    print_to_log_info(f"\n✅ PREDICT_PCT COMPLETE: {len(df_result)} boards with raw predictions")    
+
     return {
         'df': df_result,
         'metrics': metrics,
         'constraints': constraint_info,
-        'sessions': session_stats
+        'sessions': session_stats  # now defined
     }
 
 def normalize_predictions_by_session(predictions: Any, sessions: Any) -> Any:

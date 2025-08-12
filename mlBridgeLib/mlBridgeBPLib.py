@@ -99,6 +99,7 @@ FRENCH_TO_ENGLISH_DIRECTION_MAP: Dict[str, str] = {
     'E': 'E',    # East (Est)
     'S': 'S',    # South (Sud)
     'W': 'W',    # West (Ouest)
+    'O': 'W',    # West (Ouest)
     'Nord': 'N',
     'Est': 'E',
     'Sud': 'S',
