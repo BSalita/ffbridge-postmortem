@@ -1874,7 +1874,7 @@ def write_report() -> None:
         report_title = f"Bridge Game Postmortem Report" # can't use any of '():' because of href link below.
         report_person = f"Personalized for {st.session_state.player_name} ({st.session_state.player_license_number})"
         report_creator = f"Created by https://{st.session_state.game_name}.postmortem.chat"
-        report_event_info = f"{st.session_state.organization_name} {st.session_state.game_description} (event id {st.session_state.session_id}) on {st.session_state.tournament_date}."
+        report_event_info = f"{st.session_state.organization_name} {st.session_state.game_description} (event id {st.session_state.session_id}) on {time.strptime(st.session_state.tournament_date, "%Y-%m-%d").strftime("%d-%b-%Y")}."
         report_game_results_webpage = f"ffbridge Results Page: {st.session_state.game_url}"
         if st.session_state.route_url is not None:
             report_roy_rene_game_results_webpage = f"Roy Rene Results Page: {st.session_state.route_url}"
