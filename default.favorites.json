@@ -405,7 +405,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT CONCAT(section_name, Pair_Number_{Opponent_Pair_Direction}, ' - ', (SELECT STRING_AGG(value.unnest, ' - ') FROM UNNEST(Player_Names_{Opponent_Pair_Direction}) as value)) as Opponents, AVG(Pct_{Pair_Direction}) AS Avg_Pct_{Pair_Direction}, STRING_AGG(Board, ', ') AS Boards, STRING_AGG(ROUND(Pct_{Pair_Direction},2), ', ') AS Pcts_{Pair_Direction} FROM self WHERE Boards_We_Played = True GROUP BY section_name, Pair_Number_{Opponent_Pair_Direction}, Player_Names_{Opponent_Pair_Direction} ORDER BY section_name, Pair_Number_{Opponent_Pair_Direction}"
+						"sql": "SELECT CONCAT(section_name, Pair_Number_{Opponent_Pair_Direction}, ' - ', (SELECT STRING_AGG(value.unnest, ' - ') FROM UNNEST(Pair_Names_{Opponent_Pair_Direction}) as value)) as Opponents, AVG(Pct_{Pair_Direction}) AS Avg_Pct_{Pair_Direction}, STRING_AGG(Board, ', ') AS Boards, STRING_AGG(ROUND(Pct_{Pair_Direction},2), ', ') AS Pcts_{Pair_Direction} FROM self WHERE Boards_We_Played = True GROUP BY section_name, Pair_Number_{Opponent_Pair_Direction}, Pair_Names_{Opponent_Pair_Direction} ORDER BY section_name, Pair_Number_{Opponent_Pair_Direction}"
 					}
 				]
 			},

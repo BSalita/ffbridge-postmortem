@@ -6445,8 +6445,8 @@ class MatchPointAugmenter:
         t_start = time.time()
         logger.info("Starting matchpoint augmentations")
         
-        self._compute_matchpoint_top() # 5s
         self._compute_raw_matchpoints() # 12s
+        self._compute_matchpoint_top() # 5s
         self._convert_to_percentages() # 1s
         self._compute_declarer_percentage() # 1s
         self._compute_comprehensive_matchpoints() # 3m
