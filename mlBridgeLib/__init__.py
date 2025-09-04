@@ -31,6 +31,7 @@ from mlBridgeLib.mlBridgeLib import (
     ContractToScores,
     DirectionToVul,
     hands_to_brs,
+    hrs_to_brss,
     pbn_to_hands,
     score,
     ContractTypeFromContract,
@@ -43,6 +44,8 @@ from mlBridgeLib.mlBridgeLib import (
     CategorifyContractTypeBySuit,
     CategorifyContractTypeByDirection,
     MatchPointScoreUpdate,
+    show_estimated_memory_usage,
+    CATEGORICAL_SCHEMAS,
 )
 
 # List of all possible contract strings

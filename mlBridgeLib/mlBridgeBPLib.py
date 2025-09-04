@@ -11,6 +11,7 @@ from typing import List, Dict, Optional, Any, Tuple
 import polars as pl
 from playwright.async_api import async_playwright, Page, BrowserContext
 import logging
+from mlBridgeLib.logging_config import setup_logger
 from contextlib import asynccontextmanager
 import time
 import sys
@@ -21,8 +22,7 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 # Global browser management
 @asynccontextmanager
