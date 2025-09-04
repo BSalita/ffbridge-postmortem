@@ -11,8 +11,21 @@
 
 
 import logging
-from logging_config import setup_logger
-logger = setup_logger(__name__)
+
+# Robust logging setup that handles different environments
+try:
+    from mlBridgeLib.logging_config import setup_logger
+    logger = setup_logger(__name__)
+except ImportError:
+    # Fallback logging setup if logging_config is not available
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(funcName)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    logger = logging.getLogger(__name__)
+    logger.info("Using fallback logging configuration - mlBridgeLib.logging_config not available")
+
 def print_to_log_info(*args):
     print_to_log(logging.INFO, *args)
 def print_to_log_debug(*args):

@@ -46,6 +46,7 @@ import pandas as pd
 #import safetensors
 #import sklearn
 #import torch
+import mlBridgeLib.mlBridgeBPLib
 
 # assumes symlinks are created in current directory.
 sys.path.append(str(pathlib.Path.cwd().joinpath('streamlitlib')))  # global
