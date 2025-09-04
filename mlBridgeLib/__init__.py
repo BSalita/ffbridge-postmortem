@@ -47,6 +47,12 @@ from mlBridgeLib.mlBridgeLib import (
     show_estimated_memory_usage,
     CATEGORICAL_SCHEMAS,
 )
+from mlBridgeLib.logging_config import (
+    setup_logger,
+    get_logger,
+    log_print,
+    init_project_logging,
+)
 
 # List of all possible contract strings
 contract_classes = [f"{level}{strain}{dbl}" for level in range(1,8) for strain in ['C','D','H','S','N'] for dbl in ['','X','XX']] + ['Pass']
