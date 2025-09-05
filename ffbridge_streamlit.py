@@ -4,6 +4,7 @@
 # todo (priority):
 
 # todo:
+# before production, ask claude to check for bugs and concurrency issues.
 # move any Roy Rene code into mlBridgeBPLib
 # get lancelot api working again modeling on ffbridge (legacy?) api.
 # show df of freq of scores; freq, score, matchpoints
@@ -167,7 +168,8 @@ def ShowDataFrameTable(df: pl.DataFrame, key: str, query: str = 'SELECT * FROM s
     #         return None
     
     try:
-        result_df = st.session_state.con.execute(query).pl()
+        con = get_session_duckdb_connection()
+        result_df = con.execute(query).pl()
         if show_sql_query and st.session_state.show_sql_query:
             st.text(f"Result is a dataframe of {len(result_df)} rows.")
         streamlitlib.ShowDataFrameTable(result_df, key) # requires pandas dataframe.
@@ -1022,7 +1024,7 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
 
     st.markdown('<div style="height: 50px;"><a name="top-of-report"></a></div>', unsafe_allow_html=True)
 
-    con = st.session_state.con
+    con = get_session_duckdb_connection()
 
     with st.spinner(f"Retrieving a list of games for {player_id} ..."):
         t = time.time()
@@ -1484,8 +1486,9 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
             # personalize to player, partner, opponents, etc.
             st.session_state.df = filter_dataframe(df) #, st.session_state.group_id, st.session_state.session_id, st.session_state.player_id, st.session_state.partner_id)
 
-            # Register DataFrame as 'self' view
-            st.session_state.con.register('self', st.session_state.df)
+            # Register DataFrame as 'self' view in the session-specific connection
+            con = get_session_duckdb_connection()
+            con.register('self', st.session_state.df)
             print(f"st.session_state.df:{st.session_state.df.columns}")
 
     return False
@@ -1961,6 +1964,19 @@ def create_ui() -> None:
     ask_sql_query()
 
 
+def get_session_duckdb_connection():
+    """Get or create a DuckDB connection for the current session
+    
+    Returns:
+        duckdb.DuckDBPyConnection: Session-specific DuckDB connection
+    """
+    if 'con' not in st.session_state or st.session_state.con is None:
+        st.session_state.con = duckdb.connect()  # In-memory database per session
+        print(f"Created new DuckDB connection for session")
+    
+    return st.session_state.con
+
+
 def initialize_session_state() -> None:
     """Initialize Streamlit session state variables"""
     st.set_page_config(layout="wide")
@@ -1991,7 +2007,7 @@ def initialize_session_state() -> None:
         'show_sql_query': os.getenv('STREAMLIT_ENV') == 'development',
         'use_historical_data': False,
         'do_not_cache_df': True, # todo: set to True for production
-        'con': duckdb.connect(), # IMPORTANT: duckdb.connect() hung until previous version was installed.
+        # 'con' removed from defaults - will be created per-session below
         'con_register_name': 'self',
         'main_section_container': st.empty(),
         'app_datetime': datetime.fromtimestamp(pathlib.Path(__file__).stat().st_mtime, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S %Z'),
@@ -2000,6 +2016,10 @@ def initialize_session_state() -> None:
     }
     for key, value in first_time_defaults.items():
         st.session_state[key] = value
+
+    # Create a per-session DuckDB connection to avoid concurrency issues
+    # Each user session gets its own isolated database connection
+    get_session_duckdb_connection()
 
     initialize_website_specific()
 

@@ -926,38 +926,6 @@ def precompute_contract_score_tables() -> Tuple[Dict[Tuple, int], Dict[Tuple, in
     return all_scores_d, scores_d, scores_df
 
 
-# Global cache for scores calculation
-_scores_cache = None
-
-def get_cached_scores() -> Tuple[Dict[Tuple, int], Dict[Tuple, int], pl.DataFrame]:
-    """Cached wrapper around `precompute_contract_score_tables()` to avoid recomputation.
-
-    Purpose:
-    - Provide cached access to bridge scoring lookup tables
-    - Avoid expensive recomputation of contract scores
-    - Return both detailed and simplified scoring dictionaries
-
-    Parameters:
-    - None (uses global cache)
-
-    Returns:
-    - Tuple containing:
-      - all_scores_d: Complete scoring dictionary with doubling variants
-      - scores_d: Simplified scoring dictionary (penalty doubled for failed contracts)
-      - scores_df: DataFrame with score arrays for all contract combinations
-
-    Input columns:
-    - None (generates scoring data)
-
-    Output columns:
-    - Returns pre-computed scoring reference data, not DataFrame columns
-    """
-    global _scores_cache
-    if _scores_cache is None:
-        _scores_cache = precompute_contract_score_tables()
-    return _scores_cache
-
-
 def expand_scores_by_vulnerability(scores_df: pl.DataFrame) -> pl.DataFrame:
     """Split each `Score_{level}{strain}` column's [NV,V] lists into separate NV and V columns.
 
