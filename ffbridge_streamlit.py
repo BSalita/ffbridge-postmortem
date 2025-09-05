@@ -465,6 +465,18 @@ def get_ffbridge_data_using_url_licencie(api_urls_d: Dict[str, Tuple[str, bool]]
     return dfs, api_urls_d
 
 
+@st.cache_data
+def _cached_read_parquet(file_path: str) -> pl.DataFrame:
+    """Cached parquet file reader for Streamlit
+    
+    Args:
+        file_path: Path to the parquet file
+        
+    Returns:
+        Polars DataFrame containing the parquet data
+    """
+    return pl.read_parquet(file_path)
+
 def get_df_from_api_url_licencie(k: str, url: str, should_cache: bool) -> pl.DataFrame:
     """Get DataFrame from API URL with optional caching
     
@@ -485,7 +497,7 @@ def get_df_from_api_url_licencie(k: str, url: str, should_cache: bool) -> pl.Dat
 
     if should_cache and parquet_cache_file.exists():
         print(f"Loading {k} from parquet cache: {parquet_cache_file}")
-        df = pl.read_parquet(parquet_cache_file)
+        df = _cached_read_parquet(str(parquet_cache_file))
         
         # Special handling for simultaneous_dealsNumber to set nb_deals
         if k == 'simultaneous_dealsNumber':
@@ -1465,7 +1477,7 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
                 ffbridge_session_player_cache_df_filename = f'{st.session_state.cache_dir}/df-{st.session_state.session_id}-{st.session_state.player_id}.parquet'
                 ffbridge_session_player_cache_df_file = pathlib.Path(ffbridge_session_player_cache_df_filename)
                 if ffbridge_session_player_cache_df_file.exists():
-                    df = pl.read_parquet(ffbridge_session_player_cache_df_file)
+                    df = _cached_read_parquet(str(ffbridge_session_player_cache_df_file))
                     print(f"Loaded {ffbridge_session_player_cache_df_filename}: shape:{df.shape} size:{ffbridge_session_player_cache_df_file.stat().st_size}")
                 else:
                     with st.spinner('Creating ffbridge data to dataframe...'):
