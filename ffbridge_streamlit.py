@@ -61,6 +61,7 @@ import time
 from mlBridgeLib.mlBridgeAugmentLib import (
     AllAugmentations,
 )
+from mlBridgeLib.mlBridgePostmortemLib import PostmortemBase
 #import mlBridgeEndplayLib
 
 # Type definitions for better type checking
@@ -130,54 +131,30 @@ def make_api_request_licencie(full_url: str, headers: Optional[Dict[str, str]] =
         st.error(f"API request failed: {e}")
         return None
 
-def ShowDataFrameTable(df: pl.DataFrame, key: str, query: str = 'SELECT * FROM self', show_sql_query: bool = True) -> Optional[pl.DataFrame]:
-    """Display a DataFrame table in Streamlit with optional SQL query execution
-    
-    Args:
-        df: The Polars DataFrame to display
-        key: Unique key for the Streamlit component
-        query: SQL query to execute on the DataFrame
-        show_sql_query: Whether to display the SQL query text
-        
-    Returns:
-        Result DataFrame from SQL query, or None if query failed
-    """
-    if show_sql_query and st.session_state.show_sql_query:
-        st.text(f"SQL Query: {query}")
-
-    # if query doesn't contain 'FROM self', add 'FROM self ' to the beginning of the query.
-    # can't just check for startswith 'from self'. Not universal because 'from self' can appear in subqueries or after JOIN.
-    # this syntax makes easy work of adding FROM but isn't compatible with polars SQL. duckdb only.
-    if 'from self' not in query.lower():
-        query = 'FROM self ' + query
-
-    # polars SQL has so many issues that it's impossible to use. disabling until 2030.
-    # try:
-    #     # First try using Polars SQL. However, Polars doesn't support some SQL functions: string_agg(), agg_value(), some joins are not supported.
-    #     if True: # workaround issued by polars. CASE WHEN AVG() ELSE AVG() -> AVG(CASE WHEN ...)
-    #         result_df = st.session_state.con.execute(query).pl()
-    #     else:
-    #         result_df = df.sql(query) # todo: enforce FROM self for security concerns?
-    # except Exception as e:
-    #     try:
-    #         # If Polars fails, try DuckDB
-    #         print(f"Polars SQL failed. Trying DuckDB: {e}")
-    #         result_df = st.session_state.con.execute(query).pl()
-    #     except Exception as e2:
-    #         st.error(f"Both Polars and DuckDB SQL engines have failed. Polars error: {e}, DuckDB error: {e2}. Query: {query}")
-    #         return None
-    
-    try:
-        con = get_session_duckdb_connection()
-        result_df = con.execute(query).pl()
+# Legacy function - now handled by the base class
+def ShowDataFrameTable(df: pl.DataFrame, key: str, query: str = 'SELECT * FROM self', show_sql_query: bool = True, height_rows: int = 25) -> Optional[pl.DataFrame]:
+    """Legacy function - use app.ShowDataFrameTable instead"""
+    if 'app' in st.session_state:
+        return st.session_state.app.ShowDataFrameTable(df, key, query, show_sql_query, height_rows)
+    else:
+        # Fallback for backward compatibility
         if show_sql_query and st.session_state.show_sql_query:
-            st.text(f"Result is a dataframe of {len(result_df)} rows.")
-        streamlitlib.ShowDataFrameTable(result_df, key) # requires pandas dataframe.
-    except Exception as e:
-        st.error(f"duckdb exception: error:{e} query:{query}")
-        return None
-    
-    return result_df
+            st.text(f"SQL Query: {query}")
+
+        if 'from self' not in query.lower():
+            query = 'FROM self ' + query
+        
+        try:
+            con = get_session_duckdb_connection()
+            result_df = con.execute(query).pl()
+            if show_sql_query and st.session_state.show_sql_query:
+                st.text(f"Result is a dataframe of {len(result_df)} rows.")
+            streamlitlib.ShowDataFrameTable(result_df, key, height_rows=height_rows)
+        except Exception as e:
+            st.error(f"duckdb exception: error:{e} query:{query}")
+            return None
+        
+        return result_df
 
 
 def game_url_on_change() -> None:
@@ -188,17 +165,21 @@ def game_url_on_change() -> None:
 
 def chat_input_on_submit() -> None:
     """Handle chat input submission and process SQL queries"""
-    prompt = st.session_state.main_prompt_chat_input
-    sql_query = process_prompt_macros(prompt)
-    if not st.session_state.sql_query_mode:
-        st.session_state.sql_query_mode = True
-        st.session_state.sql_queries.clear()
-    st.session_state.sql_queries.append((prompt,sql_query))
-    st.session_state.main_section_container = st.empty()
-    st.session_state.main_section_container = st.container()
-    with st.session_state.main_section_container:
-        for i, (prompt,sql_query) in enumerate(st.session_state.sql_queries):
-            ShowDataFrameTable(st.session_state.df, query=sql_query, key=f'user_query_main_doit_{i}')
+    if 'app' in st.session_state:
+        st.session_state.app.chat_input_on_submit()
+    else:
+        # Fallback for backward compatibility
+        prompt = st.session_state.main_prompt_chat_input
+        sql_query = process_prompt_macros(prompt)
+        if not st.session_state.sql_query_mode:
+            st.session_state.sql_query_mode = True
+            st.session_state.sql_queries.clear()
+        st.session_state.sql_queries.append((prompt,sql_query))
+        st.session_state.main_section_container = st.empty()
+        st.session_state.main_section_container = st.container()
+        with st.session_state.main_section_container:
+            for i, (prompt,sql_query) in enumerate(st.session_state.sql_queries):
+                ShowDataFrameTable(st.session_state.df, query=sql_query, key=f'user_query_main_doit_{i}')
 
 
 def single_dummy_sample_count_on_change() -> None:
@@ -1753,6 +1734,7 @@ def initialize_website_specific() -> None:
         key='intro_message_5',
         logo=st.session_state.assistant_logo
     )
+    app_info()
     return
 
 
@@ -1760,368 +1742,347 @@ def initialize_website_specific() -> None:
 
 
 # this version of perform_hand_augmentations_locked() uses self for class compatibility, older versions did not.
-def perform_hand_augmentations_queue(self, hand_augmentation_work: Any) -> None:
+def perform_hand_augmentations_queue(augmenter_instance, hand_augmentation_work: Any) -> None:
     """Perform hand augmentations queue processing
     
     Args:
+        augmenter_instance: The augmenter instance calling this method
         hand_augmentation_work: Work item for hand augmentation processing
     """
-    return streamlitlib.perform_queued_work(self, hand_augmentation_work, "Hand analysis")
+    if hasattr(st.session_state, 'app') and st.session_state.app:
+        return st.session_state.app.perform_hand_augmentations_queue(augmenter_instance, hand_augmentation_work)
+    else:
+        # Fallback to original behavior
+        sys.path.append(str(pathlib.Path.cwd().joinpath('streamlitlib')))
+        import streamlitlib
+        return streamlitlib.perform_queued_work(augmenter_instance, hand_augmentation_work, "Hand analysis")
 
 
+# Legacy function - now handled by the base class
 def augment_df(df: pl.DataFrame) -> pl.DataFrame:
-    """Augment DataFrame with additional bridge analysis data
-    
-    Args:
-        df: Input DataFrame containing bridge game data
-        
-    Returns:
-        Augmented DataFrame with additional analysis columns
-    """
-    with st.spinner('Augmenting data...'):
-        augmenter = AllAugmentations(df,None,sd_productions=st.session_state.single_dummy_sample_count,progress=st.progress(0),lock_func=perform_hand_augmentations_queue)
-        df, hrs_cache_df = augmenter.perform_all_augmentations()
-    # with st.spinner('Creating hand data...'):
-    #     augmenter = HandAugmenter(df,{},sd_productions=st.session_state.single_dummy_sample_count,progress=st.progress(0),lock_func=perform_hand_augmentations_queue)
-    #     df = augmenter.perform_hand_augmentations()
-    # with st.spinner('Augmenting with result data...'):
-    #     augmenter = ResultAugmenter(df,{})
-    #     df = augmenter.perform_result_augmentations()
-    # with st.spinner('Augmenting with contract data...'):
-    #     augmenter = ScoreAugmenter(df)
-    #     df = augmenter.perform_score_augmentations()
-    # with st.spinner('Augmenting with DD and SD data...'):
-    #     augmenter = DDSDAugmenter(df)
-    #     df = augmenter.perform_dd_sd_augmentations()
-    # with st.spinner('Augmenting with matchpoints and percentages data...'):
-    #     augmenter = MatchPointAugmenter(df)
-    #     df = augmenter.perform_matchpoint_augmentations()
-    return df
+    """Legacy function - use app.augment_df instead"""
+    if 'app' in st.session_state:
+        return st.session_state.app.augment_df(df)
+    else:
+        # Fallback for backward compatibility
+        with st.spinner('Augmenting data...'):
+            augmenter = AllAugmentations(df,None,sd_productions=st.session_state.single_dummy_sample_count,progress=st.progress(0),lock_func=perform_hand_augmentations_queue)
+            df, hrs_cache_df = augmenter.perform_all_augmentations()
+        return df
 
 
+# Legacy function - now handled by the base class
 def read_configs() -> Dict[str, Any]:
-    """Read configuration files and return configuration dictionary
-    
-    Returns:
-        Dictionary containing configuration settings
-    """
-
-    st.session_state.default_favorites_file = pathlib.Path(
-        'default.favorites.json')
-    st.session_state.player_id_custom_favorites_file = pathlib.Path(
-        f'favorites/{st.session_state.player_id}.favorites.json')
-    st.session_state.debug_favorites_file = pathlib.Path(
-        'favorites/debug.favorites.json')
-
-    if st.session_state.default_favorites_file.exists():
-        with open(st.session_state.default_favorites_file, 'r') as f:
-            favorites = json.load(f)
-        st.session_state.favorites = favorites
-        #st.session_state.vetted_prompts = get_vetted_prompts_from_favorites(favorites)
+    """Legacy function - use app.read_configs instead"""
+    if 'app' in st.session_state:
+        return st.session_state.app.read_configs()
     else:
-        st.session_state.favorites = None
+        # Fallback for backward compatibility
+        st.session_state.default_favorites_file = pathlib.Path('default.favorites.json')
+        st.session_state.player_id_custom_favorites_file = pathlib.Path(f'favorites/{st.session_state.player_id}.favorites.json')
+        st.session_state.debug_favorites_file = pathlib.Path('favorites/debug.favorites.json')
 
-    if st.session_state.player_id_custom_favorites_file.exists():
-        with open(st.session_state.player_id_custom_favorites_file, 'r') as f:
-            player_id_favorites = json.load(f)
-        st.session_state.player_id_favorites = player_id_favorites
-    else:
-        st.session_state.player_id_favorites = None
+        if st.session_state.default_favorites_file.exists():
+            with open(st.session_state.default_favorites_file, 'r') as f:
+                favorites = json.load(f)
+            st.session_state.favorites = favorites
+        else:
+            st.session_state.favorites = None
 
-    if st.session_state.debug_favorites_file.exists():
-        with open(st.session_state.debug_favorites_file, 'r') as f:
-            debug_favorites = json.load(f)
-        st.session_state.debug_favorites = debug_favorites
-    else:
-        st.session_state.debug_favorites = None
+        if st.session_state.player_id_custom_favorites_file.exists():
+            with open(st.session_state.player_id_custom_favorites_file, 'r') as f:
+                player_id_favorites = json.load(f)
+            st.session_state.player_id_favorites = player_id_favorites
+        else:
+            st.session_state.player_id_favorites = None
 
-    # display missing prompts in favorites
-    if 'missing_in_summarize' not in st.session_state:
-        # Get the prompts from both locations
-        summarize_prompts = st.session_state.favorites['Buttons']['Summarize']['prompts']
-        vetted_prompts = st.session_state.favorites['SelectBoxes']['Vetted_Prompts']
-
-        # Process the keys to ignore leading '@'
-        st.session_state.summarize_keys = {p.lstrip('@') for p in summarize_prompts}
-        st.session_state.vetted_keys = set(vetted_prompts.keys())
-
-        # Find items in summarize_prompts but not in vetted_prompts. There should be none.
-        st.session_state.missing_in_vetted = st.session_state.summarize_keys - st.session_state.vetted_keys
-        assert len(st.session_state.missing_in_vetted) == 0, f"Oops. {st.session_state.missing_in_vetted} not in {st.session_state.vetted_keys}."
-
-        # Find items in vetted_prompts but not in summarize_prompts. ok if there's some missing.
-        st.session_state.missing_in_summarize = st.session_state.vetted_keys - st.session_state.summarize_keys
-
-        print("\nItems in Vetted_Prompts but not in Summarize.prompts:")
-        for item in st.session_state.missing_in_summarize:
-            print(f"- {item}: {vetted_prompts[item]['title']}")
-    return
-
-
-def process_prompt_macros(sql_query: str) -> str:
-    """Process SQL query macros and replace them with actual values
-    
-    Args:
-        sql_query: Input SQL query string with macros
+        if st.session_state.debug_favorites_file.exists():
+            with open(st.session_state.debug_favorites_file, 'r') as f:
+                debug_favorites = json.load(f)
+            st.session_state.debug_favorites = debug_favorites
+        else:
+            st.session_state.debug_favorites = None
         
-    Returns:
-        Processed SQL query with macros replaced
-    """
-    replacements = {
-        '{Player_Direction}': st.session_state.player_direction,
-        '{Partner_Direction}': st.session_state.partner_direction,
-        '{Pair_Direction}': st.session_state.pair_direction,
-        '{Opponent_Pair_Direction}': st.session_state.opponent_pair_direction
-    }
-    for old, new in replacements.items():
-        if new is None:
-            continue
-        sql_query = sql_query.replace(old, new)
-    return sql_query
+        return getattr(st.session_state, 'favorites', {})
 
 
+# Legacy function - now handled by the base class
+def process_prompt_macros(sql_query: str) -> str:
+    """Legacy function - use app.process_prompt_macros instead"""
+    if 'app' in st.session_state:
+        return st.session_state.app.process_prompt_macros(sql_query)
+    else:
+        # Fallback for backward compatibility
+        replacements = {
+            '{Player_Direction}': getattr(st.session_state, 'player_direction', None),
+            '{Partner_Direction}': getattr(st.session_state, 'partner_direction', None),
+            '{Pair_Direction}': getattr(st.session_state, 'pair_direction', None),
+            '{Opponent_Pair_Direction}': getattr(st.session_state, 'opponent_pair_direction', None)
+        }
+        for old, new in replacements.items():
+            if new is None:
+                continue
+            sql_query = sql_query.replace(old, new)
+        return sql_query
+
+
+# Legacy function - now handled by the base class
 def write_report() -> None:
-    """Write and display the bridge game analysis report"""
-    # bar_format='{l_bar}{bar}' isn't working in stqdm. no way to suppress r_bar without editing stqdm source code.
-    # todo: need to pass the Button title to the stqdm description. this is a hack until implemented.
-    st.session_state.main_section_container = st.container(border=True)
-    with st.session_state.main_section_container:
-        report_title = f"Bridge Game Postmortem Report" # can't use any of '():' because of href link below.
-        report_person = f"Personalized for {st.session_state.player_name} ({st.session_state.player_license_number})"
-        report_creator = f"Created by https://{st.session_state.game_name}.postmortem.chat"
-        report_event_info = f"{st.session_state.organization_name} {st.session_state.game_description} (event id {st.session_state.session_id}) on {datetime.strptime(st.session_state.tournament_date, '%Y-%m-%d').strftime('%d-%b-%Y')} ."
-        report_game_results_webpage = f"ffbridge Results Page: {st.session_state.game_url}"
-        if st.session_state.route_url is not None:
-            report_roy_rene_game_results_webpage = f"Roy Rene Results Page: {st.session_state.route_url}"
-        report_your_match_info = f"Your pair was {st.session_state.team_id} {st.session_state.pair_direction} in section {st.session_state.section_name}. You played {st.session_state.player_direction}. Your partner was {st.session_state.partner_name} ({st.session_state.partner_license_number}) who played {st.session_state.partner_direction}."
-        #st.markdown('<div style="height: 50px;"><a name="top-of-report"></a></div>', unsafe_allow_html=True)
-        st.markdown(f"### {report_title}")
-        st.markdown(f"#### {report_person}")
-        st.markdown(f"##### {report_creator}")
-        st.markdown(f"#### {report_event_info}")
-        st.markdown(f"##### {report_game_results_webpage}")
-        if st.session_state.route_url is not None:
-            st.markdown(f"##### {report_roy_rene_game_results_webpage}")
-        st.markdown(f"#### {report_your_match_info}")
-        pdf_assets = st.session_state.pdf_assets
-        pdf_assets.clear()
-        pdf_assets.append(f"# {report_title}")
-        pdf_assets.append(f"#### {report_person}")
-        pdf_assets.append(f"#### {report_creator}")
-        pdf_assets.append(f"### {report_event_info}")
-        pdf_assets.append(f"#### {report_game_results_webpage}")
-        pdf_assets.append(f"### {report_your_match_info}")
-        st.session_state.button_title = 'Summarize' # todo: generalize to all buttons!
-        selected_button = st.session_state.favorites['Buttons'][st.session_state.button_title]
-        vetted_prompts = st.session_state.favorites['SelectBoxes']['Vetted_Prompts']
-        sql_query_count = 0
-        for stats in stqdm(selected_button['prompts'], desc='Creating personalized report...'):
-            assert stats[0] == '@', stats
-            stat = vetted_prompts[stats[1:]]
-            for i, prompt in enumerate(stat['prompts']):
-                if 'sql' in prompt and prompt['sql']:
-                    #print('sql:',prompt["sql"])
-                    if i == 0:
-                        streamlit_chat.message(f"Morty: {stat['help']}", key=f'morty_sql_query_{sql_query_count}', logo=st.session_state.assistant_logo)
-                        pdf_assets.append(f"### {stat['help']}")
-                    prompt_sql = prompt['sql']
-                    sql_query = process_prompt_macros(prompt_sql)
-                    query_df = ShowDataFrameTable(st.session_state.df, query=sql_query, key=f'sql_query_{sql_query_count}')
-                    if query_df is not None:
-                        pdf_assets.append(query_df)
-                    sql_query_count += 1
-
-        # As an html button (needs styling added)
-        # can't use link_button() restarts page rendering. markdown() will correctly jump to href.
-        # st.link_button('Go to top of report',url='#your-personalized-report')\
-        # report_title_anchor = report_title.replace(' ','-').lower()
-        # Go to top button using simple anchor link (centered)
-        st.markdown('''
-            <div style="text-align: center; margin: 20px 0;">
-                <a href="#top-of-report" style="text-decoration: none;">
-                    <button style="padding: 8px 16px; background-color: #ff4b4b; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
-                        Go to top of report
-                    </button>
-                </a>
-            </div>
-        ''', unsafe_allow_html=True)
-
-    if 'pdf_link' in st.session_state: # shouldn't happen?
-        if st.session_state.pdf_link.download_button(label="Download Personalized Report",
-                data=streamlitlib.create_pdf(st.session_state.pdf_assets, title=f"Bridge Game Postmortem Report Personalized for {st.session_state.player_id}"),
-                file_name = f"{st.session_state.session_id}-{st.session_state.player_id}-morty.pdf",
-                disabled = len(st.session_state.pdf_assets) == 0,
-                mime='application/octet-stream',
-                key='personalized_report_download_button'):
-            st.warning('Personalized report downloaded.')
-        return
+    """Legacy function - use app.write_report instead"""
+    if 'app' in st.session_state:
+        st.session_state.app.write_report()
+    else:
+        # Fallback - use standard report generation
+        st.error("No app instance found for report generation")
 
 
+# Legacy function - now handled by the base class
 def ask_sql_query() -> None:
-    """Handle SQL query input and display results"""
+    """Legacy function - use app.ask_sql_query instead"""
+    if 'app' in st.session_state:
+        st.session_state.app.ask_sql_query()
+    else:
+        # Fallback for backward compatibility
+        if st.session_state.show_sql_query:
+            with st.container():
+                with bottom():
+                    st.chat_input('Enter a SQL query e.g. SELECT PBN, Contract, Result, N, S, E, W', key='main_prompt_chat_input', on_submit=chat_input_on_submit)
 
-    if st.session_state.show_sql_query:
-        with st.container():
-            with bottom():
-                st.chat_input('Enter a SQL query e.g. SELECT PBN, Contract, Result, N, S, E, W', key='main_prompt_chat_input', on_submit=chat_input_on_submit)
 
-
+# Legacy function - now handled by the base class
 def create_ui() -> None:
-    """Create the main user interface"""
-    create_sidebar()
-    if not st.session_state.sql_query_mode:
-        #create_tab_bar()
-        if st.session_state.session_id is not None:
-            write_report()
-    ask_sql_query()
+    """Legacy function - use app.create_ui instead"""
+    if 'app' in st.session_state:
+        st.session_state.app.create_ui()
+    else:
+        # Fallback for backward compatibility
+        create_sidebar()
+        if not st.session_state.sql_query_mode:
+            if st.session_state.session_id is not None:
+                write_report()
+        ask_sql_query()
 
 
+# Legacy function - now handled by the base class
 def get_session_duckdb_connection():
-    """Get or create a DuckDB connection for the current session
-    
-    Returns:
-        duckdb.DuckDBPyConnection: Session-specific DuckDB connection
-    """
-    if 'con' not in st.session_state or st.session_state.con is None:
-        st.session_state.con = duckdb.connect()  # In-memory database per session
-        print(f"Created new DuckDB connection for session")
-    
-    return st.session_state.con
+    """Legacy function - use app.get_session_duckdb_connection instead"""
+    if 'app' in st.session_state:
+        return st.session_state.app.get_session_duckdb_connection()
+    else:
+        # Fallback for backward compatibility
+        if 'con' not in st.session_state or st.session_state.con is None:
+            st.session_state.con = duckdb.connect()
+            print(f"Created new DuckDB connection for session")
+        return st.session_state.con
 
 
+# Legacy function - now handled by the base class
 def initialize_session_state() -> None:
-    """Initialize Streamlit session state variables"""
-    st.set_page_config(layout="wide")
-    # Add this auto-scroll code
-    streamlitlib.widen_scrollbars()
-
-    if platform.system() == 'Windows': # ugh. this hack is required because torch somehow remembers the platform where the model was created. Must be a bug. Must lie to torch.
-        pathlib.PosixPath = pathlib.WindowsPath
-    else:
-        pathlib.WindowsPath = pathlib.PosixPath
-    
-    if 'player_id' in st.query_params:
-        player_id = st.query_params['player_id']
-        if not isinstance(player_id, str):
-            st.error(f'player_id must be a string {player_id}')
-            st.stop()
-        st.session_state.player_id = player_id
-    else:
-        st.session_state.player_id = None
-
-    cache_dir = 'cache'
-    pathlib.Path(cache_dir).mkdir(exist_ok=True, parents=True)
-
-    first_time_defaults = {
-        'first_time': True,
-        'single_dummy_sample_count': 10,
-        'debug_mode': os.getenv('STREAMLIT_ENV') == 'development',
-        'show_sql_query': os.getenv('STREAMLIT_ENV') == 'development',
-        'use_historical_data': False,
-        'do_not_cache_df': True, # todo: set to True for production
-        # 'con' removed from defaults - will be created per-session below
-        'con_register_name': 'self',
-        'main_section_container': st.empty(),
-        'app_datetime': datetime.fromtimestamp(pathlib.Path(__file__).stat().st_mtime, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S %Z'),
-        'current_datetime': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        'cache_dir': cache_dir,
-    }
-    for key, value in first_time_defaults.items():
-        st.session_state[key] = value
-
-    # Create a per-session DuckDB connection to avoid concurrency issues
-    # Each user session gets its own isolated database connection
-    get_session_duckdb_connection()
-
-    initialize_website_specific()
-
-    reset_game_data()
-    return
+    """Legacy function - use app.initialize_session_state instead"""
+    if 'app' not in st.session_state:
+        st.session_state.app = FFBridgeApp()
+    # The app will handle its own initialization
 
 
+# Legacy function - now handled by the base class
 def reset_game_data() -> None:
-    """Reset game data to default values"""
-
-    # Default values for session state variables
-    reset_defaults = {
-        'organization_name_default': None,
-        'game_description_default': None,
-        'group_id_default': None,
-        'session_id_default': None,
-        'section_name_default': None,
-        'player_id_default': None,
-        'partner_id_default': None,
-        'player_license_number_default': '9500754', # default to my license number.
-        'partner_license_number_default': None,
-        'player_name_default': None,
-        'partner_name_default': None,
-        'player_direction_default': None,
-        'partner_direction_default': None,
-        'team_id_default': None,
-        'pair_direction_default': None,
-        'opponent_pair_direction_default': None,
-        'route_url_default': None,
-    }
-    
-    # Initialize default values if not already set
-    for key, value in reset_defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
-    
-    # Initialize additional session state variables that depend on defaults.
-    reset_session_vars = {
-        'df': None,
-        'organization_name': st.session_state.organization_name_default,
-        'game_description': st.session_state.game_description_default,
-        'group_id': st.session_state.group_id_default,
-        'session_id': st.session_state.session_id_default,
-        'section_name': st.session_state.section_name_default,
-        'player_id': st.session_state.player_id_default,
-        'partner_id': st.session_state.partner_id_default,
-        'player_license_number': st.session_state.player_license_number_default,
-        'partner_license_number': st.session_state.partner_license_number_default,
-        'player_name': st.session_state.player_name_default,
-        'partner_name': st.session_state.partner_name_default,
-        'player_direction': st.session_state.player_direction_default,
-        'partner_direction': st.session_state.partner_direction_default,
-        'team_id': st.session_state.team_id_default,
-        'pair_direction': st.session_state.pair_direction_default,
-        'opponent_pair_direction': st.session_state.opponent_pair_direction_default,
-        'route_url': st.session_state.route_url_default,
-        #'sidebar_loaded': False,
-        'analysis_started': False,   # new flag for analysis sidebar rewrite
-        'vetted_prompts': [],
-        'pdf_assets': [],
-        'sql_query_mode': False,
-        'sql_queries': [],
-        'game_urls_d': {},
-        'tournament_session_urls_d': {},
-    }
-    
-    for key, value in reset_session_vars.items():
-        #if key not in st.session_state:
-        st.session_state[key] = value
-
-    return
+    """Legacy function - use app.reset_game_data instead"""
+    if 'app' in st.session_state:
+        st.session_state.app.reset_game_data()
+    # Otherwise, the app will handle its own reset
 
 
 def app_info() -> None:
-    """Display application information and version details"""
+    """Display app information"""
     st.caption(f"Project lead is Robert Salita research@AiPolice.org. Code written in Python. UI written in streamlit. Data engine is polars. Query engine is duckdb. Bridge lib is endplay. Self hosted using Cloudflare Tunnel. Repo:https://github.com/BSalita/ffbridge-postmortem")
-    st.caption(
-        f"App:{st.session_state.app_datetime} Python:{'.'.join(map(str, sys.version_info[:3]))} Streamlit:{st.__version__} Pandas:{pd.__version__} polars:{pl.__version__} endplay:{endplay.__version__} Query Params:{st.query_params.to_dict()}")
+    st.caption(f"App:{st.session_state.app_datetime} Streamlit:{st.__version__} Query Params:{st.query_params.to_dict()} Environment:{os.getenv('STREAMLIT_ENV','')}")
+    st.caption(f"Python:{'.'.join(map(str, sys.version_info[:3]))} pandas:{pd.__version__} polars:{pl.__version__} endplay:{endplay.__version__}")
     return
 
 
 def main() -> None:
     """Main application entry point"""
-    if 'first_time' not in st.session_state:
-        initialize_session_state()
-        create_sidebar()
-    else:
-        create_ui()
+    if 'app' not in st.session_state:
+        st.session_state.app = FFBridgeApp()
+    st.session_state.app.main()
     return
 
+
+class FFBridgeApp(PostmortemBase):
+    """FFBridge Streamlit application."""
+    
+    def __init__(self):
+        super().__init__()
+        # App-specific initialization
+    
+    def initialize_session_state(self):
+        """Initialize FFBridge-specific session state."""
+        # First initialize common session state
+        self.initialize_common_session_state()
+        
+        # FFBridge-specific initialization
+        if 'player_id' in st.query_params:
+            player_id = st.query_params['player_id']
+            if not isinstance(player_id, str):
+                st.error(f'player_id must be a string {player_id}')
+                st.stop()
+            st.session_state.player_id = player_id
+        else:
+            st.session_state.player_id = None
+
+        cache_dir = 'cache'
+        pathlib.Path(cache_dir).mkdir(exist_ok=True, parents=True)
+        st.session_state.cache_dir = cache_dir
+
+        # Initialize FFBridge Bearer Token
+        initialize_ffbridge_bearer_token()
+        
+        # Initialize website-specific components
+        self.initialize_website_specific()
+        self.reset_game_data()
+        
+    def reset_game_data(self):
+        """Reset FFBridge-specific game data."""
+        # First reset common game data
+        self.reset_common_game_data()
+        
+        # FFBridge-specific defaults
+        ffbridge_defaults = {
+            'organization_name_default': None,
+            'team_id_default': None,
+            'player_license_number_default': '9500754',  # default to my license number
+            'partner_license_number_default': None,
+            'route_url_default': None,
+        }
+        
+        for key, value in ffbridge_defaults.items():
+            if key not in st.session_state:
+                st.session_state[key] = value
+        
+        # FFBridge-specific session variables
+        ffbridge_session_vars = {
+            'organization_name': st.session_state.organization_name_default,
+            'team_id': st.session_state.team_id_default,
+            'player_license_number': st.session_state.player_license_number_default,
+            'partner_license_number': st.session_state.partner_license_number_default,
+            'route_url': st.session_state.route_url_default,
+            'game_urls_d': {},
+            'person_organization_id': None,
+            'nb_deals': None,
+        }
+        
+        for key, value in ffbridge_session_vars.items():
+            st.session_state[key] = value
+
+    def initialize_website_specific(self):
+        """Initialize FFBridge-specific components."""
+        st.session_state.assistant_logo = 'https://github.com/BSalita/ffbridge-postmortem/blob/master/assets/logo_assistant.gif?raw=true'
+        st.session_state.guru_logo = 'https://github.com/BSalita/ffbridge-postmortem/blob/master/assets/logo_guru.png?raw=true'
+        st.session_state.game_name = 'ffbridge'
+        
+        # Initialize paths
+        st.session_state.rootPath = pathlib.Path('e:/bridge/data')
+        st.session_state.ffbridgePath = st.session_state.rootPath.joinpath('ffbridge')
+        st.session_state.savedModelsPath = st.session_state.rootPath.joinpath('SavedModels')
+
+        # Display intro messages
+        streamlit_chat.message(
+            "Hi. I'm Morty. Your friendly postmortem chatbot. I only want to chat about ffbridge pair matchpoint games using a Mitchell movement and not shuffled.",
+            key='intro_message_1',
+            logo=st.session_state.assistant_logo
+        )
+        streamlit_chat.message(
+            "I'm optimized for large screen devices such as a notebook or monitor. Do not use a smartphone.",
+            key='intro_message_2',
+            logo=st.session_state.assistant_logo
+        )
+        streamlit_chat.message(
+            "To start our postmortem chat, I'll need the a player number of your ffbridge game. It will be the subject of our chat.",
+            key='intro_message_3',
+            logo=st.session_state.assistant_logo
+        )
+        streamlit_chat.message(
+            "Enter the player number in the left sidebar or just re-enter the default player number. Press the enter key to begin.",
+            key='intro_message_4',
+            logo=st.session_state.assistant_logo
+        )
+        streamlit_chat.message(
+            "I'm just a Proof of Concept so don't double me.",
+            key='intro_message_5',
+            logo=st.session_state.assistant_logo
+        )
+        app_info()
+
+    def create_sidebar(self):
+        """Create FFBridge-specific sidebar."""
+        st.sidebar.caption(f"Build:{st.session_state.app_datetime}")
+
+        st.sidebar.text_input(
+            "Enter ffbridge player license number", 
+            on_change=player_search_input_on_change, 
+            placeholder=st.session_state.player_license_number, 
+            key='player_search_input'
+        )
+
+        if st.session_state.player_id is None:
+            return
+
+        if st.session_state.player_id in st.session_state.game_urls_d:
+            st.sidebar.selectbox(
+                "Choose a club game.", 
+                index=0, 
+                options=[f"{k}, {v['description']}" for k, v in st.session_state.game_urls_d[st.session_state.player_id].items()], 
+                on_change=club_session_id_on_change, 
+                key='club_session_ids_selectbox'
+            )
+        
+        self.read_configs()
+
+        st.sidebar.link_button('View ffbridge Webpage', url=st.session_state.get('game_url', ''))
+        if st.session_state.get('route_url') is not None:
+            st.sidebar.link_button('View Roy Rene Webpage', url=st.session_state.route_url)
+        st.session_state.pdf_link = st.sidebar.empty()
+
+        with st.sidebar.expander('Developer Settings', False):
+            st.number_input(
+                "Single Dummy Samples Count",
+                min_value=1,
+                max_value=100,
+                value=st.session_state.single_dummy_sample_count,
+                on_change=single_dummy_sample_count_on_change,
+                key='single_dummy_sample_count_number_input'
+            )
+
+            if st.button('Clear Cache', help='Clear cached files'):
+                clear_cache()
+
+            if st.session_state.debug_favorites is not None:
+                st.session_state.debug_player_id_names = st.session_state.debug_favorites[
+                    'SelectBoxes']['Player_IDs']['options']
+                if len(st.session_state.debug_player_id_names):
+                    st.selectbox(
+                        "Debug Player List", 
+                        options=st.session_state.debug_player_id_names, 
+                        placeholder=st.session_state.player_id,
+                        on_change=debug_player_id_names_change, 
+                        key='debug_player_id_names_selectbox'
+                    )
+
+            st.checkbox(
+                'Show SQL Query',
+                value=st.session_state.show_sql_query,
+                key='show_sql_query_checkbox',
+                on_change=sql_query_on_change,
+                help='Show SQL used to query dataframes.'
+            )
+
+            st.checkbox(
+                'Enable Debug Mode',
+                value=st.session_state.debug_mode,
+                key='debug_mode_checkbox',
+                on_change=debug_mode_on_change,
+                help='Show SQL used to query dataframes.'
+            )
 
 def initialize_ffbridge_bearer_token() -> None:
     """Initialize FFBridge Bearer token from .env file or environment variables"""
