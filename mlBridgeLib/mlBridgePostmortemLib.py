@@ -265,7 +265,7 @@ class PostmortemBase(ABC):
             pathlib.WindowsPath = pathlib.PosixPath
         
         # Common session state defaults
-        streamlit_envs = os.getenv('STREAMLIT_ENV').split(',')
+        streamlit_envs = os.getenv('STREAMLIT_ENV', '').split(',') if os.getenv('STREAMLIT_ENV') else []
         first_time_defaults = {
             'first_time': True,
             'single_dummy_sample_count': 10,
