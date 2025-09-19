@@ -2084,6 +2084,13 @@ class FFBridgeApp(PostmortemBase):
                 help='Show SQL used to query dataframes.'
             )
 
+        # Automated Postmortem Apps
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("**Automated Postmortem Apps**")
+        st.sidebar.markdown("🔗 [ACBL Postmortem](https://acbl.postmortem.chat)")
+        st.sidebar.markdown("🔗 [French ffbridge Postmortem](https://ffbridge.postmortem.chat)")
+        #st.sidebar.markdown("🔗 [BridgeWebs Postmortem](https://bridgewebs.postmortem.chat)")
+
 def initialize_ffbridge_bearer_token() -> None:
     """Initialize FFBridge Bearer token from .env file or environment variables"""
     
