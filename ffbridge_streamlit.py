@@ -19,6 +19,7 @@ import streamlit as st
 import streamlit_chat
 from streamlit_extras.bottom_container import bottom
 from stqdm import stqdm
+# from streamlit_autocomplete.autocomplete import st_textcomplete_autocomplete  # Not working as expected
 
 
 import pathlib
@@ -201,13 +202,8 @@ def debug_mode_on_change() -> None:
     #st.session_state.sql_query_mode = False # don't alter sql query mode.
 
 
-def group_id_on_change() -> None:
-    """Handle group ID input change event"""
-    st.session_state.sql_query_mode = False
-
-
-def session_id_on_change() -> None:
-    """Handle session ID input change event"""
+def generic_input_on_change() -> None:
+    """Generic handler for input change events that disable SQL query mode"""
     st.session_state.sql_query_mode = False
 
 
@@ -217,29 +213,14 @@ def debug_player_id_names_change() -> None:
     change_game_state(player_id_name[0], None)
 
 
-def team_id_on_change() -> None:
-    """Handle team ID input change event"""
-    st.session_state.sql_query_mode = False
-
-
-def simultane_id_on_change() -> None:
-    """Handle simultane ID input change event"""
-    st.session_state.sql_query_mode = False
-
-
-def teams_id_on_change() -> None:
-    """Handle teams ID input change event"""
-    st.session_state.sql_query_mode = False
-
-
-def org_id_on_change() -> None:
-    """Handle organization ID input change event"""
-    st.session_state.sql_query_mode = False
-
-
-def player_license_number_on_change() -> None:
-    """Handle player license number input change event"""
-    st.session_state.sql_query_mode = False
+# Legacy callback aliases - all delegate to generic handler
+group_id_on_change = generic_input_on_change
+session_id_on_change = generic_input_on_change  
+team_id_on_change = generic_input_on_change
+simultane_id_on_change = generic_input_on_change
+teams_id_on_change = generic_input_on_change
+org_id_on_change = generic_input_on_change
+player_license_number_on_change = generic_input_on_change
 
 
 def clear_cache() -> None:
@@ -1013,7 +994,7 @@ def get_ffbridge_licencie_get_urls(api_urls_d: Dict[str, Tuple[str, bool]]) -> T
 
 def change_game_state(player_id: str, session_id: str) -> None: # todo: rename to session_id?
 
-    print(f"Retrieving latest results for {player_id}")
+    print(f"=== change_game_state START: player_id={player_id}, session_id={session_id} ===")
 
     st.markdown('<div style="height: 50px;"><a name="top-of-report"></a></div>', unsafe_allow_html=True)
 
@@ -1031,15 +1012,41 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
                     'members': (f"https://api.ffbridge.fr/api/v1/members/{player_id}", False),
                     'person': (f"https://api.ffbridge.fr/api/v1/licensee-results/results/person/{player_id}?date=all&place=0&type=0", False),
                 }
-                dfs, api_urls_d = get_ffbridge_licencie_get_urls(api_urls_d)
-                st.session_state.game_urls_d[player_id] = {k:v for k,v in zip(dfs['person']['tournament_id'], dfs['person'].to_dicts())}
-                st.session_state.person_organization_id = dfs['members']['seasons_organization_id'] # person's signup organization id e.g. 1212 for St Honore BC
+                try:
+                    dfs, api_urls_d = get_ffbridge_licencie_get_urls(api_urls_d)
+                    
+                    # Debug: Check what columns are available in the person DataFrame
+                    if st.session_state.get('debug_mode', False):
+                        print(f"Person DataFrame columns: {dfs['person'].columns}")
+                        print(f"Person DataFrame shape: {dfs['person'].shape}")
+                    
+                    # Handle missing tournament_id column gracefully
+                    if 'tournament_id' in dfs['person'].columns:
+                        st.session_state.game_urls_d[player_id] = {k:v for k,v in zip(dfs['person']['tournament_id'], dfs['person'].to_dicts())}
+                    else:
+                        # Try alternative column names or use a different approach
+                        if 'id' in dfs['person'].columns:
+                            st.session_state.game_urls_d[player_id] = {k:v for k,v in zip(dfs['person']['id'], dfs['person'].to_dicts())}
+                        elif len(dfs['person']) > 0:
+                            # Use row index as key if no suitable ID column found
+                            st.session_state.game_urls_d[player_id] = {i:v for i,v in enumerate(dfs['person'].to_dicts())}
+                        else:
+                            st.session_state.game_urls_d[player_id] = {}
+                    
+                    st.session_state.person_organization_id = dfs['members']['seasons_organization_id'] # person's signup organization id e.g. 1212 for St Honore BC
+                    
+                except Exception as e:
+                    print(f"Error loading player data for {player_id}: {e}")
+                    st.error(f"Error loading player data: {str(e)}")
+                    st.session_state.game_urls_d[player_id] = {}
+                    return True  # Return True to indicate error
         game_urls = st.session_state.game_urls_d[player_id]
         if game_urls is None:
             st.error(f"Player number {player_id} not found.")
-            return False
+            return True  # Return True to indicate error
         if len(game_urls) == 0:
             st.error(f"Could not find any games for {player_id}.")
+            return True  # Return error if no games found
         elif session_id is None:
             iterator = iter(game_urls)
             #next(iterator)  # Skip first
@@ -1484,6 +1491,7 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
             con.register('self', st.session_state.df)
             print(f"st.session_state.df:{st.session_state.df.columns}")
 
+    print(f"=== change_game_state END: SUCCESS - player_id={st.session_state.player_id}, session_id={st.session_state.session_id} ===")
     return False
 
 
@@ -1495,20 +1503,172 @@ def on_game_url_input_change() -> None:
         reset_game_data()
 
 
-def player_search_input_on_change() -> None:
-    # todo: looks like there's some situation where this is not called because player_search_input is already set. Need to breakpoint here to determine why st.session_state.player_id isn't updated.
-    # assign changed textbox value (player_search_input) to player_id
-    player_search_input = st.session_state.player_search_input
-    api_urls_d = {
-        'search': (f"https://api.ffbridge.fr/api/v1/search-members?alive=1&search={player_search_input}", False),
-    }
-    dfs, api_urls_d = get_ffbridge_data_using_url_licencie(api_urls_d, show_progress=False)
-    if len(dfs['search']) == 0:
+@st.dialog("Select Player")
+def show_player_selection_modal(filtered_options):
+    """Show modal dialog with radio buttons and Select button"""
+    st.write(f"Found {len(filtered_options)} match(es). Select a player:")
+    
+    # Radio buttons for selection
+    selected_option = st.radio(
+        "Players:",
+        options=filtered_options,
+        index=None,
+        key='modal_player_radio',
+        label_visibility="collapsed"
+    )
+    
+    # Action buttons
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("Select", disabled=selected_option is None, use_container_width=True, type="primary"):
+            if selected_option:
+                # Find the actual player_id for the selected option
+                if hasattr(st.session_state, 'player_search_matches'):
+                    for display_text, player_id, license_number, player_name in st.session_state.player_search_matches:
+                        if display_text == selected_option:
+                            # Update only the value state (not the widget state directly)
+                            st.session_state.player_search_value = str(license_number)
+                            
+                            # Clear dialog state to dismiss dialog
+                            if hasattr(st.session_state, 'player_search_matches'):
+                                del st.session_state.player_search_matches
+                            if hasattr(st.session_state, 'player_search_error'):
+                                del st.session_state.player_search_error
+                            # Clear the modal flag as well
+                            if hasattr(st.session_state, 'show_player_modal'):
+                                del st.session_state.show_player_modal
+                            
+                            # Rerun to update the textbox and dismiss dialog
+                            st.rerun()
+                            return
+                
+    with col2:
+        if st.button("Cancel", use_container_width=True):
+            # Clear dialog state immediately (like X button does)
+            if hasattr(st.session_state, 'player_search_matches'):
+                del st.session_state.player_search_matches
+            if hasattr(st.session_state, 'player_search_error'):
+                del st.session_state.player_search_error
+            # Clear the modal flag as well
+            if hasattr(st.session_state, 'show_player_modal'):
+                del st.session_state.show_player_modal
+            # Use st.stop() to await the clearing of the UI dismissal queue
+            st.stop()
+
+
+def player_search_input_on_change_with_query(query: str) -> None:
+    """Handle player search with a specific query string"""
+    
+    if not query or not query.strip():
+        # Clear any existing search state when input is empty
+        if hasattr(st.session_state, 'player_search_matches'):
+            del st.session_state.player_search_matches
+        if hasattr(st.session_state, 'player_search_error'):
+            del st.session_state.player_search_error
         return
-    assert len(dfs['search']) == 1, f"Expected 1 row, got {len(dfs['search'])}"
-    player_id = dfs['search']['person_id'][0] # todo: remove this?
-    change_game_state(player_id, None)
-    st.session_state.sql_query_mode = False
+    
+    # Only search if we have at least 4 characters (to avoid premature searches)
+    if len(query.strip()) < 4:
+        return
+        
+    try:
+        api_urls_d = {
+            'search': (f"https://api.ffbridge.fr/api/v1/search-members?alive=1&search={query}", False),
+        }
+        dfs, api_urls_d = get_ffbridge_data_using_url_licencie(api_urls_d, show_progress=False)
+        
+        if len(dfs['search']) == 0:
+            # Store error message in session state to persist across reruns
+            st.session_state.player_search_error = f"Player number '{query}' not found. Please check the number and try again."
+            # Reset player_id to None to ensure Morty instructions are shown
+            st.session_state.player_id = None
+            return
+            
+        if len(dfs['search']) > 1:
+            # If input is more than 3 characters, show matches in selectbox
+            if len(query.strip()) > 3:
+                # Store matches for selectbox display
+                matches = []
+                for row in dfs['search'].iter_rows(named=True):
+                    # Debug: Print available columns and values
+                    if st.session_state.get('debug_mode', False):
+                        print(f"Available columns: {list(row.keys())}")
+                        print(f"Row data: {row}")
+                    
+                    # Try different possible field names for firstname/lastname
+                    firstname = row.get('person_firstname', '') or row.get('firstname', '') or row.get('first_name', '')
+                    lastname = row.get('person_lastname', '') or row.get('lastname', '') or row.get('last_name', '')
+                    player_name = f"{firstname} {lastname}".strip()
+                    
+                    # Try different possible field names for license number
+                    license_number = row.get('person_license_number', '') or row.get('license_number', '') or row.get('licenseNumber', '')
+                    
+                    # Try different possible field names for player ID
+                    player_id = row.get('person_id', '') or row.get('id', '') or row.get('player_id', '')
+                    
+                    # Format: "First Last - number" - compact display for narrow selectbox
+                    if player_name.strip() and license_number:
+                        display_text = f"{player_name} - {license_number}"
+                    elif player_name.strip():
+                        display_text = f"{player_name} - {player_id}"
+                    elif license_number:
+                        display_text = f"License: {license_number}"
+                    else:
+                        display_text = f"Player ID: {player_id}"
+                    
+                    matches.append((display_text, player_id, license_number, player_name))
+                
+                st.session_state.player_search_matches = matches
+                # Store the search query for display in selectbox (strip whitespace)
+                st.session_state.player_search_query = query.strip()
+                
+                # Debug: Show what matches were created
+                if st.session_state.get('debug_mode', False):
+                    print(f"Created {len(matches)} matches:")
+                    for i, (display_text, player_id, license_number, player_name) in enumerate(matches):
+                        print(f"  Match {i}: '{display_text}' (ID: {player_id})")
+                
+                # Clear any error message since we're showing the selectbox instead
+                if hasattr(st.session_state, 'player_search_error'):
+                    del st.session_state.player_search_error
+                # Don't reset player_id here - we want to keep current state and show modal
+                # Set a flag to show modal on next run (after this search processing completes)
+                st.session_state.show_player_modal = True
+                return
+            else:
+                # For short inputs, don't show error - let user continue typing
+                # Clear any previous error message since we're not showing selectbox
+                if hasattr(st.session_state, 'player_search_error'):
+                    del st.session_state.player_search_error
+                # Don't reset player_id here either - just return
+                return
+            
+        player_id = dfs['search']['person_id'][0]
+        # Clear any previous error message and matches on successful search
+        if hasattr(st.session_state, 'player_search_error'):
+            del st.session_state.player_search_error
+        if hasattr(st.session_state, 'player_search_matches'):
+            del st.session_state.player_search_matches
+        change_game_state(player_id, None)
+        st.session_state.sql_query_mode = False
+        
+    except Exception as e:
+        # Store error message in session state to persist across reruns
+        st.session_state.player_search_error = f"Error searching for player '{query}': {str(e)}"
+        # Clear any previous matches
+        if hasattr(st.session_state, 'player_search_matches'):
+            del st.session_state.player_search_matches
+        # Reset player_id to None to ensure Morty instructions are shown
+        st.session_state.player_id = None
+
+
+def player_search_input_on_change() -> None:
+    """Handle player search input change - delegates to helper function"""
+    player_search_input = st.session_state.player_search_input
+    # Sync the value state with the input
+    st.session_state.player_search_value = player_search_input
+    player_search_input_on_change_with_query(player_search_input)
 
 
 
@@ -1524,170 +1684,22 @@ def club_session_id_on_change() -> None:
 
 
 def create_sidebar() -> None:
-    """Create the main sidebar interface"""
-
-    st.sidebar.caption(st.session_state.app_datetime)
-
-    st.sidebar.text_input(
-        "Enter ffbridge player license number", on_change=player_search_input_on_change, placeholder=st.session_state.player_license_number, key='player_search_input')
-
-    if st.session_state.player_id is None:
-        return
-
-    st.sidebar.selectbox("Choose a club game.", index=0, options=[f"{k}, {v['description']}" for k, v in st.session_state.game_urls_d[st.session_state.player_id].items(
-    )], on_change=club_session_id_on_change, key='club_session_ids_selectbox')  # options are event_id + event description
-    
-    read_configs()
-
-    st.sidebar.link_button('View ffbridge Webpage', url=st.session_state.game_url)
-    if st.session_state.route_url is not None:
-        st.sidebar.link_button('View Roy Rene Webpage', url=st.session_state.route_url)
-    st.session_state.pdf_link = st.sidebar.empty()
-
-    # create_sidebar_ffbridge_licencie()? create_sidebar_ffbridge_licencie()? neither?
-
-    with st.sidebar.expander('Developer Settings', False):
-
-        # don't use st.sidebar... in expander.
-        st.number_input(
-            "Single Dummy Samples Count",
-            min_value=1,
-            max_value=100,
-            value=st.session_state.single_dummy_sample_count,
-            on_change=single_dummy_sample_count_on_change,
-            key='single_dummy_sample_count_number_input'
+    """Legacy function - use app.create_sidebar instead"""
+    if 'app' in st.session_state:
+        st.session_state.app.create_sidebar()
+    else:
+        # Fallback for backward compatibility - basic sidebar
+        st.sidebar.caption(st.session_state.get('app_datetime', ''))
+        st.sidebar.text_input(
+            "Enter ffbridge license number", 
+            on_change=player_search_input_on_change, 
+            placeholder=st.session_state.get('player_license_number', ''), 
+            key='player_search_input', 
+            help="Enter ffbridge license number or (partial) last name."
         )
 
-        if st.button('Clear Cache', help='Clear cached files'):
-            clear_cache()
 
-        if st.session_state.debug_favorites is not None:
-            # favorite prompts selectboxes
-            st.session_state.debug_player_id_names = st.session_state.debug_favorites[
-                'SelectBoxes']['Player_IDs']['options']
-            if len(st.session_state.debug_player_id_names):
-                # changed placeholder to player_id because when selectbox gets reset, possibly due to expander auto-collapsing, we don't want an unexpected value.
-                # test player_id is not None else use debug_favorites['SelectBoxes']['player_ids']['placeholder']?
-                st.selectbox("Debug Player List", options=st.session_state.debug_player_id_names, placeholder=st.session_state.player_id, #.debug_favorites['SelectBoxes']['player_ids']['placeholder'],
-                                        on_change=debug_player_id_names_change, key='debug_player_id_names_selectbox')
-
-        st.checkbox(
-            'Show SQL Query',
-            value=st.session_state.show_sql_query,
-            key='show_sql_query_checkbox',
-            on_change=sql_query_on_change,
-            help='Show SQL used to query dataframes.'
-        )
-
-        st.checkbox(
-            'Enable Debug Mode',
-            value=st.session_state.debug_mode,
-            key='debug_mode_checkbox',
-            on_change=debug_mode_on_change,
-            help='Show SQL used to query dataframes.'
-        )
-
-    return
-
-
-# disabled for now. not sure if needed. maybe show in developer settings?
-def create_sidebar_ffbridge_licencie() -> None:
-    """Create sidebar for FFBridge licencie interface"""
-    # st.session_state.simultane_id = 34424 # simultane id for the game
-    # st.session_state.team_id = 4818526 # team id for the game
-    # st.session_state.org_id = 1634 # e.g. 1634 is Levallois-Perret
-    # st.session_state.player_id = 597539 # both player_id and person
-    # st.session_state.person_organization_id = 1212 # e.g. is the person's signup organization id e.g. 1212 for St Honore BC
-    print(f"{st.session_state.simultane_id=} {st.session_state.team_id=} {st.session_state.org_id=} {st.session_state.player_id=} {st.session_state.person_organization_id=}")
-
-    # Provide a "Load Game URL" button.
-    # if st.sidebar.button("Analyze Game"):
-    #     st.session_state.sql_query_mode = False
-    #     if change_game_state(st.session_state.player_id, None):
-    #         st.session_state.game_url_default = ''
-    #         reset_game_data()
-    # st.sidebar.link_button('View Game Webpage', url=st.session_state.game_url)
-    # st.session_state.pdf_link = st.sidebar.empty()
-    st.sidebar.markdown("#### Game Retrival Settings")
-    st.session_state.group_id = st.sidebar.number_input(
-        'simultane_id',
-        value=st.session_state.simultane_id,
-        key='sidebar_simultane_id',
-        on_change=simultane_id_on_change,
-        help='Enter ffbridge simultane_id. e.g. 34424'
-    )
-    st.session_state.team_id = st.sidebar.number_input(
-        'teams_id',
-        value=st.session_state.team_id,
-        key='sidebar_teams_id',
-        on_change=teams_id_on_change,
-        help='Enter ffbridge teams id. e.g. 4818526'
-    )
-    st.session_state.org_id = st.sidebar.number_input(
-        'org_id',
-        value=st.session_state.org_id,
-        key='sidebar_org_id',
-        on_change=org_id_on_change,
-        help='Enter ffbridge org id. e.g. 1634'
-    )
-    st.session_state.org_id = st.sidebar.text_input(
-        'player_license_number',
-        value=st.session_state.player_license_number,
-        key='sidebar_player_license_number',
-        on_change=player_license_number_on_change,
-        help='Enter ffbridge player license id. e.g. 9500754'
-    )
-
-    if st.session_state.player_id is None: # todo: not quite right. value is not updated with player_id if previously None. unsure why.
-        return
-
-    return
-
-
-# disabled for now. not sure if needed. maybe show in developer settings? Only show setting as read-only?
-def create_sidebar_ffbridge() -> None:
-    """Create sidebar for FFBridge interface"""
-
-    # if extract_group_id_session_id_team_id():
-    #     st.error("Invalid game URL. Please enter a valid game URL.")
-    #     return
-
-    # # Provide a "Load Game URL" button.
-    # if st.sidebar.button("Analyze Game"):
-    #     st.session_state.sql_query_mode = False
-    #     if change_game_state(st.session_state.player_id, None):
-    #         st.session_state.game_url_default = ''
-    #         reset_game_data()
-
-    # When the full sidebar is to be shown:
-    # --- Check if the "Analyze Game" button has been hit ---
-    #if not st.session_state.analysis_started:
-    # st.sidebar.link_button('View Game Webpage', url=st.session_state.game_url)
-    # st.session_state.pdf_link = st.sidebar.empty()
-    st.sidebar.markdown("#### Game Retrival Settings")
-    st.session_state.group_id = st.sidebar.number_input(
-        'Group ID',
-        value=st.session_state.group_id,
-        key='sidebar_group_id',
-        on_change=group_id_on_change,
-        help='Enter ffbridge group id. e.g. 7878 for Bridge Club St. Honore'
-    )
-    st.session_state.session_id = st.sidebar.number_input(
-        'Session ID',
-        value=st.session_state.session_id,
-        key='sidebar_session_id',
-        on_change=session_id_on_change,
-        help='Enter ffbridge session id. e.g. 107118'
-    )
-    
-    st.session_state.team_id = st.sidebar.number_input(
-        'Pairs ID',
-        value=st.session_state.team_id,
-        key='sidebar_team_id',
-        on_change=team_id_on_change,
-        help='Enter ffbridge pairs id. e.g. 3976783'
-    )
-    return
+# Legacy functions removed - functionality moved to class-based approach
 
 
 def initialize_website_specific() -> None:
@@ -1985,44 +1997,158 @@ class FFBridgeApp(PostmortemBase):
         st.session_state.ffbridgePath = st.session_state.rootPath.joinpath('ffbridge')
         st.session_state.savedModelsPath = st.session_state.rootPath.joinpath('SavedModels')
 
-        # Display intro messages
-        streamlit_chat.message(
-            "Hi. I'm Morty. Your friendly postmortem chatbot. I only want to chat about ffbridge pair matchpoint games using a Mitchell movement and not shuffled.",
-            key='intro_message_1',
-            logo=st.session_state.assistant_logo
-        )
-        streamlit_chat.message(
-            "I'm optimized for large screen devices such as a notebook or monitor. Do not use a smartphone.",
-            key='intro_message_2',
-            logo=st.session_state.assistant_logo
-        )
-        streamlit_chat.message(
-            "To start our postmortem chat, I'll need the a player number of your ffbridge game. It will be the subject of our chat.",
-            key='intro_message_3',
-            logo=st.session_state.assistant_logo
-        )
-        streamlit_chat.message(
-            "Enter the player number in the left sidebar or just re-enter the default player number. Press the enter key to begin.",
-            key='intro_message_4',
-            logo=st.session_state.assistant_logo
-        )
-        streamlit_chat.message(
-            "I'm just a Proof of Concept so don't double me.",
-            key='intro_message_5',
-            logo=st.session_state.assistant_logo
-        )
-        app_info()
+        # Intro messages are now displayed in create_ui() when player_id is None
+
+    def create_ui(self):
+        """Creates the main UI structure for FFBridge."""
+        self.create_sidebar()
+        if not st.session_state.sql_query_mode:
+            # Show Morty instructions if no player is selected
+            if st.session_state.player_id is None:
+                # Display intro messages when no player is selected
+                with st.session_state.main_section_container.container():
+                    # Display any persistent error message first
+                    if hasattr(st.session_state, 'player_search_error'):
+                        st.error(st.session_state.player_search_error)
+                    
+                    streamlit_chat.message(
+                        "Hi. I'm Morty. Your friendly postmortem chatbot. I only want to chat about ffbridge pair matchpoint games using a Mitchell movement and not shuffled.",
+                        key='intro_message_1',
+                        logo=st.session_state.assistant_logo
+                    )
+                    streamlit_chat.message(
+                        "I'm optimized for large screen devices such as a notebook or monitor. Do not use a smartphone.",
+                        key='intro_message_2',
+                        logo=st.session_state.assistant_logo
+                    )
+                    streamlit_chat.message(
+                        "To start our postmortem chat, I'll need the a player number of your ffbridge game. It will be the subject of our chat.",
+                        key='intro_message_3',
+                        logo=st.session_state.assistant_logo
+                    )
+                    streamlit_chat.message(
+                        "Enter the player number in the left sidebar or just re-enter the default player number. Press the enter key to begin.",
+                        key='intro_message_4',
+                        logo=st.session_state.assistant_logo
+                    )
+                    streamlit_chat.message(
+                        "I'm just a Proof of Concept so don't double me.",
+                        key='intro_message_5',
+                        logo=st.session_state.assistant_logo
+                    )
+                    app_info()
+            elif st.session_state.session_id is not None:
+                try:
+                    print(f"Starting report generation for player_id={st.session_state.player_id}, session_id={st.session_state.session_id}")
+                    self.write_report()
+                    print(f"Report generation completed successfully")
+                except Exception as e:
+                    print(f"Exception during report generation: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    st.error(f"Error generating report: {str(e)}")
+                    # Reset to initial state on error
+                    st.session_state.player_id = None
+                    st.session_state.session_id = None
+                    st.rerun()
+        self.ask_sql_query()
 
     def create_sidebar(self):
         """Create FFBridge-specific sidebar."""
+        
+        # Process Go button input OUTSIDE sidebar context (so output goes to main window)
+        if hasattr(st.session_state, 'process_go_button_input'):
+            input_value = st.session_state.process_go_button_input
+            del st.session_state.process_go_button_input
+            
+            # Processing Go button input in main context (so output goes to main window)
+            
+            # If it's a license number (numeric), look up the player and generate report
+            if input_value.isdigit():
+                try:
+                    # Make API call to find the player by license number
+                    api_urls_d = {
+                        'search': (f"https://api.ffbridge.fr/api/v1/search-members?alive=1&search={input_value}", False),
+                    }
+                    dfs, api_urls_d = get_ffbridge_data_using_url_licencie(api_urls_d, show_progress=False)
+                    
+                    if len(dfs['search']) == 0:
+                        st.error(f"License number '{input_value}' not found.")
+                    elif len(dfs['search']) == 1:
+                        # Exactly one player found - get their player ID
+                        row = list(dfs['search'].iter_rows(named=True))[0]
+                        player_id = row['person_id']  # This is the actual player ID
+                        
+                        # Generate report with player ID (not license number)
+                        result = change_game_state(str(player_id), None)
+                        if not result:  # False means success
+                            st.session_state.sql_query_mode = False
+                            st.rerun()
+                            return
+                        else:
+                            st.error(f"Error loading player data for license {input_value}")
+                    else:
+                        # Multiple players found - this shouldn't happen with exact license numbers
+                        st.error(f"Multiple players found for license '{input_value}'. This is unexpected.")
+                        
+                except Exception as e:
+                    st.error(f"Error looking up license {input_value}: {str(e)}")
+            else:
+                # If it's a search term, trigger search to show dialog
+                player_search_input_on_change_with_query(input_value)
+        
+        # Modal dialog just updates the textbox - user must press Enter to generate report
+        
+        
         st.sidebar.caption(f"Build:{st.session_state.app_datetime}")
 
-        st.sidebar.text_input(
-            "Enter ffbridge player license number", 
-            on_change=player_search_input_on_change, 
-            placeholder=st.session_state.player_license_number, 
-            key='player_search_input'
+        # Player search with modal dialog
+        # Use a separate value state that can be updated
+        # Use the stored value, or empty for truly fresh searches
+        current_value = st.session_state.get('player_search_value', '')
+            
+        # Simple textbox with Go button below it
+        search_input = st.sidebar.text_input(
+            "Enter ffbridge license number",
+            value=current_value,
+            key='player_search_input',
+            on_change=player_search_input_on_change,
+            placeholder="Enter license number",
+            help="Enter ffbridge license number or (partial) last name."
         )
+        
+        # Show Go button only after dialog returns with a license number (numeric)
+        if current_value and current_value.strip().isdigit():
+            if st.sidebar.button("Go", use_container_width=True, type="primary"):
+                # Store the input for processing outside sidebar context
+                st.session_state.process_go_button_input = current_value.strip()
+                st.rerun()
+        
+        # Show instruction when license number is populated
+        if current_value and current_value.strip().isdigit():
+            st.sidebar.caption("👆 Click 'Go' to generate report")
+        
+        # Show modal dialog if we have matches AND the flag is set (meaning search processing is complete)
+        if (st.session_state.get('show_player_modal', False) and
+            hasattr(st.session_state, 'player_search_matches') and 
+            st.session_state.player_search_matches):
+            
+            # Filter matches based on current textbox content
+            current_input = st.session_state.get('player_search_input', '').lower()
+            match_options = [match[0] for match in st.session_state.player_search_matches]
+            
+            # Further filter options based on current textbox input
+            if current_input and len(current_input) > 0:
+                filtered_options = [opt for opt in match_options if current_input in opt.lower()]
+            else:
+                filtered_options = match_options
+            
+            # Check one more time right before showing dialog
+            if filtered_options and hasattr(st.session_state, 'player_search_matches'):
+                # Clear the flag since we're now showing the modal
+                st.session_state.show_player_modal = False
+                # Show modal dialog with player selection
+                show_player_selection_modal(filtered_options)
 
         if st.session_state.player_id is None:
             return
