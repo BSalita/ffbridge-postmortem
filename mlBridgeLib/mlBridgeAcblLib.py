@@ -888,7 +888,7 @@ def merge_clean_augment_club_dfs(dfs, sd_cache_d, acbl_number):  # todo: acbl_nu
 
     df = df.with_columns([
         pl.col('board_record_string').cast(pl.Utf8),
-        pl.col('Date').str.strptime(pl.Datetime, format="%Y-%m-%d %H:%M:%S"),
+        pl.col('Date').str.strptime(pl.Date, format="%Y-%m-%d %H:%M:%S"),
         #pl.col('Final_Standing_NS').cast(pl.Float32), # Final_Standing_NS is not a column in the data. use percentage instead?
         #pl.col('Final_Standing_EW').cast(pl.Float32), # Final_Standing_EW is not a column in the data. use percentage instead?
         pl.col('hand_record_id').cast(pl.Int64),
@@ -1034,7 +1034,7 @@ def merge_clean_augment_tournament_dfs(dfs, json_results_d, sd_cache_d, player_i
         (pl.col('percentage_ns')/100).cast(pl.Float32).alias('Pct_NS'),
         (pl.col('percentage_ew')/100).cast(pl.Float32).alias('Pct_EW'),
         #pl.col('board_record_string').cast(pl.Utf8),
-        pl.lit(results_dfs_d['event']['start_date'].to_list()[0]).alias('Date'), # no time in the data, can't use %Y-%m-%d %H:%M:%S
+        pl.lit(results_dfs_d['event']['start_date'].to_list()[0]).str.strptime(pl.Date, format="%Y-%m-%d %H:%M:%S", strict=False).alias('Date'), # no time in the data, can't use %Y-%m-%d %H:%M:%S
         pl.lit(results_dfs_d['event']['id'].to_list()[0]).alias('event_id'),
         #pl.col('hand_record_id').cast(pl.Int64), # only box_number is present in the data
         pl.col('Pair_Number_NS').cast(pl.UInt16),
