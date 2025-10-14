@@ -428,6 +428,21 @@ def get_club_results_details_data(url):
     
     if details_data:
         print_to_log_info(f'Downloaded details data with {len(details_data.get("boards", []))} boards')
+        
+        # Save to cache
+        try:
+            club_id = details_data.get('club_id_number') or details_data.get('club_id')
+            if club_id:
+                cache_dir = pathlib.Path('club-results') / str(club_id) / 'details'
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                cache_file = cache_dir / f'{event_id}.data.json'
+                with open(cache_file, 'w', encoding='utf-8') as f:
+                    json.dump(details_data, f, indent=2, ensure_ascii=False)
+                print_to_log_info(f'Saved to cache: {cache_file}')
+            else:
+                print_to_log_info('No club_id found in data, skipping cache save')
+        except Exception as e:
+            print_to_log_info(f'Error saving to cache: {e}')
     else:
         print_to_log_info('No details data found (possibly team event)')
     
@@ -549,6 +564,21 @@ def get_tournament_session_results(session_id, acbl_api_key):
     url = path+'?'+params
     print_to_log_info('tournament session url:',url)
     response = requests.get(url, headers=headers)
+    
+    # Save to cache if successful
+    if response.status_code == 200:
+        try:
+            data = response.json()
+            cache_dir = pathlib.Path('tournaments')
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            print_to_log_info(f'Saved to cache: {cache_file}')
+        except Exception as e:
+            print_to_log_info(f'Error saving to cache: {e}')
+    else:
+        print_to_log_info(f'Download failed with status {response.status_code}, not caching')
+    
     return response
 
 
@@ -1437,6 +1467,13 @@ def _get_club_results_sync(acbl_number, headless=True, save_screenshot=None, lim
             while True:
                 if verbose:
                     print(f"  Processing page {page_num}...")
+                
+                # Wait for DataTables to render
+                try:
+                    page.wait_for_selector('.dataTables_paginate', timeout=5000)
+                except:
+                    pass  # Continue even if timeout
+                
                 html_content = page.content()
                 events_on_page = parse_acbl_events_from_html(html_content, url)
                 all_events.update(events_on_page)
@@ -1450,17 +1487,50 @@ def _get_club_results_sync(acbl_number, headless=True, save_screenshot=None, lim
                     break
                 
                 # Check if there's a "Next" button
-                try:
-                    next_button = page.locator('a:has-text("Next"), button:has-text("Next"), .pagination a[aria-label="Next"]').first
-                    if next_button.is_visible(timeout=1000):
-                        next_button.click()
-                        page.wait_for_load_state('networkidle', timeout=ACBL_PAGE_LOAD_TIMEOUT)
-                        page_num += 1
-                        time.sleep(0.5)  # Small delay to be respectful
-                    else:
-                        break
-                except:
-                    # No next button or not clickable - we're done
+                # Try multiple selectors for the Next button
+                next_button_found = False
+                selectors = [
+                    'a.paginate_button.next',  # DataTables pagination (ACBL uses this)
+                    '#DataTables_Table_0_next',  # DataTables Next button ID
+                    'a.page-link:has-text("Next")',  # Bootstrap pagination
+                    'button:has-text("Next")',
+                    'a:has-text("Next")',
+                    '.pagination a[aria-label="Next"]',
+                    'a[rel="next"]',
+                    '.next a',
+                    'li.page-item.next a',
+                ]
+                
+                for selector in selectors:
+                    try:
+                        next_button = page.locator(selector).first
+                        if next_button.count() > 0:
+                            # Check if button is visible and not disabled
+                            if not next_button.is_visible():
+                                continue
+                            
+                            class_attr = next_button.get_attribute('class')
+                            if class_attr and 'disabled' in class_attr:
+                                # Button is disabled, no more pages
+                                continue
+                            
+                            if verbose:
+                                print(f"    Found Next button with selector: {selector}")
+                            next_button.click()
+                            page.wait_for_load_state('networkidle', timeout=ACBL_PAGE_LOAD_TIMEOUT)
+                            page_num += 1
+                            time.sleep(0.5)  # Small delay to be respectful
+                            next_button_found = True
+                            break
+                    except Exception as e:
+                        # Try next selector
+                        if verbose:
+                            print(f"    Selector {selector} failed: {e}")
+                        continue
+                
+                if not next_button_found:
+                    if verbose:
+                        print(f"    No Next button found, stopping pagination")
                     break
             
         finally:
