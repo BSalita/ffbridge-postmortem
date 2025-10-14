@@ -31,7 +31,7 @@ import json
 import sys
 import os
 import platform
-#import asyncio
+import asyncio
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 
@@ -1138,8 +1138,39 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
             deal_numbers = dfs['simultaneous_roadsheets']['roadsheets_deals_dealNumber'].unique().to_list()
             # uses st.session_state.player_license_number to get boards because Roy Rene website works with player_license_number to get boards.
             with st.spinner(f"Roy Rene tournaments require an extra step. Takes 1 to 3 minutes..."):
-                # e.g. "https://www.bridgeplus.com/nos-simultanes/resultats/?p=route&res=sim&tr=S202602&cl=5802079&sc=A&eq=212"
-                st.session_state.route_url = f"https://www.bridgeplus.com/nos-simultanes/resultats/?p=route&res=sim&eq={st.session_state.team_number}&tr={st.session_state.tournament_id}&cl={st.session_state.organization_code}&sc={st.session_state.section_name}"
+                # Get the Bridge+ club page to find the player's route link
+                async def get_player_route_url():
+                    # Fetch the club teams page which contains links to each pair's route
+                    teams_df = await mlBridgeLib.mlBridgeBPLib.get_teams_by_tournament_async(
+                        st.session_state.tournament_id, 
+                        st.session_state.organization_code
+                    )
+                    
+                    # Normalize player_id by stripping leading zeros for robust string comparison
+                    norm_player_id = str(st.session_state.player_license_number).lstrip('0')
+                    
+                    # Find the team where the player_id matches either Player1_ID or Player2_ID
+                    player_team = teams_df.filter(
+                        (pl.col('Player1_ID').cast(pl.Utf8).str.strip_chars_start('0') == norm_player_id) | 
+                        (pl.col('Player2_ID').cast(pl.Utf8).str.strip_chars_start('0') == norm_player_id)
+                    )
+                    
+                    # Check if player was found
+                    if len(player_team) == 0:
+                        raise ValueError(f"Player {st.session_state.player_license_number} not found in tournament {st.session_state.tournament_id}, club {st.session_state.organization_code}")
+                    
+                    # Extract section and team number from the teams data
+                    section = player_team['Section'].first()
+                    team_number = player_team['Team_Number'].first()
+                    
+                    # Build the route URL using the extracted parameters
+                    route_url = f"https://www.bridgeplus.com/nos-simultanes/resultats/?p=route&res=sim&tr={st.session_state.tournament_id}&cl={st.session_state.organization_code}&sc={section}&eq={team_number}"
+                    
+                    return route_url, section, team_number
+                
+                # Get the route URL by finding the player in the club page
+                st.session_state.route_url, st.session_state.section_name, bridgeplus_team_number = asyncio.run(get_player_route_url())
+                print(f"Found player route URL: {st.session_state.route_url}")
                 print(f"Getting route data from: {st.session_state.route_url}")
                 if False:
                     # calls internal async version which takes 60s. almost 3x faster than asyncio version below
@@ -1150,7 +1181,6 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
                     boards_dfs = {'boards': None, 'score_frequency': None}
                     
                     try:
-                        import asyncio
                         
                         async def get_boards_with_progress():
                             # First, get the route data to see which boards this player actually played
@@ -1396,6 +1426,14 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
             #pair_ew_df = pair_ew_df.rename({'team_table_number':'Pair_Number_EW'})
             boards_df = boards_dfs['boards']
             assert boards_df.height > 0, f"No boards found for {st.session_state.tournament_id}"
+            
+            # Debug: Check what columns we actually have
+            print(f"Boards DataFrame columns: {boards_df.columns}")
+            print(f"Boards DataFrame shape: {boards_df.shape}")
+            if st.session_state.debug_mode:
+                st.write("**Debug: Boards DataFrame sample:**")
+                st.dataframe(boards_df.head(3))
+            
             boards_df = boards_df.with_columns([
                 pl.lit(st.session_state.tournament_id).alias('tournament_id'),
                 pl.lit(st.session_state.organization_code).alias('club_id'),
@@ -1408,25 +1446,105 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
                 pl.lit(st.session_state.player_direction).alias('Player_Direction'),
                 pl.lit(st.session_state.pair_direction).alias('Pair_Direction'),
             ])
+            
+            # Debug: Check boards_df before joins
+            print(f"Before joins - boards_df shape: {boards_df.shape}")
+            print(f"Before joins - boards_df columns: {boards_df.columns}")
+            if boards_df.height > 0:
+                print(f"Before joins - sample Pair_Number values: {boards_df['Pair_Number'].unique().to_list()[:5]}")
+                print(f"Before joins - sample Club_ID values: {boards_df['Club_ID'].unique().to_list()[:5]}")
+                print(f"Before joins - sample club_id values: {boards_df['club_id'].unique().to_list()[:5]}")
+            
+            # Debug: Check player dataframes before joins
+            print(f"player_n_df shape: {player_n_df.shape}")
+            if player_n_df.height > 0:
+                print(f"player_n_df sample team_table_number: {player_n_df['team_table_number'].unique().to_list()[:5]}")
+                print(f"player_n_df sample team_organization_code: {player_n_df['team_organization_code'].unique().to_list()[:5]}")
+            
             if st.session_state.pair_direction == 'NS':
-                boards_df = boards_df.join(player_n_df,left_on=('club_id','Pair_Number'),right_on=('team_organization_code','team_table_number'),how='inner')
-                boards_df = boards_df.join(player_e_df,left_on=('club_id','Opponent_Pair_Number'),right_on=('team_organization_code','team_table_number'),how='inner')
-                boards_df = boards_df.join(player_s_df,left_on=('club_id','Pair_Number'),right_on=('team_organization_code','team_table_number'),how='inner')
-                boards_df = boards_df.join(player_w_df,left_on=('club_id','Opponent_Pair_Number'),right_on=('team_organization_code','team_table_number'),how='inner')
+                # Use LEFT joins to preserve boards even when player IDs don't match
+                # This is necessary because BridgePlus and FFBridge use different numbering systems
+                print(f"Joining with player_n_df...")
+                boards_df = boards_df.join(player_n_df,left_on=('club_id','Pair_Number'),right_on=('team_organization_code','team_table_number'),how='left')
+                print(f"After player_n_df join - boards_df shape: {boards_df.shape}")
+                
+                print(f"Joining with player_e_df...")
+                boards_df = boards_df.join(player_e_df,left_on=('club_id','Opponent_Pair_Number'),right_on=('team_organization_code','team_table_number'),how='left')
+                print(f"After player_e_df join - boards_df shape: {boards_df.shape}")
+                
+                print(f"Joining with player_s_df...")
+                boards_df = boards_df.join(player_s_df,left_on=('club_id','Pair_Number'),right_on=('team_organization_code','team_table_number'),how='left')
+                print(f"After player_s_df join - boards_df shape: {boards_df.shape}")
+                
+                print(f"Joining with player_w_df...")
+                boards_df = boards_df.join(player_w_df,left_on=('club_id','Opponent_Pair_Number'),right_on=('team_organization_code','team_table_number'),how='left')
+                print(f"After player_w_df join - boards_df shape: {boards_df.shape}")
+                
                 boards_df = boards_df.with_columns([
                     pl.col('Pair_Number').alias('Pair_Number_NS'),
                     pl.col('Opponent_Pair_Number').alias('Pair_Number_EW'),
                 ])
+                
+                # Fill in player IDs from session state for the user's pair if joins didn't match
+                # This handles the case where BridgePlus and FFBridge use different numbering
+                # Check if joins failed (columns don't exist or are all null)
+                needs_player_ids = ('Player_ID_N' not in boards_df.columns or 
+                                   (boards_df.height > 0 and boards_df['Player_ID_N'].is_null().all()))
+                if needs_player_ids:
+                    print("Player IDs not found from joins, populating from session state...")
+                    boards_df = boards_df.with_columns([
+                        pl.lit(str(st.session_state.player_id if st.session_state.player_direction == 'N' else st.session_state.partner_id if st.session_state.partner_direction == 'N' else '')).alias('Player_ID_N'),
+                        pl.lit(str(st.session_state.player_id if st.session_state.player_direction == 'S' else st.session_state.partner_id if st.session_state.partner_direction == 'S' else '')).alias('Player_ID_S'),
+                        pl.lit('').alias('Player_ID_E'),  # Opponents - unknown
+                        pl.lit('').alias('Player_ID_W'),  # Opponents - unknown
+                    ])
             else:
-                boards_df = boards_df.join(player_n_df,left_on=('club_id','Opponent_Pair_Number'),right_on=('team_organization_code','team_table_number'),how='inner')
-                boards_df = boards_df.join(player_e_df,left_on=('club_id','Pair_Number'),right_on=('team_organization_code','team_table_number'),how='inner')
-                boards_df = boards_df.join(player_s_df,left_on=('club_id','Opponent_Pair_Number'),right_on=('team_organization_code','team_table_number'),how='inner')
-                boards_df = boards_df.join(player_w_df,left_on=('club_id','Pair_Number'),right_on=('team_organization_code','team_table_number'),how='inner')
+                # Use LEFT joins to preserve boards even when player IDs don't match
+                # This is necessary because BridgePlus and FFBridge use different numbering systems
+                print(f"Joining with player_n_df...")
+                boards_df = boards_df.join(player_n_df,left_on=('club_id','Opponent_Pair_Number'),right_on=('team_organization_code','team_table_number'),how='left')
+                print(f"After player_n_df join - boards_df shape: {boards_df.shape}")
+                
+                print(f"Joining with player_e_df...")
+                boards_df = boards_df.join(player_e_df,left_on=('club_id','Pair_Number'),right_on=('team_organization_code','team_table_number'),how='left')
+                print(f"After player_e_df join - boards_df shape: {boards_df.shape}")
+                
+                print(f"Joining with player_s_df...")
+                boards_df = boards_df.join(player_s_df,left_on=('club_id','Opponent_Pair_Number'),right_on=('team_organization_code','team_table_number'),how='left')
+                print(f"After player_s_df join - boards_df shape: {boards_df.shape}")
+                
+                print(f"Joining with player_w_df...")
+                boards_df = boards_df.join(player_w_df,left_on=('club_id','Pair_Number'),right_on=('team_organization_code','team_table_number'),how='left')
+                print(f"After player_w_df join - boards_df shape: {boards_df.shape}")
+                
                 boards_df = boards_df.with_columns([
                     pl.col('Pair_Number').alias('Pair_Number_EW'),
                     pl.col('Opponent_Pair_Number').alias('Pair_Number_NS'),
                 ])
+                
+                # Fill in player IDs from session state for the user's pair if joins didn't match
+                # This handles the case where BridgePlus and FFBridge use different numbering
+                # Check if joins failed (columns don't exist or are all null)
+                needs_player_ids = ('Player_ID_E' not in boards_df.columns or 
+                                   (boards_df.height > 0 and boards_df['Player_ID_E'].is_null().all()))
+                if needs_player_ids:
+                    print("Player IDs not found from joins, populating from session state...")
+                    boards_df = boards_df.with_columns([
+                        pl.lit('').alias('Player_ID_N'),  # Opponents - unknown
+                        pl.lit('').alias('Player_ID_S'),  # Opponents - unknown
+                        pl.lit(str(st.session_state.player_id if st.session_state.player_direction == 'E' else st.session_state.partner_id if st.session_state.partner_direction == 'E' else '')).alias('Player_ID_E'),
+                        pl.lit(str(st.session_state.player_id if st.session_state.player_direction == 'W' else st.session_state.partner_id if st.session_state.partner_direction == 'W' else '')).alias('Player_ID_W'),
+                    ])
+            
+            # Debug: Check boards_df before final join with roadsheets
+            print(f"Before final join with roadsheets - boards_df shape: {boards_df.shape}")
+            print(f"Before final join - df (roadsheets) shape: {df.shape}")
+            if boards_df.height > 0 and df.height > 0:
+                print(f"boards_df Board values: {sorted(boards_df['Board'].unique().to_list())}")
+                print(f"df (roadsheets) Board values: {sorted(df['Board'].unique().to_list())}")
+            
             df = boards_df.join(df, on='Board', how='left')
+            print(f"After final join with roadsheets - df shape: {df.shape}")
         else:
             df = mlBridgeFFLib.convert_ffdf_api_to_mldf(dfs)
 
@@ -1644,7 +1762,16 @@ def player_search_input_on_change_with_query(query: str) -> None:
                 # Don't reset player_id here either - just return
                 return
             
-        player_id = dfs['search']['person_id'][0]
+        # Single player found - get their ID using proper Polars syntax
+        try:
+            player_id = dfs['search']['person_id'].to_list()[0]
+        except Exception as e:
+            # More informative error if column doesn't exist
+            print(f"Error accessing person_id from search results: {e}")
+            print(f"Available columns: {dfs['search'].columns}")
+            print(f"Search dataframe:\n{dfs['search']}")
+            raise Exception(f"Could not extract player_id from search results. Available columns: {dfs['search'].columns}")
+        
         # Clear any previous error message and matches on successful search
         if hasattr(st.session_state, 'player_search_error'):
             del st.session_state.player_search_error
@@ -2256,8 +2383,9 @@ def initialize_ffbridge_bearer_token() -> None:
 
     dfs, api_urls_d = get_ffbridge_data_using_url_licencie(api_urls_d, show_progress=False)
     assert len(dfs['my_infos']) == 1, f"Expected 1 row, got {len(dfs['my_infos'])}"
-    st.session_state.player_id = dfs['my_infos']['person_id'][0] # todo: remove this?
-    st.session_state.player_license_number = dfs['my_infos']['person_license_number'][0]
+    # Use proper Polars syntax to get first value
+    st.session_state.player_id = dfs['my_infos']['person_id'].to_list()[0] # todo: remove this?
+    st.session_state.player_license_number = dfs['my_infos']['person_license_number'].to_list()[0]
 
         # # Try to import automation functions
         # try:

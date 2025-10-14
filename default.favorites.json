@@ -39,6 +39,7 @@
 				"@Expected_Value_Our_Boards",
 				"@Expected_Value_All_Boards",
 				"@Declarer_Rankings",
+				"@Successful_Sacrifices",
 				"@Scoring_Errors"
 			]
 		},
@@ -462,7 +463,18 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT Declarer_Name AS Name, CASE WHEN Declarer_Direction IN ('N', 'S') THEN AVG(Pct_NS) ELSE AVG(Pct_EW) END AS Avg_Pct, COUNT(*) AS Count, Declarer_ID AS Declarer, Declarer_Direction AS Direction, AVG(CAST(Tricks > DD_Tricks AS INT)) AS Pct_GT_DD, AVG(CAST(Tricks = DD_Tricks AS INT)) AS Pct_EQ_DD, AVG(CAST(Score_Declarer > Par_Declarer AS INT)) AS Pct_GT_Par, AVG(CAST(Score_Declarer = Par_Declarer AS INT)) AS Pct_EQ_Par FROM self GROUP BY Declarer_ID, Declarer_Name, Declarer_Direction HAVING COUNT(*) >= 4 ORDER BY Avg_Pct DESC"
+						"sql": "SELECT Declarer_Name AS Name, CASE WHEN Declarer_Direction IN ('N', 'S') THEN AVG(Pct_NS) ELSE AVG(Pct_EW) END AS Avg_Pct, COUNT(*) AS Count, Declarer_ID AS Declarer, Declarer_Direction AS Direction, AVG(CAST(Tricks > DD_Tricks AS INT)) AS Pct_GT_DD, AVG(CAST(Tricks = DD_Tricks AS INT)) AS Pct_EQ_DD, AVG(CAST(Score_Declarer > Par_Declarer AS INT)) AS Pct_GT_Par, AVG(CAST(Score_Declarer = Par_Declarer AS INT)) AS Pct_EQ_Par, AVG(CAST(Par_Declarer = DD_Score_Max_Declarer AS INT)) AS Is_Par_Suit, AVG(CAST(Par_Declarer = DD_Score_Declarer AS INT)) AS Is_Par_Contract, SUM(CAST(DD_Score_Declarer = Par_Declarer AND DD_Score_Declarer < 0 AS INT)) AS Sacrifices FROM self GROUP BY Declarer_ID, Declarer_Name, Declarer_Direction HAVING COUNT(*) >= 4 ORDER BY Avg_Pct DESC"
+					}
+				]
+			},
+			"Successful_Sacrifices": {
+				"title": "Successful Sacrifices",
+				"help": "**Showing successful sacrifices as determined using DD and par score.**",
+				"comment": "TODO: Change to show only contracts where the defenders had no better bid than to double (or pass).",
+				"prompts": [
+					{
+						"prompt": "",
+						"sql": "SELECT  Board, Declarer_ID, Declarer_Name, Contract, Par_Declarer, DD_Score_Declarer, CAST(DD_Score_Declarer = Par_Declarer AND DD_Score_Declarer < 0 AS INT) AS Sacrifice FROM self WHERE Sacrifice > 0 ORDER BY Board, Declarer_ID DESC"
 					}
 				]
 			},
@@ -584,21 +596,6 @@
 					{
 						"prompt": "",
 						"sql": "SELECT Board, Contract, Contract_Pred, COUNT() AS Board_Plays, SUM(CASE WHEN Contract = Contract_Pred THEN 1 ELSE 0 END) AS Correct_Preds, Correct_Preds/Board_Plays AS Correct_Contract_Pct FROM self GROUP BY Board, Contract, Contract_Pred ORDER BY Board"
-					}
-				]
-			},
-			"Declarer_Probabilities_Statistics": {
-				"title": "Declarer Performance Predictions and Statistics",
-				"help": "**Declarer Performance Predictions and Statistics (NS, EW). Predictions made before game starts.**",
-				"comment": "Need to scale Pct_NS_Pred and Pct_EW_Pred to 50%.",
-				"prompts": [
-					{
-						"prompt": "",
-						"sql": "SELECT Declarer_ID AS Declarer_NS, Declarer_Name AS Name_NS, AVG(Pct_NS) AS Pct_NS_Actual, AVG(Pct_NS_Pred) AS Pct_NS_Pred,  COUNT() AS Boards_Declared, AVG(CAST(Tricks > DD_Tricks AS INT)) AS Pct_GT_DD, AVG(CAST(Tricks = DD_Tricks AS INT)) AS Pct_EQ_DD FROM self WHERE Declarer_Pair_Direction='NS' GROUP BY Declarer_ID, Declarer_Name ORDER BY Pct_NS_Actual DESC, Boards_Declared DESC"
-					},
-					{
-						"prompt": "",
-						"sql": "SELECT Declarer_ID AS Declarer_EW, Declarer_Name AS Name_EW, AVG(Pct_EW) AS Pct_EW_Actual, AVG(Pct_EW_Pred) AS Pct_EW_Pred,  COUNT() AS Boards_Declared, AVG(CAST(Tricks > DD_Tricks AS INT)) AS Pct_GT_DD, AVG(CAST(Tricks = DD_Tricks AS INT)) AS Pct_EQ_DD FROM self WHERE Declarer_Pair_Direction='EW' GROUP BY Declarer_ID, Declarer_Name ORDER BY Pct_EW_Actual DESC, Boards_Declared DESC"
 					}
 				]
 			}

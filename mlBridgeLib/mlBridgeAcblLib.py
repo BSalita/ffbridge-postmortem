@@ -24,11 +24,14 @@ import time
 import json
 import pathlib
 import sys
+import asyncio
+import threading
 import sqlalchemy
 from sqlalchemy import create_engine, inspect
 import sqlalchemy_utils
 from sqlalchemy_utils.functions import database_exists, create_database
-sys.path.append(str(pathlib.Path.cwd().parent.parent.joinpath('mlBridgeLib'))) # removed .parent
+from typing import List, Optional
+sys.path.append(str(pathlib.Path.cwd().parent.joinpath('mlBridgeLib'))) # removed .parent
 sys.path
 
 from mlBridgeLib.mlBridgeLib import (
@@ -278,7 +281,7 @@ def club_results_json_to_sql(urls, starting_nfile=0, ending_nfile=0, initially_d
 
 
 # todo: can acblPath be removed?
-def club_results_create_sql_db(db_file_connection_string, create_tables_sql_file, db_file_path,  acblPath, db_memory_connection_string='sqlite://', starting_nfile=0, ending_nfile=0, write_direct_to_disk=False, create_tables=True, delete_db=False, perform_integrity_checks=False, create_engine_echo=False):
+def club_results_create_sql_db(db_file_connection_string, create_tables_sql_file, db_file_path,  acblPath, input_subdir, db_memory_connection_string='sqlite://', starting_nfile=0, ending_nfile=0, write_direct_to_disk=False, create_tables=True, delete_db=False, perform_integrity_checks=False, create_engine_echo=False):
     if write_direct_to_disk:
         db_connection_string = db_file_connection_string # disk file based db
     else:
@@ -302,9 +305,12 @@ def club_results_create_sql_db(db_file_connection_string, create_tables_sql_file
             create_sql = f.read()
         raw_connection.executescript(create_sql) # create tables
 
+    # Discover input SQL scripts from one or more subdirectories under acblPath
     urls = []
-    for path in acblPath.joinpath('club-results').rglob('*.data.sql'): # fyi: PurePathPosix doesn't support glob/rglob
-        urls.append(path)
+    base = acblPath.joinpath(input_subdir)
+    if base.is_dir():
+        for path in base.rglob('*.data.sql'):
+            urls.append(path)
 
     #urls = [acblPath.joinpath(f) for f in ['club-results/108571/details/280270.data.sql']] # use slashes, not backslashes
     #urls = [acblPath.joinpath(f) for f in ['club-results/275966/details/99197.data.sql']] # use slashes, not backslashes
@@ -377,32 +383,54 @@ def club_results_create_sql_db(db_file_connection_string, create_tables_sql_file
 
 
 def get_club_results_details_data(url):
-    print_to_log_info('details url:',url)
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        )
-    }
-    # todo: use some get...() for 'https://my.acbl.org/club-results/details/993420'
-    response = requests.get(url, headers=headers)
-    assert response.status_code == 200, [url, response.status_code]
-
-    soup = BeautifulSoup(response.content, "html.parser")
-
-    if soup.find('result-details-combined-section'):
-        data = soup.find('result-details-combined-section')['v-bind:data']
-    elif soup.find('result-details'):
-        data = soup.find('result-details')['v-bind:data']
-    elif soup.find('team-result-details'):
-        return None # todo: handle team events
-        data = soup.find('team-result-details')['v-bind:data']
+    """
+    Retrieve detailed data for a specific club event.
+    
+    NOTE: This function now uses Playwright due to ACBL's 403 blocking of requests.
+    Will check cache first (club-results/*/details/<event_id>.data.json) before downloading.
+    Return format maintained for backward compatibility: dict or None
+    
+    Args:
+        url: URL to club results details page (e.g., https://my.acbl.org/club-results/details/993420)
+    
+    Returns:
+        dict or None: Event details data or None if not found/team event
+    """
+    print_to_log_info('details url:', url)
+    
+    # Extract event_id from URL
+    event_id = url.rstrip('/').split('/')[-1]
+    
+    # Check for cached file in club-results/*/details/<event_id>.data.json
+    cache_pattern = pathlib.Path('club-results') / '*' / 'details' / f'{event_id}.data.json'
+    cached_files = list(pathlib.Path('.').glob(str(cache_pattern)))
+    
+    if cached_files:
+        cached_file = cached_files[0]  # Use first match
+        print_to_log_info(f'Using cached file: {cached_file}')
+        try:
+            with open(cached_file, 'r', encoding='utf-8') as f:
+                details_data = json.load(f)
+            print_to_log_info(f'Loaded from cache with {len(details_data.get("boards", []))} boards')
+            return details_data
+        except Exception as e:
+            print_to_log_info(f'Error loading cache file: {e}, will download instead')
+    
+    # Not in cache, download using Playwright
+    print_to_log_info('Not in cache, downloading with Playwright (requires: pip install playwright && playwright install chromium)')
+    
+    # Use Playwright version (defined later in this file)
+    details_data = get_club_results_details_data_playwright(
+        url,
+        headless=True,
+        verbose=False  # Use logging instead
+    )
+    
+    if details_data:
+        print_to_log_info(f'Downloaded details data with {len(details_data.get("boards", []))} boards')
     else:
-        return None # "Can't find data tag."
-    assert data is not None and isinstance(data,str) and len(data), [url, data]
-
-    details_data = json.loads(data) # returns dict from json
+        print_to_log_info('No details data found (possibly team event)')
+    
     return details_data
 
 
@@ -430,34 +458,37 @@ def get_club_results_details_data(url):
 
 
 def get_club_results_from_acbl_number(acbl_number):
+    """
+    Retrieve club results for a specific ACBL member number.
+    
+    NOTE: This function now uses Playwright due to ACBL's 403 blocking of requests.
+    Return format maintained for backward compatibility: (url, detail_url, msg)
+    For more features (pagination, club_id), use get_club_results_from_acbl_number_playwright() directly.
+    
+    Args:
+        acbl_number: ACBL member number (e.g., 2663279)
+    
+    Returns:
+        dict: {event_id: (url, detail_url, msg)}
+    """
     url = f"https://my.acbl.org/club-results/my-results/{acbl_number}"
-    print_to_log_info('my-results url:',url)
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        )
-    }
-    response = requests.get(url, headers=headers)
-    assert response.status_code == 200, [url, response.status_code]
-
-    soup = BeautifulSoup(response.content, "html.parser")
-
-    # Find all anchor tags with href attributes
-    anchor_pattern = re.compile(r'/club\-results/details/\d+$') # was \d{6}
-    anchor_tags = soup.find_all('a', href=anchor_pattern)
-    anchor_d = {a['href']: a for a in anchor_tags}
-    sorted_anchor_d = dict(sorted({int(k.split('/')[-1]):v for k,v in anchor_d.items()}.items(), reverse=True))
-    # 847339 2023-08-21, Ft Lauderdale Bridge Club, Mon Aft Stratified Pair, Monday Afternoon, 58.52%
-    msgs = [', '.join([v.parent.parent.find_all('td')[i].text.replace('\n','').strip() for i in [0,1,2,3,5]]) for k,v in sorted_anchor_d.items()]
-    assert len(anchor_d) == len(msgs)
-
-    # Print the href attributes
+    print_to_log_info('my-results url:', url)
+    print_to_log_info('Note: Using Playwright (requires: pip install playwright && playwright install chromium)')
+    
+    # Use Playwright version (defined later in this file, get all events, no limit)
+    playwright_results = get_club_results_from_acbl_number_playwright(
+        acbl_number, 
+        headless=True,
+        limit=0,  # Get all events
+        verbose=False  # Use logging instead
+    )
+    
+    # Convert to old format (drop club_id for backward compatibility)
     my_results_details_data = {}
-    for (event_id,href),msg in zip(sorted_anchor_d.items(),msgs):
-        detail_url = 'https://my.acbl.org'+href['href']
+    for event_id, (my_results_url, detail_url, msg, club_id) in playwright_results.items():
         my_results_details_data[event_id] = (url, detail_url, msg)
+    
+    print_to_log_info(f'Found {len(my_results_details_data)} event(s)')
     return my_results_details_data
 
 
@@ -468,6 +499,41 @@ def get_club_player_history(acbl_number):
 
 # get a single tournament session result
 def get_tournament_session_results(session_id, acbl_api_key):
+    """
+    Retrieve tournament session results.
+    Will check cache first (tournaments/<session_id>.session.json) before downloading.
+    
+    Args:
+        session_id: Tournament session ID (e.g., '2310369-2801-2')
+        acbl_api_key: ACBL API key
+    
+    Returns:
+        requests.Response object (for backward compatibility)
+    """
+    # Check for cached file
+    cache_file = pathlib.Path('tournaments') / f'{session_id}.session.json'
+    
+    if cache_file.exists():
+        print_to_log_info(f'Using cached file: {cache_file}')
+        try:
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                cached_data = json.load(f)
+            
+            # Create a mock response object to maintain backward compatibility
+            class CachedResponse:
+                def __init__(self, data):
+                    self.status_code = 200
+                    self._json_data = data
+                
+                def json(self):
+                    return self._json_data
+            
+            print_to_log_info(f'Loaded from cache')
+            return CachedResponse(cached_data)
+        except Exception as e:
+            print_to_log_info(f'Error loading cache file: {e}, will download instead')
+    
+    # Not in cache, download from API
     headers = {
         'accept': 'application/json', 
         'Authorization': f'Bearer {acbl_api_key}',
@@ -1263,4 +1329,349 @@ def acbldf_to_mldf(df: pl.DataFrame) -> pl.DataFrame:
 
     assert len(df) > 0
     return df
+
+
+# ============================================================================
+# Playwright-based functions for retrieving ACBL club results
+# Added to support modern anti-bot protection
+# ============================================================================
+
+# Constants for Playwright browser configuration
+ACBL_PAGE_LOAD_TIMEOUT = 60000  # milliseconds
+ACBL_VIEWPORT_WIDTH = 1920
+ACBL_VIEWPORT_HEIGHT = 1080
+ACBL_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
+)
+
+
+def create_acbl_browser_context(p, headless=True):
+    """
+    Helper to create browser context with consistent settings for ACBL scraping.
+    
+    Args:
+        p: Playwright instance
+        headless: Run browser in headless mode
+    
+    Returns:
+        tuple: (browser, context) objects
+    """
+    browser = p.chromium.launch(headless=headless)
+    context = browser.new_context(
+        viewport={'width': ACBL_VIEWPORT_WIDTH, 'height': ACBL_VIEWPORT_HEIGHT},
+        user_agent=ACBL_USER_AGENT
+    )
+    return browser, context
+
+
+def _run_in_thread_with_new_loop(func, *args, **kwargs):
+    """Run function in a thread with a fresh event loop (Windows-compatible)."""
+    import sys
+    result_container = []
+    exception_container = []
+    
+    def thread_worker():
+        try:
+            # Set Windows-compatible event loop policy
+            if sys.platform == 'win32':
+                asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+            
+            # Create and set a new event loop for this thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            try:
+                # Call the function
+                result = func(*args, **kwargs)
+                result_container.append(result)
+            finally:
+                loop.close()
+        except Exception as e:
+            exception_container.append(e)
+    
+    thread = threading.Thread(target=thread_worker)
+    thread.start()
+    thread.join()
+    
+    if exception_container:
+        raise exception_container[0]
+    return result_container[0] if result_container else None
+
+
+def _get_club_results_sync(acbl_number, headless=True, save_screenshot=None, limit=0, verbose=True):
+    """
+    Internal sync version that runs Playwright. 
+    Use get_club_results_from_acbl_number_playwright() instead.
+    """
+    from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+    
+    url = f"https://my.acbl.org/club-results/my-results/{acbl_number}"
+    if verbose:
+        print(f"Fetching with Playwright: {url}")
+    
+    all_events = {}
+    page_num = 1
+    
+    with sync_playwright() as p:
+        browser, context = create_acbl_browser_context(p, headless)
+        page = context.new_page()
+        
+        try:
+            # Navigate to the page
+            if verbose:
+                print("  Loading page...")
+            response = page.goto(url, wait_until='networkidle', timeout=ACBL_PAGE_LOAD_TIMEOUT)
+            
+            if response.status != 200:
+                raise Exception(f"Failed to load page. Status code: {response.status}")
+            
+            # Take screenshot if requested
+            if save_screenshot:
+                page.screenshot(path=save_screenshot)
+                if verbose:
+                    print(f"  Screenshot saved to: {save_screenshot}")
+            
+            # Process all pages
+            while True:
+                if verbose:
+                    print(f"  Processing page {page_num}...")
+                html_content = page.content()
+                events_on_page = parse_acbl_events_from_html(html_content, url)
+                all_events.update(events_on_page)
+                if verbose:
+                    print(f"    Found {len(events_on_page)} event(s) on page {page_num}")
+                
+                # Check if we have enough events
+                if limit > 0 and len(all_events) >= limit:
+                    if verbose:
+                        print(f"    Reached limit of {limit} events, stopping pagination")
+                    break
+                
+                # Check if there's a "Next" button
+                try:
+                    next_button = page.locator('a:has-text("Next"), button:has-text("Next"), .pagination a[aria-label="Next"]').first
+                    if next_button.is_visible(timeout=1000):
+                        next_button.click()
+                        page.wait_for_load_state('networkidle', timeout=ACBL_PAGE_LOAD_TIMEOUT)
+                        page_num += 1
+                        time.sleep(0.5)  # Small delay to be respectful
+                    else:
+                        break
+                except:
+                    # No next button or not clickable - we're done
+                    break
+            
+        finally:
+            browser.close()
+    
+    if verbose:
+        print(f"  Total events found across {page_num} page(s): {len(all_events)}")
+    return all_events
+
+
+def get_club_results_from_acbl_number_playwright(acbl_number, headless=True, save_screenshot=None, limit=0, verbose=True):
+    """
+    Retrieve club results for a specific ACBL member number using Playwright.
+    Returns a dictionary of event data keyed by event ID.
+    Automatically pages through all available pages to get complete results.
+    
+    This function is safe to call from async contexts (like Streamlit) as it runs
+    Playwright in a separate thread with its own event loop.
+    
+    Args:
+        acbl_number: ACBL member number (e.g., 2663279)
+        headless: Run browser in headless mode (default: True)
+        save_screenshot: Path to save screenshot (optional)
+        limit: Maximum number of events to retrieve (0 = unlimited)
+        verbose: Print progress messages (default: True)
+    
+    Returns:
+        dict: Dictionary with event_id as key and tuple (my_results_url, details_url, msg, club_id) as value
+    
+    Example:
+        >>> from mlBridgeLib.mlBridgeAcblLib import get_club_results_from_acbl_number_playwright
+        >>> results = get_club_results_from_acbl_number_playwright(2663279, limit=5)
+        >>> for event_id, (url, details_url, msg, club_id) in results.items():
+        ...     print(f"Event {event_id}: {msg}")
+    """
+    # Run in a thread with a fresh event loop to avoid conflicts with Streamlit
+    return _run_in_thread_with_new_loop(_get_club_results_sync, acbl_number, headless, save_screenshot, limit, verbose)
+
+
+def parse_acbl_events_from_html(html_content, base_url):
+    """
+    Helper function to parse events from ACBL HTML content.
+    Returns a dictionary of event data keyed by event ID.
+    
+    Args:
+        html_content: HTML content string
+        base_url: Base URL for the my-results page
+    
+    Returns:
+        dict: Dictionary with event_id as key and tuple (base_url, details_url, msg, club_id) as value
+    """
+    # Parse the HTML
+    soup = BeautifulSoup(html_content, "html.parser")
+    
+    # Find all anchor tags with href attributes pointing to club results details
+    anchor_pattern = re.compile(r'/club-results/details/\d+$')
+    anchor_tags = soup.find_all('a', href=anchor_pattern)
+    
+    if not anchor_tags:
+        # Empty page or no results on this page
+        return {}
+    
+    anchor_d = {a['href']: a for a in anchor_tags}
+    sorted_anchor_d = dict(sorted(
+        {int(k.split('/')[-1]): v for k, v in anchor_d.items()}.items(), 
+        reverse=True
+    ))
+    
+    # Extract event information from table rows
+    msgs = []
+    club_ids = []
+    for k, v in sorted_anchor_d.items():
+        try:
+            td_elements = v.parent.parent.find_all('td')
+            if len(td_elements) >= 6:
+                msg = ', '.join([
+                    td_elements[i].text.replace('\n', '').strip() 
+                    for i in [0, 1, 2, 3, 5]  # event_id, date, club, event, score
+                ])
+                msgs.append(msg)
+                
+                # Extract club_id from any column that has a club-results link
+                club_id_found = None
+                for td in td_elements:
+                    club_link = td.find('a', href=re.compile(r'/club-results/\d+$'))
+                    if club_link and 'href' in club_link.attrs:
+                        # Extract club ID from href like "/club-results/267096"
+                        club_href = club_link['href']
+                        club_id_match = re.search(r'/club-results/(\d+)$', club_href)
+                        if club_id_match:
+                            club_id_found = club_id_match.group(1)
+                            break
+                club_ids.append(club_id_found)
+        except (AttributeError, IndexError):
+            msgs.append(f"Event {k} (parsing error)")
+            club_ids.append(None)
+    
+    # Build results dictionary
+    my_results_details_data = {}
+    for (event_id, href), msg, club_id in zip(sorted_anchor_d.items(), msgs, club_ids):
+        detail_url = 'https://my.acbl.org' + href['href']
+        my_results_details_data[event_id] = (base_url, detail_url, msg, club_id)
+    
+    return my_results_details_data
+
+
+def extract_json_from_var_data(html_content):
+    """
+    Extract JSON data from 'var data =' assignment in JavaScript.
+    Returns the parsed JSON data or None if not found.
+    
+    Args:
+        html_content: HTML content string containing JavaScript
+    
+    Returns:
+        dict or None: Parsed JSON data or None if not found
+    """
+    # Look for patterns like: var data = {...}; or var data={...};
+    
+    # Pattern to match var data = {...};
+    patterns = [
+        r'var\s+data\s*=\s*(\{[^;]*\});',  # var data = {...};
+        r'var\s+data\s*=\s*(\{.*?\});',     # var data = {...}; (non-greedy)
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, html_content, re.DOTALL)
+        if match:
+            try:
+                json_str = match.group(1)
+                return json.loads(json_str)
+            except json.JSONDecodeError:
+                continue
+    
+    return None
+
+
+def _get_club_results_details_sync(url, headless=True, verbose=True):
+    """
+    Internal sync version that runs Playwright.
+    Use get_club_results_details_data_playwright() instead.
+    """
+    from playwright.sync_api import sync_playwright
+    
+    if verbose:
+        print(f"  Fetching details with Playwright: {url}")
+    
+    with sync_playwright() as p:
+        browser, context = create_acbl_browser_context(p, headless)
+        page = context.new_page()
+        
+        try:
+            response = page.goto(url, wait_until='networkidle', timeout=ACBL_PAGE_LOAD_TIMEOUT)
+            
+            if response.status != 200:
+                raise Exception(f"Failed to load page. Status code: {response.status}")
+            
+            # Get page content immediately - no need to wait for specific components
+            # since we have reliable extraction methods that work with the raw HTML
+            html_content = page.content()
+            
+        finally:
+            browser.close()
+    
+    soup = BeautifulSoup(html_content, "html.parser")
+    
+    # Method 1: Try to find the data attribute in various result detail tags
+    data = None
+    if soup.find('result-details-combined-section'):
+        data = soup.find('result-details-combined-section').get('v-bind:data')
+    elif soup.find('result-details'):
+        data = soup.find('result-details').get('v-bind:data')
+    elif soup.find('team-result-details'):
+        data = soup.find('team-result-details').get('v-bind:data')
+    
+    if data and isinstance(data, str) and len(data) > 0:
+        try:
+            return json.loads(data)
+        except json.JSONDecodeError:
+            pass
+    
+    # Method 2: Try to extract from 'var data =' in script
+    var_data = extract_json_from_var_data(html_content)
+    if var_data:
+        return var_data
+    
+    # No data found
+    return None
+
+
+def get_club_results_details_data_playwright(url, headless=True, verbose=True):
+    """
+    Retrieve detailed data for a specific club event using Playwright.
+    Returns the parsed JSON data embedded in the HTML page.
+    
+    This function is safe to call from async contexts (like Streamlit) as it runs
+    Playwright in a separate thread with its own event loop.
+    
+    Args:
+        url: URL to the club results details page (e.g., https://my.acbl.org/club-results/details/993420)
+        headless: Run browser in headless mode (default: True)
+        verbose: Print progress messages (default: True)
+    
+    Returns:
+        dict or None: Parsed JSON data from the page or None if not found
+    
+    Example:
+        >>> from mlBridgeLib.mlBridgeAcblLib import get_club_results_details_data_playwright
+        >>> details = get_club_results_details_data_playwright("https://my.acbl.org/club-results/details/993420")
+        >>> print(details['event_name'])
+    """
+    # Run in a thread with a fresh event loop to avoid conflicts with Streamlit
+    return _run_in_thread_with_new_loop(_get_club_results_details_sync, url, headless, verbose)
 
