@@ -1163,7 +1163,12 @@ def acbldf_to_mldf(df: pl.DataFrame) -> pl.DataFrame:
     df = df.rename({'dealer': 'Dealer'})
     df = df.with_columns(pl.col('Dealer').replace_strict(Direction_to_NESW_d,return_dtype=pl.String))
 
-    # todo: Shouldn't MP_Top/Pct_NS/Pct_EW be done in mlBridgeAugmentLib?
+    # todo: Shouldn't MP_Top/Pct_NS/Pct_EW calculations be left to mlBridgeAugmentLib?
+    # This is flawed. We need 2 of 3 of (Pct_NS,Pct_EW,MP_Top) or (MP_NS,MP_EW,MP_Top) to be present to calculate the others.
+    for col in ['Pct_NS','Pct_EW','MP_NS','MP_EW','MP_Top']:
+        if col in df.columns:
+            df = df.with_columns(pl.col(col).cast(pl.Float32))
+
     if 'MP_Top' not in df.columns:
         # Calculate 'MP_Top'
         df = df.with_columns([
@@ -1176,7 +1181,7 @@ def acbldf_to_mldf(df: pl.DataFrame) -> pl.DataFrame:
     # todo: Shouldn't this be done in mlBridgeAugmentLib?
     if 'Pct_NS' not in df.columns and 'Pct_EW' not in df.columns:
         df = df.with_columns([
-            (pl.col('MP_NS').cast(pl.Float32) / pl.col('MP_Top')).cast(pl.Float32).alias('Pct_NS'),
+            (pl.col('MP_NS') / pl.col('MP_Top')).cast(pl.Float32).alias('Pct_NS'),
             #(pl.col('MP_EW').cast(pl.Float32) / pl.col('MP_Top')).alias('Pct_EW')
         ])
         df = df.with_columns([
@@ -1197,6 +1202,7 @@ def acbldf_to_mldf(df: pl.DataFrame) -> pl.DataFrame:
         df = df.with_columns([
             (1 - pl.col('Pct_NS')).cast(pl.Float32).alias('Pct_EW'),
         ])
+
 
     # Function to transform names into "first last" format
     def last_first_to_first_last(name):
