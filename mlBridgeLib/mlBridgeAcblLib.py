@@ -983,13 +983,14 @@ def merge_clean_augment_club_dfs(dfs, sd_cache_d, acbl_number):  # todo: acbl_nu
     })
 
     df = df.with_columns([
+        pl.col('Club').cast(pl.Int32), # todo: convert to Categorical but must align with acbl_club_model_data or convert in predict?
         pl.col('board_record_string').cast(pl.Utf8),
         pl.col('Date').str.strptime(pl.Date, format="%Y-%m-%d %H:%M:%S"),
         #pl.col('Final_Standing_NS').cast(pl.Float32), # Final_Standing_NS is not a column in the data. use percentage instead?
         #pl.col('Final_Standing_EW').cast(pl.Float32), # Final_Standing_EW is not a column in the data. use percentage instead?
         pl.col('hand_record_id').cast(pl.Int64),
-        pl.col('Pair_Number_NS').cast(pl.UInt16),
-        pl.col('Pair_Number_EW').cast(pl.UInt16),
+        pl.col('Pair_Number_NS').cast(pl.UInt8),
+        pl.col('Pair_Number_EW').cast(pl.UInt8),
         pl.col('pair_summary_id').alias('pair_summary_id_ns'), # todo: remove this alias after ai model is updated to use pair_summary_id
         pl.col('pair_summary_id').alias('pair_summary_id_ew'), # todo: remove this alias after ai model is updated to use pair_summary_id
     ])
@@ -1133,8 +1134,8 @@ def merge_clean_augment_tournament_dfs(dfs, json_results_d, sd_cache_d, player_i
         pl.lit(results_dfs_d['event']['start_date'].to_list()[0]).str.strptime(pl.Date, format="%Y-%m-%d %H:%M:%S", strict=False).alias('Date'), # no time in the data, can't use %Y-%m-%d %H:%M:%S
         pl.lit(results_dfs_d['event']['id'].to_list()[0]).alias('event_id'),
         #pl.col('hand_record_id').cast(pl.Int64), # only box_number is present in the data
-        pl.col('Pair_Number_NS').cast(pl.UInt16),
-        pl.col('Pair_Number_EW').cast(pl.UInt16),
+        pl.col('Pair_Number_NS').cast(pl.UInt8),
+        pl.col('Pair_Number_EW').cast(pl.UInt8),
         #pl.col('pair_summary_id').alias('pair_summary_id_ns'), # todo: remove this alias after ai model is updated to use pair_summary_id
         #pl.col('pair_summary_id').alias('pair_summary_id_ew'), # todo: remove this alias after ai model is updated to use pair_summary_id
     ])
@@ -1162,18 +1163,20 @@ def acbldf_to_mldf(df: pl.DataFrame) -> pl.DataFrame:
     df = df.rename({'dealer': 'Dealer'})
     df = df.with_columns(pl.col('Dealer').replace_strict(Direction_to_NESW_d,return_dtype=pl.String))
 
-    # todo: Shouldn't this be done in mlBridgeAugmentLib?
+    # todo: Shouldn't MP_Top/Pct_NS/Pct_EW be done in mlBridgeAugmentLib?
     if 'MP_Top' not in df.columns:
         # Calculate 'MP_Top'
         df = df.with_columns([
-            pl.col('MP_NS').count().over('Board').sub(1).alias('MP_Top')
+            # which is better?
+            #pl.col('MP_NS').count().over('Board').sub().cast(pl.UInt32).alias('MP_Top')
+            pl.col("MP_NS").add(pl.col('MP_EW')).cast(pl.Float64).round(0).cast(pl.UInt32).alias("MP_Top"),
         ])
 
     # Calculate percentages. strange values and with multiple section computations. Can't all be director's adjustments?
     # todo: Shouldn't this be done in mlBridgeAugmentLib?
     if 'Pct_NS' not in df.columns and 'Pct_EW' not in df.columns:
         df = df.with_columns([
-            (pl.col('MP_NS').cast(pl.Float32) / pl.col('MP_Top')).alias('Pct_NS'),
+            (pl.col('MP_NS').cast(pl.Float32) / pl.col('MP_Top')).cast(pl.Float32).alias('Pct_NS'),
             #(pl.col('MP_EW').cast(pl.Float32) / pl.col('MP_Top')).alias('Pct_EW')
         ])
         df = df.with_columns([
@@ -1181,7 +1184,7 @@ def acbldf_to_mldf(df: pl.DataFrame) -> pl.DataFrame:
             #pl.when(pl.col('Pct_EW') > 1).then(1).otherwise(pl.col('Pct_EW')).alias('Pct_EW')
         ])
         df = df.with_columns([
-            (1 - pl.col('Pct_NS')).alias('Pct_EW'),
+            (1 - pl.col('Pct_NS')).cast(pl.Float32).alias('Pct_EW'),
         ])
     else:   
         # Cap percentages at 1
@@ -1192,7 +1195,7 @@ def acbldf_to_mldf(df: pl.DataFrame) -> pl.DataFrame:
         ])
         # I've seen some seemingly correct Pct_NS but null for Pct_EW. Mystery. Can't all be director's adjustments?
         df = df.with_columns([
-            (1 - pl.col('Pct_NS')).alias('Pct_EW'),
+            (1 - pl.col('Pct_NS')).cast(pl.Float32).alias('Pct_EW'),
         ])
 
     # Function to transform names into "first last" format
@@ -1340,12 +1343,12 @@ def acbldf_to_mldf(df: pl.DataFrame) -> pl.DataFrame:
     # Fill missing values
     if 'Round' in df.columns:
         df = df.with_columns([
-            pl.col('Round').fill_null(0),
+            pl.col('Round').fill_null(0).cast(pl.UInt8),
         ])
 
     if 'tb_count' in df.columns:
         df = df.with_columns([
-            pl.col('tb_count').fill_null(0).cast(pl.UInt8),
+            pl.col('tb_count').fill_null(0).cast(pl.Float32), # could be half table
         ])
 
     if 'Table' in df.columns:
