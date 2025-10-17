@@ -938,6 +938,22 @@ def merge_clean_augment_club_dfs(dfs, sd_cache_d, acbl_number):  # todo: acbl_nu
     df_pair_summary_players_ew = df_br_b_pair_summary_ew.join(player_ew, on='pair_summary_id', how='left')
     assert df_pair_summary_players_ew.height == df_br_b_pair_summary_ew.height
 
+    # Rename pair summary columns with _NS and _EW suffixes to avoid _right suffix confusion
+    pair_summary_columns_to_rename = [
+        'pair_summary_id', 'event_pair_type', 'pair_type_id', 'pair_number', 
+        'direction', 'strat', 'boards_played', 'score', 'percentage', 
+        'adjustment', 'handicap', 'raw_score', 'is_eligible', 'awardFinal', 
+        'strat_place', 'session_scores', 'players'
+    ]
+    
+    # Rename NS columns
+    ns_rename_dict = {col: f'{col}_NS' for col in pair_summary_columns_to_rename if col in df_pair_summary_players_ns.columns}
+    df_pair_summary_players_ns = df_pair_summary_players_ns.rename(ns_rename_dict)
+    
+    # Rename EW columns
+    ew_rename_dict = {col: f'{col}_EW' for col in pair_summary_columns_to_rename if col in df_pair_summary_players_ew.columns}
+    df_pair_summary_players_ew = df_pair_summary_players_ew.rename(ew_rename_dict)
+
     df_br_b_sections_sessions_events_pair_summary_players = df_br_b_sections_sessions_events.join(df_pair_summary_players_ns, on=['section_id', 'ns_pair'], how='left')
     print_to_log_info(df_br_b_sections_sessions_events_pair_summary_players.head(1))
     assert df_br_b_sections_sessions_events_pair_summary_players.height == df_br_b_sections_sessions_events.height
@@ -985,14 +1001,14 @@ def merge_clean_augment_club_dfs(dfs, sd_cache_d, acbl_number):  # todo: acbl_nu
     df = df.with_columns([
         pl.col('Club').cast(pl.Int32), # todo: convert to Categorical but must align with acbl_club_model_data or convert in predict?
         pl.col('board_record_string').cast(pl.Utf8),
-        pl.col('Date').str.strptime(pl.Date, format="%Y-%m-%d %H:%M:%S"),
+        pl.col('Date').str.strptime(pl.Date, format="%Y-%m-%d %H:%M:%S"), # game_date has both date and time, but tournament start_date has only date.
         #pl.col('Final_Standing_NS').cast(pl.Float32), # Final_Standing_NS is not a column in the data. use percentage instead?
         #pl.col('Final_Standing_EW').cast(pl.Float32), # Final_Standing_EW is not a column in the data. use percentage instead?
         pl.col('hand_record_id').cast(pl.Int64),
         pl.col('Pair_Number_NS').cast(pl.UInt8),
         pl.col('Pair_Number_EW').cast(pl.UInt8),
-        pl.col('pair_summary_id').alias('pair_summary_id_ns'), # todo: remove this alias after ai model is updated to use pair_summary_id
-        pl.col('pair_summary_id').alias('pair_summary_id_ew'), # todo: remove this alias after ai model is updated to use pair_summary_id
+        pl.col('pair_summary_id_NS').alias('pair_summary_id_ns'), # todo: remove this alias after ai model is updated to use pair_summary_id
+        pl.col('pair_summary_id_EW').alias('pair_summary_id_ew'), # todo: remove this alias after ai model is updated to use pair_summary_id
     ])
 
     df = acbldf_to_mldf(df) # todo: temporarily convert to pandas to use augment_df until clean_validate_df is converted to polars
@@ -1131,7 +1147,7 @@ def merge_clean_augment_tournament_dfs(dfs, json_results_d, sd_cache_d, player_i
         (pl.col('percentage_ns')/100).cast(pl.Float32).alias('Pct_NS'),
         (pl.col('percentage_ew')/100).cast(pl.Float32).alias('Pct_EW'),
         #pl.col('board_record_string').cast(pl.Utf8),
-        pl.lit(results_dfs_d['event']['start_date'].to_list()[0]).str.strptime(pl.Date, format="%Y-%m-%d %H:%M:%S", strict=False).alias('Date'), # no time in the data, can't use %Y-%m-%d %H:%M:%S
+        pl.lit(results_dfs_d['event']['start_date'].to_list()[0]).str.strptime(pl.Date, format="%Y-%m-%d").alias('Date'), # tournament start_date has only date so can't use %Y-%m-%d
         pl.lit(results_dfs_d['event']['id'].to_list()[0]).alias('event_id'),
         #pl.col('hand_record_id').cast(pl.Int64), # only box_number is present in the data
         pl.col('Pair_Number_NS').cast(pl.UInt8),
