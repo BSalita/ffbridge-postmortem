@@ -84,6 +84,28 @@ class DataFramesDict(TypedDict):
     boards: Optional[pl.DataFrame]
     score_frequency: Optional[pl.DataFrame]
 
+
+def _derive_person_organization_id_scalar(members_df: pl.DataFrame) -> Optional[int]:
+    """Derive a single person_organization_id from members DataFrame.
+    Preference order:
+    1) st.session_state.org_id if present in seasons_organization_id
+    2) last value of unique(non-null) seasons_organization_id
+    3) None
+    """
+    try:
+        if members_df is None or 'seasons_organization_id' not in members_df.columns:
+            return None
+        person_org_series = members_df['seasons_organization_id'].drop_nulls().unique()
+        candidate_ids = person_org_series.to_list() if hasattr(person_org_series, 'to_list') else list(person_org_series)
+        org_id = st.session_state.get('org_id')
+        if org_id in candidate_ids:
+            return int(org_id)
+        if len(candidate_ids):
+            return int(candidate_ids[-1])
+    except Exception:
+        pass
+    return None
+
 def make_api_request_licencie(full_url: str, headers: Optional[Dict[str, str]] = None) -> Optional[Dict[str, Any]]:
     """Make API request with full URL
     
@@ -494,7 +516,15 @@ def get_df_from_api_name_licencie(k: str, url: str) -> pl.DataFrame:
         Polars DataFrame containing the processed API response data
     """
 
+    # Ensure df is defined even if a branch fails unexpectedly
+    df = pl.DataFrame([])
+
     match k:
+        case 'search':
+            json_data = make_api_request_licencie(url)
+            if json_data is None:
+                raise Exception(f"Failed to get data from {url}")
+            df = pl.DataFrame(pd.json_normalize(json_data, sep='_'))
         case 'simultaneous_deals':
             json_datas = []
             for i in range(1, st.session_state.nb_deals+1):
@@ -992,6 +1022,52 @@ def get_ffbridge_licencie_get_urls(api_urls_d: Dict[str, Tuple[str, bool]]) -> T
     return dfs, api_urls_d
 
 
+def populate_game_urls_for_player(player_id: str) -> bool:
+    """Populate st.session_state.game_urls_d for a given player without changing session_id.
+    Returns True if games were populated (length > 0), False otherwise.
+    """
+    if player_id in st.session_state.game_urls_d and st.session_state.game_urls_d[player_id]:
+        return True
+    api_urls_d = {
+        'members': (f"https://api.ffbridge.fr/api/v1/members/{player_id}", False),
+        'person': (f"https://api.ffbridge.fr/api/v1/licensee-results/results/person/{player_id}?date=all&place=0&type=0", False),
+    }
+    try:
+        dfs, _ = get_ffbridge_licencie_get_urls(api_urls_d)
+        if 'tournament_id' in dfs['person'].columns:
+            st.session_state.game_urls_d[player_id] = {k: v for k, v in zip(dfs['person']['tournament_id'], dfs['person'].to_dicts())}
+        else:
+            if 'id' in dfs['person'].columns:
+                st.session_state.game_urls_d[player_id] = {k: v for k, v in zip(dfs['person']['id'], dfs['person'].to_dicts())}
+            elif len(dfs['person']) > 0:
+                st.session_state.game_urls_d[player_id] = {i: v for i, v in enumerate(dfs['person'].to_dicts())}
+            else:
+                # Preserve any existing cache; otherwise leave empty
+                if not (player_id in st.session_state.game_urls_d and st.session_state.game_urls_d[player_id]):
+                    st.session_state.game_urls_d[player_id] = {}
+        st.session_state.person_organization_id = _derive_person_organization_id_scalar(dfs['members'])
+        return len(st.session_state.game_urls_d.get(player_id, {})) > 0
+    except Exception:
+        # Retry once
+        try:
+            dfs, _ = get_ffbridge_licencie_get_urls(api_urls_d)
+            if 'tournament_id' in dfs['person'].columns:
+                st.session_state.game_urls_d[player_id] = {k: v for k, v in zip(dfs['person']['tournament_id'], dfs['person'].to_dicts())}
+            else:
+                if 'id' in dfs['person'].columns:
+                    st.session_state.game_urls_d[player_id] = {k: v for k, v in zip(dfs['person']['id'], dfs['person'].to_dicts())}
+                elif len(dfs['person']) > 0:
+                    st.session_state.game_urls_d[player_id] = {i: v for i, v in enumerate(dfs['person'].to_dicts())}
+                else:
+                    if not (player_id in st.session_state.game_urls_d and st.session_state.game_urls_d[player_id]):
+                        st.session_state.game_urls_d[player_id] = {}
+            st.session_state.person_organization_id = dfs['members']['seasons_organization_id']
+            return len(st.session_state.game_urls_d.get(player_id, {})) > 0
+        except Exception as e2:
+            # Keep cached games if present
+            return len(st.session_state.game_urls_d.get(player_id, {})) > 0
+
+
 def change_game_state(player_id: str, session_id: str) -> None: # todo: rename to session_id?
 
     print(f"=== change_game_state START: player_id={player_id}, session_id={session_id} ===")
@@ -1031,15 +1107,39 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
                             # Use row index as key if no suitable ID column found
                             st.session_state.game_urls_d[player_id] = {i:v for i,v in enumerate(dfs['person'].to_dicts())}
                         else:
-                            st.session_state.game_urls_d[player_id] = {}
+                            # Preserve existing cached games if present
+                            if player_id in st.session_state.game_urls_d and st.session_state.game_urls_d[player_id]:
+                                st.warning("Using cached games due to empty results.")
+                            else:
+                                st.session_state.game_urls_d[player_id] = {}
                     
-                    st.session_state.person_organization_id = dfs['members']['seasons_organization_id'] # person's signup organization id e.g. 1212 for St Honore BC
+                    # Derive a single person_organization_id scalar (not a Series)
+                    st.session_state.person_organization_id = _derive_person_organization_id_scalar(dfs['members'])
                     
                 except Exception as e:
-                    print(f"Error loading player data for {player_id}: {e}")
-                    st.error(f"Error loading player data: {str(e)}")
-                    st.session_state.game_urls_d[player_id] = {}
-                    return True  # Return True to indicate error
+                    # Retry once before falling back to cache
+                    try:
+                        dfs, api_urls_d = get_ffbridge_licencie_get_urls(api_urls_d)
+                        if 'tournament_id' in dfs['person'].columns:
+                            st.session_state.game_urls_d[player_id] = {k:v for k,v in zip(dfs['person']['tournament_id'], dfs['person'].to_dicts())}
+                        else:
+                            if 'id' in dfs['person'].columns:
+                                st.session_state.game_urls_d[player_id] = {k:v for k,v in zip(dfs['person']['id'], dfs['person'].to_dicts())}
+                            elif len(dfs['person']) > 0:
+                                st.session_state.game_urls_d[player_id] = {i:v for i,v in enumerate(dfs['person'].to_dicts())}
+                            else:
+                                if player_id in st.session_state.game_urls_d and st.session_state.game_urls_d[player_id]:
+                                    st.warning("Using cached games due to empty results.")
+                                else:
+                                    st.session_state.game_urls_d[player_id] = {}
+                        st.session_state.person_organization_id = _derive_person_organization_id_scalar(dfs['members'])
+                    except Exception as e2:
+                        print(f"Error loading player data for {player_id}: {e2}")
+                        st.error(f"Error loading player data: {str(e2)}")
+                        # Only clear if no cache exists; otherwise, keep cached games
+                        if not (player_id in st.session_state.game_urls_d and st.session_state.game_urls_d[player_id]):
+                            st.session_state.game_urls_d[player_id] = {}
+                            return True  # Only signal error if we have nothing to show
         game_urls = st.session_state.game_urls_d[player_id]
         if game_urls is None:
             st.error(f"Player number {player_id} not found.")
@@ -1126,8 +1226,8 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
             'my_infos': (f"https://api.ffbridge.fr/api/v1/users/my/infos", False),
             'members': (f"https://api.ffbridge.fr/api/v1/members/{st.session_state.player_id}", False),
             'person': (f"https://api.ffbridge.fr/api/v1/licensee-results/results/person/{st.session_state.player_id}?date=all&place=0&type=0", False),
-            'organization_by_person_organization_id': (f"https://api.ffbridge.fr/api/v1/licensee-results/results/organization/{st.session_state.org_id}?date=all&person_organization_id={st.session_state.person_organization_id}&place=0&type=0", False),
-            'person_by_person_organization_id': (f"https://api.ffbridge.fr/api/v1/licensee-results/results/person/{st.session_state.player_id}?date=all&person_organization_id={st.session_state.person_organization_id}&place=0&type=0", False),
+            'organization_by_person_organization_id': (f"https://api.ffbridge.fr/api/v1/licensee-results/results/organization/{st.session_state.org_id}?date=all&person_organization_id={str(st.session_state.person_organization_id or '')}&place=0&type=0", False),
+            'person_by_person_organization_id': (f"https://api.ffbridge.fr/api/v1/licensee-results/results/person/{st.session_state.player_id}?date=all&person_organization_id={str(st.session_state.person_organization_id or '')}&place=0&type=0", False),
         }
         dfs, api_urls = get_ffbridge_licencie_get_urls(api_urls_d)
         if st.session_state.simultaneeCode  == 'RRN':
@@ -1546,7 +1646,11 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
             df = boards_df.join(df, on='Board', how='left')
             print(f"After final join with roadsheets - df shape: {df.shape}")
         else:
-            df = mlBridgeFFLib.convert_ffdf_api_to_mldf(dfs)
+            try:
+                df = mlBridgeFFLib.convert_ffdf_api_to_mldf(dfs)
+            except Exception as e:
+                st.error(str(e))
+                return True
 
         if st.session_state.debug_mode:
             st.caption(f"Final dataframe: Shape:{df.shape}")
@@ -1589,7 +1693,7 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
                     with st.spinner('Creating ffbridge data to dataframe...'):
                         df = augment_df(df)
                     if df is not None:
-                        st.rerun() # todo: not sure what is needed to recover from error:
+                        st.session_state.df_ready = True  # main loop can notice and proceed
                     ffbridge_session_player_cache_dir = pathlib.Path(st.session_state.cache_dir)
                     ffbridge_session_player_cache_dir.mkdir(exist_ok=True)  # Creates directory if it doesn't exist
                     ffbridge_session_player_cache_df_filename = f'{st.session_state.cache_dir}/df-{st.session_state.session_id}-{st.session_state.player_id}.parquet'
@@ -1657,8 +1761,9 @@ def show_player_selection_modal(filtered_options):
                             if hasattr(st.session_state, 'show_player_modal'):
                                 del st.session_state.show_player_modal
                             
-                            # Rerun to update the textbox and dismiss dialog
-                            st.rerun()
+                            # Flag for main loop to refresh after modal selection
+                            st.session_state.deferred_start_report = True
+                            st.experimental_set_query_params()  # no-op to mark state change
                             return
                 
     with col2:
@@ -1777,12 +1882,19 @@ def player_search_input_on_change_with_query(query: str) -> None:
             del st.session_state.player_search_error
         if hasattr(st.session_state, 'player_search_matches'):
             del st.session_state.player_search_matches
-        change_game_state(player_id, None)
-        st.session_state.sql_query_mode = False
+        
+        # Defer report start: first refresh sidebar with games, then start report
+        st.session_state.player_id = str(player_id)
+        try:
+            populate_game_urls_for_player(st.session_state.player_id)
+        except Exception as _:
+            pass
+        st.session_state.deferred_start_report = True
+        return
         
     except Exception as e:
-        # Store error message in session state to persist across reruns
-        st.session_state.player_search_error = f"Error searching for player '{query}': {str(e)}"
+        # Store only the underlying error message (no prefix) for clarity
+        st.session_state.player_search_error = str(e)
         # Clear any previous matches
         if hasattr(st.session_state, 'player_search_matches'):
             del st.session_state.player_search_matches
@@ -2129,6 +2241,20 @@ class FFBridgeApp(PostmortemBase):
     def create_ui(self):
         """Creates the main UI structure for FFBridge."""
         self.create_sidebar()
+        # If a new player was entered, refresh sidebar first then start report
+        if st.session_state.get('deferred_start_report', False):
+            # Ensure games are available
+            if st.session_state.player_id is not None:
+                populate_game_urls_for_player(str(st.session_state.player_id))
+                # Start report on first available game
+                game_urls = st.session_state.game_urls_d.get(st.session_state.player_id, {})
+                if len(game_urls) > 0:
+                    st.session_state.deferred_start_report = False
+                    change_game_state(str(st.session_state.player_id), None)
+                    st.session_state.sql_query_mode = False
+                    # Defer clearing search inputs to before widget creation
+                    st.session_state.clear_player_search = True
+                    return
         if not st.session_state.sql_query_mode:
             # Show Morty instructions if no player is selected
             if st.session_state.player_id is None:
@@ -2165,6 +2291,7 @@ class FFBridgeApp(PostmortemBase):
                     )
                     app_info()
             elif st.session_state.session_id is not None:
+                st.session_state.report_rendering = True
                 try:
                     print(f"Starting report generation for player_id={st.session_state.player_id}, session_id={st.session_state.session_id}")
                     self.write_report()
@@ -2174,10 +2301,9 @@ class FFBridgeApp(PostmortemBase):
                     import traceback
                     traceback.print_exc()
                     st.error(f"Error generating report: {str(e)}")
-                    # Reset to initial state on error
-                    st.session_state.player_id = None
-                    st.session_state.session_id = None
-                    st.rerun()
+                finally:
+                    st.session_state.report_rendering = False
+                    
         self.ask_sql_query()
 
     def create_sidebar(self):
@@ -2206,14 +2332,11 @@ class FFBridgeApp(PostmortemBase):
                         row = list(dfs['search'].iter_rows(named=True))[0]
                         player_id = row['person_id']  # This is the actual player ID
                         
-                        # Generate report with player ID (not license number)
-                        result = change_game_state(str(player_id), None)
-                        if not result:  # False means success
-                            st.session_state.sql_query_mode = False
-                            st.rerun()
-                            return
-                        else:
-                            st.error(f"Error loading player data for license {input_value}")
+                        # Populate sidebar first, then defer report start until after sidebar refresh
+                        st.session_state.player_id = str(player_id)
+                        populate_game_urls_for_player(st.session_state.player_id)
+                        st.session_state.deferred_start_report = True
+                        return
                     else:
                         # Multiple players found - this shouldn't happen with exact license numbers
                         st.error(f"Multiple players found for license '{input_value}'. This is unexpected.")
@@ -2232,9 +2355,14 @@ class FFBridgeApp(PostmortemBase):
         # Player search with modal dialog
         # Use a separate value state that can be updated
         # Use the stored value, or empty for truly fresh searches
+        # Clear the text input value before instantiation if flagged
+        if st.session_state.get('clear_player_search'):
+            st.session_state.player_search_input = ''
+            st.session_state.player_search_value = ''
+            del st.session_state.clear_player_search
         current_value = st.session_state.get('player_search_value', '')
             
-        # Simple textbox with Go button below it
+        # Simple textbox with Go button below it (Enter also triggers)
         search_input = st.sidebar.text_input(
             "Enter ffbridge license number",
             value=current_value,
@@ -2243,6 +2371,17 @@ class FFBridgeApp(PostmortemBase):
             placeholder="Enter license number",
             help="Enter ffbridge license number or (partial) last name."
         )
+        # If user pressed Enter, the on_change above already ran; if it populated a player, set deferred start
+        if (st.session_state.get('player_id') and
+            st.session_state.get('player_search_value') == st.session_state.get('player_search_input') and
+            not st.session_state.get('session_id') and
+            not st.session_state.get('deferred_start_report')):
+            # Ensure games are populated and then trigger report start on next cycle
+            try:
+                populate_game_urls_for_player(str(st.session_state.player_id))
+            except Exception:
+                pass
+            st.session_state.deferred_start_report = True
         
         # Show Go button only after dialog returns with a license number (numeric)
         if current_value and current_value.strip().isdigit():
@@ -2278,8 +2417,19 @@ class FFBridgeApp(PostmortemBase):
                 show_player_selection_modal(filtered_options)
 
         if st.session_state.player_id is None:
-            return
+            st.sidebar.caption("Select a player or enter a license to continue.")
+        
+        # If a player is selected but games haven't been loaded yet, try to populate them
+        if (st.session_state.player_id is not None and
+            st.session_state.player_id not in st.session_state.game_urls_d):
+            try:
+                populate_game_urls_for_player(str(st.session_state.player_id))
+            except Exception as e:
+                print(f"Auto-populate games failed for player {st.session_state.player_id}: {e}")
 
+        self.read_configs()
+
+        is_report_running = bool(st.session_state.get('report_rendering'))
         if st.session_state.player_id in st.session_state.game_urls_d:
             st.sidebar.selectbox(
                 "Choose a club game.", 
@@ -2288,13 +2438,14 @@ class FFBridgeApp(PostmortemBase):
                 on_change=club_session_id_on_change, 
                 key='club_session_ids_selectbox'
             )
-        
-        self.read_configs()
-
-        st.sidebar.link_button('View ffbridge Webpage', url=st.session_state.get('game_url', ''))
-        if st.session_state.get('route_url') is not None:
-            st.sidebar.link_button('View Roy Rene Webpage', url=st.session_state.route_url)
-        st.session_state.pdf_link = st.sidebar.empty()
+            # Show a small verification of how many games are available
+            st.sidebar.caption(f"Games found: {len(st.session_state.game_urls_d.get(st.session_state.player_id, {}))}")
+            # Only show external links after one render pass completes (even with error)
+            if not is_report_running and st.session_state.get('game_url'):
+                st.sidebar.link_button('View ffbridge Webpage', url=st.session_state.get('game_url', ''))
+                if st.session_state.get('route_url') is not None:
+                    st.sidebar.link_button('View Roy Rene Webpage', url=st.session_state.route_url)
+            st.session_state.pdf_link = st.sidebar.empty()
 
         with st.sidebar.expander('Developer Settings', False):
             st.number_input(
