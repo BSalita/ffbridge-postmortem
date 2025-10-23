@@ -2254,6 +2254,8 @@ class FFBridgeApp(PostmortemBase):
                     st.session_state.sql_query_mode = False
                     # Defer clearing search inputs to before widget creation
                     st.session_state.clear_player_search = True
+                    # Immediately rerun so the report renders without requiring Go
+                    st.rerun()
                     return
         if not st.session_state.sql_query_mode:
             # Show Morty instructions if no player is selected
@@ -2352,6 +2354,25 @@ class FFBridgeApp(PostmortemBase):
         
         st.sidebar.caption(f"Build:{st.session_state.app_datetime}")
 
+        # Style primary buttons in the sidebar (e.g., Go) to green
+        st.markdown(
+            """
+            <style>
+            [data-testid="stSidebar"] button[kind="primary"] {
+                background-color: #2e7d32 !important;
+                border-color: #2e7d32 !important;
+                color: #ffffff !important;
+            }
+            [data-testid="stSidebar"] button[kind="primary"]:hover {
+                background-color: #1b5e20 !important;
+                border-color: #1b5e20 !important;
+                color: #ffffff !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
         # Player search with modal dialog
         # Use a separate value state that can be updated
         # Use the stored value, or empty for truly fresh searches
@@ -2383,12 +2404,20 @@ class FFBridgeApp(PostmortemBase):
                 pass
             st.session_state.deferred_start_report = True
         
-        # Show Go button only after dialog returns with a license number (numeric)
-        if current_value and current_value.strip().isdigit():
-            if st.sidebar.button("Go", use_container_width=True, type="primary"):
-                # Store the input for processing outside sidebar context
-                st.session_state.process_go_button_input = current_value.strip()
-                st.rerun()
+        # Show Go button directly under the input (always visible; disabled until numeric)
+        is_numeric_input = bool(current_value and current_value.strip().isdigit())
+        if st.sidebar.button("Go", use_container_width=True, type="primary", disabled=not is_numeric_input):
+            # Store the input for processing outside sidebar context
+            st.session_state.process_go_button_input = current_value.strip()
+            st.rerun()
+        # Auto-start the report once when numeric input appears
+        if (is_numeric_input and
+            not st.session_state.get('session_id') and
+            not st.session_state.get('deferred_start_report') and
+            not st.session_state.get('auto_go_triggered')):
+            st.session_state.process_go_button_input = current_value.strip()
+            st.session_state.auto_go_triggered = True
+            st.rerun()
         
         # Show instruction when license number is populated
         if current_value and current_value.strip().isdigit():
@@ -2440,13 +2469,26 @@ class FFBridgeApp(PostmortemBase):
             )
             # Show a small verification of how many games are available
             st.sidebar.caption(f"Games found: {len(st.session_state.game_urls_d.get(st.session_state.player_id, {}))}")
-            # Only show external links after one render pass completes (even with error)
-            if not is_report_running and st.session_state.get('game_url'):
-                st.sidebar.link_button('View ffbridge Webpage', url=st.session_state.get('game_url', ''))
-                if st.session_state.get('route_url') is not None:
-                    st.sidebar.link_button('View Roy Rene Webpage', url=st.session_state.route_url)
-            st.session_state.pdf_link = st.sidebar.empty()
 
+        # External links (after render pass completes, even on error)
+        if not is_report_running and st.session_state.get('game_url'):
+            st.sidebar.link_button('View ffbridge Webpage', url=st.session_state.get('game_url', ''))
+            if st.session_state.get('route_url') is not None:
+                st.sidebar.link_button('View Roy Rene Webpage', url=st.session_state.route_url)
+        # Download Personalized Report PDF button placeholder (below the link button)
+        st.session_state.pdf_link = st.sidebar.empty()
+
+        # Automated Postmortem Apps
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("**Automated Postmortem Apps**")
+        st.sidebar.markdown("🔗 [ACBL Postmortem](https://acbl.postmortem.chat)")
+        st.sidebar.markdown("🔗 [French ffbridge Postmortem](https://ffbridge.postmortem.chat)")
+        #st.sidebar.markdown("🔗 [BridgeWebs Postmortem](https://bridgewebs.postmortem.chat)")
+
+        # Separator above Developer Settings
+        st.sidebar.markdown("---")
+
+        # Developer Settings moved to bottom
         with st.sidebar.expander('Developer Settings', False):
             st.number_input(
                 "Single Dummy Samples Count",
@@ -2487,13 +2529,6 @@ class FFBridgeApp(PostmortemBase):
                 on_change=debug_mode_on_change,
                 help='Show SQL used to query dataframes.'
             )
-
-        # Automated Postmortem Apps
-        st.sidebar.markdown("---")
-        st.sidebar.markdown("**Automated Postmortem Apps**")
-        st.sidebar.markdown("🔗 [ACBL Postmortem](https://acbl.postmortem.chat)")
-        st.sidebar.markdown("🔗 [French ffbridge Postmortem](https://ffbridge.postmortem.chat)")
-        #st.sidebar.markdown("🔗 [BridgeWebs Postmortem](https://bridgewebs.postmortem.chat)")
 
 def initialize_ffbridge_bearer_token() -> None:
     """Initialize FFBridge Bearer token from .env file or environment variables"""
