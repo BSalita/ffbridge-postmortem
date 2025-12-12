@@ -1743,7 +1743,7 @@ def show_player_selection_modal(filtered_options):
     col1, col2 = st.columns(2)
     
     with col1:
-        if st.button("Select", disabled=selected_option is None, use_container_width="stretch", type="primary"):
+        if st.button("Select", disabled=selected_option is None, width="stretch", type="primary"):
             if selected_option:
                 # Find the actual player_id for the selected option
                 if hasattr(st.session_state, 'player_search_matches'):
@@ -1767,7 +1767,7 @@ def show_player_selection_modal(filtered_options):
                             return
                 
     with col2:
-        if st.button("Cancel", use_container_width="stretch"):
+        if st.button("Cancel", width="stretch"):
             # Clear dialog state immediately (like X button does)
             if hasattr(st.session_state, 'player_search_matches'):
                 del st.session_state.player_search_matches
@@ -2406,7 +2406,7 @@ class FFBridgeApp(PostmortemBase):
         
         # Show Go button directly under the input (always visible; disabled until numeric)
         is_numeric_input = bool(current_value and current_value.strip().isdigit())
-        if st.sidebar.button("Go", use_container_width="stretch", type="primary", disabled=not is_numeric_input):
+        if st.sidebar.button("Go", width="stretch", type="primary", disabled=not is_numeric_input):
             # Store the input for processing outside sidebar context
             st.session_state.process_go_button_input = current_value.strip()
             st.rerun()
