@@ -721,10 +721,13 @@ def get_df_from_api_name_licencie(k: str, url: str) -> pl.DataFrame:
         case _:
             json_data = make_api_request_licencie(url)
             if json_data is None:
-                raise Exception(f"Failed to get data from {url}")
+                raise Exception(f"Failed to get data from {url} possibly due to data not yet available. Try again in 24 hours.")
     
             # Create DataFrame from the JSON response. json_data can be a dict or a list.
-            df = pl.DataFrame(pd.json_normalize(json_data, sep='_'))
+            try:
+                df = pl.DataFrame(pd.json_normalize(json_data, sep='_'))
+            except Exception as e:
+                raise Exception(f"Failed to create DataFrame from {url} possibly due to data not yet available. Try again in 24 hours. {e}")
             if 'functions' in df.columns: # my_infos['functions'] is a list of null. ignore it.
                 df = df.drop('functions')
     # Handle any remaining List or Struct columns that couldn't be processed
