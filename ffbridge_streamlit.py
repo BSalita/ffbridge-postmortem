@@ -1766,7 +1766,7 @@ def show_player_selection_modal(filtered_options):
                             
                             # Flag for main loop to refresh after modal selection
                             st.session_state.deferred_start_report = True
-                            st.experimental_set_query_params()  # no-op to mark state change
+                            st.set_query_params()  # no-op to mark state change
                             return
                 
     with col2:
