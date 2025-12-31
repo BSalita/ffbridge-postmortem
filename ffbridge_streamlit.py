@@ -1770,32 +1770,40 @@ def show_player_selection_modal(filtered_options):
                             
                             # Don't auto-start report - let user click Go button
                             # This allows modal to close quickly without waiting for report generation
-                            
-                            # Simulate clicking the X button to use Streamlit's native dismissal
-                            # This provides the same immediate close behavior as clicking X
+                            # Close the modal immediately like clicking the "X" does (client-side),
+                            # without triggering a Streamlit rerun (which can take ~1 minute).
+                            #
+                            # We also set the sidebar textbox value visually so the user sees it
+                            # right away; the authoritative value is still in st.session_state
+                            # and will persist on the next rerun (e.g., when clicking Go).
                             st.components.v1.html(
-                                """
+                                f"""
                                 <script>
-                                (function() {
-                                    // Find and click the modal's close button (X)
-                                    var closeBtn = parent.document.querySelector('[data-testid="stModal"] button[aria-label="Close"]');
-                                    if (!closeBtn) {
-                                        // Try alternative selectors
-                                        closeBtn = parent.document.querySelector('[data-testid="stModal"] [data-testid="stModalCloseButton"]');
-                                    }
-                                    if (!closeBtn) {
-                                        // Try finding any close button in the modal header
-                                        closeBtn = parent.document.querySelector('[data-testid="stModal"] header button');
-                                    }
-                                    if (closeBtn) {
-                                        closeBtn.click();
-                                    }
-                                })();
+                                (function() {{
+                                  const doc = parent.document;
+
+                                  // Update the sidebar textbox visually (no events => no rerun)
+                                  const inputs = Array.from(doc.querySelectorAll('input'));
+                                  const targetInput = inputs.find(i =>
+                                    i.getAttribute('aria-label') === 'Enter ffbridge license number' ||
+                                    i.getAttribute('placeholder') === 'Enter license number'
+                                  );
+                                  if (targetInput) {{
+                                    targetInput.value = {license_number!r};
+                                  }}
+
+                                  // Click the modal close (X) button
+                                  const closeBtn =
+                                    doc.querySelector('[data-testid="stModal"] button[aria-label="Close"]') ||
+                                    doc.querySelector('[data-testid="stModal"] [data-testid="stModalCloseButton"]') ||
+                                    doc.querySelector('[data-testid="stModal"] header button');
+                                  if (closeBtn) closeBtn.click();
+                                }})();
                                 </script>
                                 """,
-                                height=0
+                                height=0,
                             )
-                            return
+                            st.stop()
                 
     with col2:
         if st.button("Cancel", width="stretch"):
@@ -1807,29 +1815,24 @@ def show_player_selection_modal(filtered_options):
             # Clear the modal flag as well
             if hasattr(st.session_state, 'show_player_modal'):
                 del st.session_state.show_player_modal
-            
-            # Simulate clicking the X button to use Streamlit's native dismissal
+
+            # Close the modal immediately like clicking the "X" does, without rerun.
             st.components.v1.html(
                 """
                 <script>
                 (function() {
-                    // Find and click the modal's close button (X)
-                    var closeBtn = parent.document.querySelector('[data-testid="stModal"] button[aria-label="Close"]');
-                    if (!closeBtn) {
-                        closeBtn = parent.document.querySelector('[data-testid="stModal"] [data-testid="stModalCloseButton"]');
-                    }
-                    if (!closeBtn) {
-                        closeBtn = parent.document.querySelector('[data-testid="stModal"] header button');
-                    }
-                    if (closeBtn) {
-                        closeBtn.click();
-                    }
+                  const doc = parent.document;
+                  const closeBtn =
+                    doc.querySelector('[data-testid="stModal"] button[aria-label="Close"]') ||
+                    doc.querySelector('[data-testid="stModal"] [data-testid="stModalCloseButton"]') ||
+                    doc.querySelector('[data-testid="stModal"] header button');
+                  if (closeBtn) closeBtn.click();
                 })();
                 </script>
                 """,
-                height=0
+                height=0,
             )
-            return
+            st.stop()
 
 
 def player_search_input_on_change_with_query(query: str) -> None:
