@@ -1771,23 +1771,31 @@ def show_player_selection_modal(filtered_options):
                             # Don't auto-start report - let user click Go button
                             # This allows modal to close quickly without waiting for report generation
                             
-                            # Inject CSS to hide the modal overlay during rerun transition
-                            st.markdown(
+                            # Simulate clicking the X button to use Streamlit's native dismissal
+                            # This provides the same immediate close behavior as clicking X
+                            st.components.v1.html(
                                 """
-                                <style>
-                                [data-testid="stModal"], 
-                                [data-testid="stModalOverlay"],
-                                .stModal {
-                                    display: none !important;
-                                    visibility: hidden !important;
-                                }
-                                </style>
+                                <script>
+                                (function() {
+                                    // Find and click the modal's close button (X)
+                                    var closeBtn = parent.document.querySelector('[data-testid="stModal"] button[aria-label="Close"]');
+                                    if (!closeBtn) {
+                                        // Try alternative selectors
+                                        closeBtn = parent.document.querySelector('[data-testid="stModal"] [data-testid="stModalCloseButton"]');
+                                    }
+                                    if (!closeBtn) {
+                                        // Try finding any close button in the modal header
+                                        closeBtn = parent.document.querySelector('[data-testid="stModal"] header button');
+                                    }
+                                    if (closeBtn) {
+                                        closeBtn.click();
+                                    }
+                                })();
+                                </script>
                                 """,
-                                unsafe_allow_html=True
+                                height=0
                             )
-                            
-                            # Rerun to apply session state changes (CSS above hides grey overlay)
-                            st.rerun()
+                            return
                 
     with col2:
         if st.button("Cancel", width="stretch"):
@@ -1800,23 +1808,28 @@ def show_player_selection_modal(filtered_options):
             if hasattr(st.session_state, 'show_player_modal'):
                 del st.session_state.show_player_modal
             
-            # Inject CSS to hide the modal overlay during rerun transition
-            st.markdown(
+            # Simulate clicking the X button to use Streamlit's native dismissal
+            st.components.v1.html(
                 """
-                <style>
-                [data-testid="stModal"], 
-                [data-testid="stModalOverlay"],
-                .stModal {
-                    display: none !important;
-                    visibility: hidden !important;
-                }
-                </style>
+                <script>
+                (function() {
+                    // Find and click the modal's close button (X)
+                    var closeBtn = parent.document.querySelector('[data-testid="stModal"] button[aria-label="Close"]');
+                    if (!closeBtn) {
+                        closeBtn = parent.document.querySelector('[data-testid="stModal"] [data-testid="stModalCloseButton"]');
+                    }
+                    if (!closeBtn) {
+                        closeBtn = parent.document.querySelector('[data-testid="stModal"] header button');
+                    }
+                    if (closeBtn) {
+                        closeBtn.click();
+                    }
+                })();
+                </script>
                 """,
-                unsafe_allow_html=True
+                height=0
             )
-            
-            # Rerun to apply state changes (CSS above hides grey overlay)
-            st.rerun()
+            return
 
 
 def player_search_input_on_change_with_query(query: str) -> None:
