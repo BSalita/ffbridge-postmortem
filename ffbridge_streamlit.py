@@ -1752,8 +1752,12 @@ def show_player_selection_modal(filtered_options):
                 if hasattr(st.session_state, 'player_search_matches'):
                     for display_text, player_id, license_number, player_name in st.session_state.player_search_matches:
                         if display_text == selected_option:
-                            # Update only the value state (not the widget state directly)
+                            # Update both the value state AND the widget key to sync the textbox
                             st.session_state.player_search_value = str(license_number)
+                            st.session_state.player_search_input = str(license_number)
+                            
+                            # Also set the player_id for downstream processing
+                            st.session_state.player_id = str(player_id)
                             
                             # Clear dialog state to dismiss dialog
                             if hasattr(st.session_state, 'player_search_matches'):
@@ -1766,7 +1770,7 @@ def show_player_selection_modal(filtered_options):
                             
                             # Flag for main loop to refresh after modal selection
                             st.session_state.deferred_start_report = True
-                            st.query_params["player_id"] = str(player_id)  # no-op to mark state change
+                            # st.query_params["player_id"] = str(license_number)  # no-op to mark state change
                             return
                 
     with col2:
