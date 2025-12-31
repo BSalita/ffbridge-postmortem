@@ -1768,42 +1768,24 @@ def show_player_selection_modal(filtered_options):
                             if hasattr(st.session_state, 'show_player_modal'):
                                 del st.session_state.show_player_modal
                             
-                            # Don't auto-start report - let user click Go button
-                            # This allows modal to close quickly without waiting for report generation
-                            # Close the modal immediately like clicking the "X" does (client-side),
-                            # without triggering a Streamlit rerun (which can take ~1 minute).
-                            #
-                            # We also set the sidebar textbox value visually so the user sees it
-                            # right away; the authoritative value is still in st.session_state
-                            # and will persist on the next rerun (e.g., when clicking Go).
-                            st.components.v1.html(
-                                f"""
-                                <script>
-                                (function() {{
-                                  const doc = parent.document;
-
-                                  // Update the sidebar textbox visually (no events => no rerun)
-                                  const inputs = Array.from(doc.querySelectorAll('input'));
-                                  const targetInput = inputs.find(i =>
-                                    i.getAttribute('aria-label') === 'Enter ffbridge license number' ||
-                                    i.getAttribute('placeholder') === 'Enter license number'
-                                  );
-                                  if (targetInput) {{
-                                    targetInput.value = {license_number!r};
-                                  }}
-
-                                  // Click the modal close (X) button
-                                  const closeBtn =
-                                    doc.querySelector('[data-testid="stModal"] button[aria-label="Close"]') ||
-                                    doc.querySelector('[data-testid="stModal"] [data-testid="stModalCloseButton"]') ||
-                                    doc.querySelector('[data-testid="stModal"] header button');
-                                  if (closeBtn) closeBtn.click();
-                                }})();
-                                </script>
-                                """,
-                                height=0,
+                            # Flag for main loop to refresh after modal selection
+                            st.session_state.deferred_start_report = True
+                            
+                            # Immediately hide the dialog visually before rerun completes
+                            st.markdown(
+                                """<script>
+                                (function() {
+                                    var dialog = parent.document.querySelector('[data-testid="stModal"]');
+                                    if (dialog) dialog.style.display = 'none';
+                                    var overlay = parent.document.querySelector('[data-testid="stModalOverlay"]');
+                                    if (overlay) overlay.style.display = 'none';
+                                })();
+                                </script>""",
+                                unsafe_allow_html=True
                             )
-                            st.stop()
+                            
+                            # Rerun to apply session state changes
+                            st.rerun()
                 
     with col2:
         if st.button("Cancel", width="stretch"):
@@ -1815,24 +1797,22 @@ def show_player_selection_modal(filtered_options):
             # Clear the modal flag as well
             if hasattr(st.session_state, 'show_player_modal'):
                 del st.session_state.show_player_modal
-
-            # Close the modal immediately like clicking the "X" does, without rerun.
-            st.components.v1.html(
-                """
-                <script>
+            
+            # Immediately hide the dialog visually before rerun completes
+            st.markdown(
+                """<script>
                 (function() {
-                  const doc = parent.document;
-                  const closeBtn =
-                    doc.querySelector('[data-testid="stModal"] button[aria-label="Close"]') ||
-                    doc.querySelector('[data-testid="stModal"] [data-testid="stModalCloseButton"]') ||
-                    doc.querySelector('[data-testid="stModal"] header button');
-                  if (closeBtn) closeBtn.click();
+                    var dialog = parent.document.querySelector('[data-testid="stModal"]');
+                    if (dialog) dialog.style.display = 'none';
+                    var overlay = parent.document.querySelector('[data-testid="stModalOverlay"]');
+                    if (overlay) overlay.style.display = 'none';
                 })();
-                </script>
-                """,
-                height=0,
+                </script>""",
+                unsafe_allow_html=True
             )
-            st.stop()
+            
+            # Rerun to apply state changes
+            st.rerun()
 
 
 def player_search_input_on_change_with_query(query: str) -> None:
