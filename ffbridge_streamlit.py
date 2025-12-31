@@ -2450,10 +2450,11 @@ class FFBridgeApp(PostmortemBase):
             if is_numeric_input:
                 # Numeric input - store for report generation
                 st.session_state.process_go_button_input = input_value
+                st.rerun()
             else:
                 # Non-numeric input - trigger search/modal
+                # Don't rerun here - the modal will be shown in the current render cycle
                 player_search_input_on_change_with_query(input_value)
-            st.rerun()
             
         # Auto-start the report once when numeric input appears
         if (is_numeric_input and
