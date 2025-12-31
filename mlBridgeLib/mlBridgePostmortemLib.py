@@ -378,7 +378,7 @@ class PostmortemBase(ABC):
             if hasattr(st.session_state, 'game_description') and st.session_state.game_description:
                 event_info_parts.append(st.session_state.game_description)
             if hasattr(st.session_state, 'tournament_date') and st.session_state.tournament_date:
-                event_info_parts.append(st.session_state.tournament_date)
+                event_info_parts.append(f"on {st.session_state.tournament_date}")
             if hasattr(st.session_state, 'session_id') and st.session_state.session_id:
                 event_info_parts.append(f"(event id {st.session_state.session_id})")
             
