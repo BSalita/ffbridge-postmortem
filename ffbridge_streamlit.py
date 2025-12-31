@@ -1771,7 +1771,20 @@ def show_player_selection_modal(filtered_options):
                             # Flag for main loop to refresh after modal selection
                             st.session_state.deferred_start_report = True
                             
-                            # Rerun to dismiss dialog and apply session state changes
+                            # Immediately hide the dialog visually before rerun completes
+                            st.markdown(
+                                """<script>
+                                (function() {
+                                    var dialog = parent.document.querySelector('[data-testid="stModal"]');
+                                    if (dialog) dialog.style.display = 'none';
+                                    var overlay = parent.document.querySelector('[data-testid="stModalOverlay"]');
+                                    if (overlay) overlay.style.display = 'none';
+                                })();
+                                </script>""",
+                                unsafe_allow_html=True
+                            )
+                            
+                            # Rerun to apply session state changes
                             st.rerun()
                 
     with col2:
@@ -1785,7 +1798,20 @@ def show_player_selection_modal(filtered_options):
             if hasattr(st.session_state, 'show_player_modal'):
                 del st.session_state.show_player_modal
             
-            # Rerun to dismiss dialog
+            # Immediately hide the dialog visually before rerun completes
+            st.markdown(
+                """<script>
+                (function() {
+                    var dialog = parent.document.querySelector('[data-testid="stModal"]');
+                    if (dialog) dialog.style.display = 'none';
+                    var overlay = parent.document.querySelector('[data-testid="stModalOverlay"]');
+                    if (overlay) overlay.style.display = 'none';
+                })();
+                </script>""",
+                unsafe_allow_html=True
+            )
+            
+            # Rerun to apply state changes
             st.rerun()
 
 
@@ -2383,19 +2409,20 @@ class FFBridgeApp(PostmortemBase):
         )
 
         # Player search with modal dialog
-        # Use a separate value state that can be updated
-        # Use the stored value, or empty for truly fresh searches
+        # Initialize session state for text input if not exists (only use session state, not value= param)
+        if 'player_search_input' not in st.session_state:
+            st.session_state.player_search_input = ''
+        
         # Clear the text input value before instantiation if flagged
         if st.session_state.get('clear_player_search'):
             st.session_state.player_search_input = ''
             st.session_state.player_search_value = ''
             del st.session_state.clear_player_search
-        current_value = st.session_state.get('player_search_value', '')
             
         # Simple textbox with Go button below it (Enter also triggers)
+        # Use only key= to bind to session state (no value= to avoid conflict)
         search_input = st.sidebar.text_input(
             "Enter ffbridge license number",
-            value=current_value,
             key='player_search_input',
             on_change=player_search_input_on_change,
             placeholder="Enter license number",
@@ -2413,24 +2440,36 @@ class FFBridgeApp(PostmortemBase):
                 pass
             st.session_state.deferred_start_report = True
         
-        # Show Go button directly under the input (always visible; disabled until numeric)
-        is_numeric_input = bool(current_value and current_value.strip().isdigit())
-        if st.sidebar.button("Go", width="stretch", type="primary", disabled=not is_numeric_input):
-            # Store the input for processing outside sidebar context
-            st.session_state.process_go_button_input = current_value.strip()
+        # Show Go button directly under the input (enabled for any non-empty input)
+        current_input = st.session_state.player_search_input
+        has_input = bool(current_input and current_input.strip())
+        is_numeric_input = bool(current_input and current_input.strip().isdigit())
+        
+        if st.sidebar.button("Go", width="stretch", type="primary", disabled=not has_input):
+            input_value = current_input.strip()
+            if is_numeric_input:
+                # Numeric input - store for report generation
+                st.session_state.process_go_button_input = input_value
+            else:
+                # Non-numeric input - trigger search/modal
+                player_search_input_on_change_with_query(input_value)
             st.rerun()
+            
         # Auto-start the report once when numeric input appears
         if (is_numeric_input and
             not st.session_state.get('session_id') and
             not st.session_state.get('deferred_start_report') and
             not st.session_state.get('auto_go_triggered')):
-            st.session_state.process_go_button_input = current_value.strip()
+            st.session_state.process_go_button_input = current_input.strip()
             st.session_state.auto_go_triggered = True
             st.rerun()
         
-        # Show instruction when license number is populated
-        if current_value and current_value.strip().isdigit():
-            st.sidebar.caption("👆 Click 'Go' to generate report")
+        # Show instruction based on input type
+        if has_input:
+            if is_numeric_input:
+                st.sidebar.caption("👆 Click 'Go' to generate report")
+            else:
+                st.sidebar.caption("👆 Click 'Go' to search for player")
         
         # Show modal dialog if we have matches AND the flag is set (meaning search processing is complete)
         if (st.session_state.get('show_player_modal', False) and
