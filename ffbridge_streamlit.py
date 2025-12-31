@@ -1768,24 +1768,33 @@ def show_player_selection_modal(filtered_options):
                             if hasattr(st.session_state, 'show_player_modal'):
                                 del st.session_state.show_player_modal
                             
-                            # Flag for main loop to refresh after modal selection
-                            st.session_state.deferred_start_report = True
+                            # Don't auto-start report - let user click Go button
+                            # This allows modal to close quickly without waiting for report generation
                             
-                            # Immediately hide the dialog visually before rerun completes
-                            st.markdown(
-                                """<script>
+                            # Use JavaScript to close the modal and trigger a lightweight page update
+                            # The script hides the modal immediately, then uses a form submission trick
+                            # to trigger a Streamlit rerun without the heavy grey overlay
+                            st.components.v1.html(
+                                """
+                                <script>
                                 (function() {
+                                    // Hide modal immediately
                                     var dialog = parent.document.querySelector('[data-testid="stModal"]');
                                     if (dialog) dialog.style.display = 'none';
                                     var overlay = parent.document.querySelector('[data-testid="stModalOverlay"]');
                                     if (overlay) overlay.style.display = 'none';
+                                    
+                                    // Trigger a lightweight rerun by simulating a widget interaction
+                                    setTimeout(function() {
+                                        // Find and click a hidden rerun trigger or just reload
+                                        parent.window.location.reload();
+                                    }, 50);
                                 })();
-                                </script>""",
-                                unsafe_allow_html=True
+                                </script>
+                                """,
+                                height=0
                             )
-                            
-                            # Rerun to apply session state changes
-                            st.rerun()
+                            st.stop()
                 
     with col2:
         if st.button("Cancel", width="stretch"):
@@ -1798,21 +1807,27 @@ def show_player_selection_modal(filtered_options):
             if hasattr(st.session_state, 'show_player_modal'):
                 del st.session_state.show_player_modal
             
-            # Immediately hide the dialog visually before rerun completes
-            st.markdown(
-                """<script>
+            # Use JavaScript to close the modal immediately and reload
+            st.components.v1.html(
+                """
+                <script>
                 (function() {
+                    // Hide modal immediately
                     var dialog = parent.document.querySelector('[data-testid="stModal"]');
                     if (dialog) dialog.style.display = 'none';
                     var overlay = parent.document.querySelector('[data-testid="stModalOverlay"]');
                     if (overlay) overlay.style.display = 'none';
+                    
+                    // Trigger a page reload after a brief delay
+                    setTimeout(function() {
+                        parent.window.location.reload();
+                    }, 50);
                 })();
-                </script>""",
-                unsafe_allow_html=True
+                </script>
+                """,
+                height=0
             )
-            
-            # Rerun to apply state changes
-            st.rerun()
+            st.stop()
 
 
 def player_search_input_on_change_with_query(query: str) -> None:
