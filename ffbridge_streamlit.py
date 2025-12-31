@@ -1770,8 +1770,9 @@ def show_player_selection_modal(filtered_options):
                             
                             # Flag for main loop to refresh after modal selection
                             st.session_state.deferred_start_report = True
-                            # st.query_params["player_id"] = str(license_number)  # no-op to mark state change
-                            return
+                            
+                            # Rerun to dismiss dialog and apply session state changes
+                            st.rerun()
                 
     with col2:
         if st.button("Cancel", width="stretch"):
@@ -1783,8 +1784,9 @@ def show_player_selection_modal(filtered_options):
             # Clear the modal flag as well
             if hasattr(st.session_state, 'show_player_modal'):
                 del st.session_state.show_player_modal
-            # Use st.stop() to await the clearing of the UI dismissal queue
-            st.stop()
+            
+            # Rerun to dismiss dialog
+            st.rerun()
 
 
 def player_search_input_on_change_with_query(query: str) -> None:
