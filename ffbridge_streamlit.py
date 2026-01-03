@@ -277,8 +277,8 @@ def filter_dataframe(df: pl.DataFrame) -> pl.DataFrame:
     if f"lineup_{full_directions_d[st.session_state.player_direction]}Player_id" in df.columns:
         df = df.with_columns(
         pl.col(f'lineup_{full_directions_d[st.session_state.player_direction]}Player_id').eq(pl.lit(str(st.session_state.player_id))).alias('Boards_I_Played'), # player_id could be numeric
-        pl.col('Declarer_ID').eq(pl.lit(str(st.session_state.player_id))).alias('Boards_I_Declared'), # Declarer_ID contains player_id, not license_number
-        pl.col('Declarer_ID').eq(pl.lit(str(st.session_state.partner_id))).alias('Boards_Partner_Declared'), # Declarer_ID contains player_id, not license_number
+        pl.col('Declarer_ID').eq(pl.lit(str(st.session_state.player_license_number))).alias('Boards_I_Declared'), # player_id could be numeric
+        pl.col('Declarer_ID').eq(pl.lit(str(st.session_state.partner_license_number))).alias('Boards_Partner_Declared'), # partner_id could be numeric
     )
     elif "Pair_Direction" in df.columns:
         # todo: better way to determine Boards_I_Played than above?
@@ -396,6 +396,61 @@ def create_dataframe(data: List[Dict[str, Any]]) -> pl.DataFrame:
     except Exception as e:
         print(f"Error creating DataFrame: {e}")
         raise
+
+
+def _df_from_json_normalize(json_data: Any, sep: str = '_') -> pl.DataFrame:
+    """Normalize JSON with pandas, then build a Polars DataFrame in a tolerant way.
+
+    Some FFBridge endpoints return mixed types for the same field across rows (e.g. a number sometimes
+    comes back as a string like "78.022"). Using strict=False avoids hard failures during ingestion.
+    """
+    df_pd = pd.json_normalize(json_data, sep=sep)
+    try:
+        # Prefer from_pandas; it's explicit and lets us retry with cleaned dtypes.
+        return pl.from_pandas(df_pd, include_index=False)
+    except Exception as e:
+        # pyarrow/lib conversion can fail when a column is inferred as numeric but contains strings.
+        # Example: "Could not convert '78.022' with type str: tried to convert to double"
+        if type(e).__name__ != 'ArrowInvalid' and 'ArrowInvalid' not in str(e):
+            raise
+
+        df_pd2 = df_pd.copy()
+        for col in df_pd2.columns:
+            s = df_pd2[col]
+            # Only attempt cleanup on object-like columns; numeric columns are fine.
+            if getattr(s.dtype, 'kind', None) == 'O' or str(s.dtype) == 'object':
+                # If this column contains nested structures (lists/dicts), keep them as-is.
+                # These are required for downstream explode/unnest logic (e.g. 'roadsheets', 'teams').
+                try:
+                    sample = [v for v in s.dropna().head(50).tolist()]
+                    has_nested = any(isinstance(v, (list, dict)) for v in sample)
+                except Exception:
+                    has_nested = False
+
+                if has_nested:
+                    continue
+
+                # Otherwise, normalize common French numeric formatting (comma decimal separator) before conversion.
+                s_str = s.astype('string')
+                s_num_candidate = pd.to_numeric(
+                    s_str.str.replace(',', '.', regex=False),
+                    errors='coerce'
+                )
+                non_null = int(s_str.notna().sum())
+                num_notna = int(s_num_candidate.notna().sum())
+
+                # If every non-null value successfully converts, keep numeric; otherwise force string dtype
+                # to prevent Arrow from trying to build a floating column.
+                if non_null > 0 and num_notna == non_null:
+                    df_pd2[col] = s_num_candidate
+                else:
+                    df_pd2[col] = s_str
+
+        # Retry after dtype cleanup. If Arrow still can't handle nested/object columns, bypass Arrow entirely.
+        try:
+            return pl.from_pandas(df_pd2, include_index=False)
+        except Exception:
+            return pl.DataFrame(df_pd2.to_dict('records'), strict=False)
 
 
 # todo: cache requests
@@ -524,7 +579,7 @@ def get_df_from_api_name_licencie(k: str, url: str) -> pl.DataFrame:
             json_data = make_api_request_licencie(url)
             if json_data is None:
                 raise Exception(f"Failed to get data from {url}")
-            df = pl.DataFrame(pd.json_normalize(json_data, sep='_'))
+            df = _df_from_json_normalize(json_data, sep='_')
         case 'simultaneous_deals':
             json_datas = []
             for i in range(1, st.session_state.nb_deals+1):
@@ -536,7 +591,7 @@ def get_df_from_api_name_licencie(k: str, url: str) -> pl.DataFrame:
                 assert isinstance(json_data, dict), f"Expected a dict, got {type(json_data)}"
                 json_datas.append(json_data)
             
-            df = pl.DataFrame(pd.json_normalize(json_datas, sep='_'))
+            df = _df_from_json_normalize(json_datas, sep='_')
             for exploded_col_name in ['teams_players_name', 'teams_opponents_name']: #['frequencies', 'frequencies_organizations', 'teams_players_name', 'teams_opponents_name']:
                 exploded_col = df.explode(exploded_col_name)
                 struct_fields = exploded_col[exploded_col_name].struct.fields
@@ -563,14 +618,14 @@ def get_df_from_api_name_licencie(k: str, url: str) -> pl.DataFrame:
                 
                 json_datas.extend(json_data)
             
-            df = pl.DataFrame(pd.json_normalize(json_datas, sep='_'))
+            df = _df_from_json_normalize(json_datas, sep='_')
         case 'simultaneous_dealsNumber':
             json_data = make_api_request_licencie(url)
             if json_data is None:
                 raise Exception(f"Failed to get data from {url}")
             
             assert isinstance(json_data, dict), f"Expected a dict, got {type(json_data)}"
-            df = pl.DataFrame(pd.json_normalize(json_data, sep='_'))
+            df = _df_from_json_normalize(json_data, sep='_')
             assert len(df) == 1, f"Expected 1 row, got {len(df)}"
             st.session_state.nb_deals = df['nb_deals'][0]
         case 'simultaneous_roadsheets':
@@ -585,7 +640,7 @@ def get_df_from_api_name_licencie(k: str, url: str) -> pl.DataFrame:
                 raise Exception(f"Failed to get data from {url}")
     
             # Create DataFrame from the JSON response. json_data can be a dict or a list.
-            df = pl.DataFrame(pd.json_normalize(json_data, sep='_'))
+            df = _df_from_json_normalize(json_data, sep='_')
             
             # Get the struct fields and rename them before unnesting
             exploded_col = df.explode('roadsheets') # https://api.ffbridge.fr/api/v1/simultaneous-tournaments/32178/teams/4230171/roadsheets
@@ -638,7 +693,7 @@ def get_df_from_api_name_licencie(k: str, url: str) -> pl.DataFrame:
                 raise Exception(f"Failed to get data from {url}")
     
             # Create DataFrame from the JSON response. json_data can be a dict or a list.
-            df = pl.DataFrame(pd.json_normalize(json_data, sep='_'))
+            df = _df_from_json_normalize(json_data, sep='_')
             # todo: at least one game doesn't have an 'id' to rename. https://api.ffbridge.fr/api/v1/simultaneous-tournaments/2991057
             df = df.rename({'id': 'simultane_id'})
             
@@ -689,7 +744,7 @@ def get_df_from_api_name_licencie(k: str, url: str) -> pl.DataFrame:
                 raise Exception(f"Failed to get data from {url}")
     
             # Create DataFrame from the JSON response. json_data can be a dict or a list.
-            df = pl.DataFrame(pd.json_normalize(json_data, sep='_'))
+            df = _df_from_json_normalize(json_data, sep='_')
             # season is list[struct[7]]
             # regularity_tournament_points is list[struct[7]]
             for exploded_col_name in ['seasons', 'regularity_tournament_points']:
@@ -725,9 +780,9 @@ def get_df_from_api_name_licencie(k: str, url: str) -> pl.DataFrame:
     
             # Create DataFrame from the JSON response. json_data can be a dict or a list.
             try:
-                df = pl.DataFrame(pd.json_normalize(json_data, sep='_'))
+                df = _df_from_json_normalize(json_data, sep='_')
             except Exception as e:
-                raise Exception(f"Failed to create DataFrame from {url} possibly due to data not yet available. Try again in 24 hours. {e}")
+                raise Exception(f"Failed to create DataFrame from {url}. Data may not yet be available, or the API returned mixed/invalid types. {e}")
             if 'functions' in df.columns: # my_infos['functions'] is a list of null. ignore it.
                 df = df.drop('functions')
     # Handle any remaining List or Struct columns that couldn't be processed
@@ -1073,6 +1128,9 @@ def populate_game_urls_for_player(player_id: str) -> bool:
 
 def change_game_state(player_id: str, session_id: str) -> None: # todo: rename to session_id?
 
+    # Keep player_id stable as a string; other parts of the UI (e.g., game_urls_d keys) depend on this.
+    player_id = str(player_id) if player_id is not None else player_id
+
     print(f"=== change_game_state START: player_id={player_id}, session_id={session_id} ===")
 
     st.markdown('<div style="height: 50px;"><a name="top-of-report"></a></div>', unsafe_allow_html=True)
@@ -1172,7 +1230,8 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
         if st.session_state.debug_mode:
             st.caption(f"player_row")
             st.dataframe(st.session_state.player_row,selection_mode='single-row')
-        st.session_state.player_id = st.session_state.player_row['team_players_id'].first()
+        # Do NOT change player_id type here; ensure it remains a string for consistent dict-keying and widgets.
+        st.session_state.player_id = str(st.session_state.player_row['team_players_id'].first())
         st.session_state.player_license_number = st.session_state.player_row['team_players_license_number'].str.strip_chars_start('0').first()
         st.session_state.pair_direction = st.session_state.player_row['team_orientation'].first()        
         st.session_state.opponent_pair_direction = 'EW' if st.session_state.pair_direction == 'NS' else 'NS' # opposite of pair_direction
@@ -1219,7 +1278,6 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
         # Use the API endpoint instead of the web page
         # api_urls values are tuples of (url, should_cache) where should_cache=False means always request fresh data
         api_urls_d = {
-            'roadsheets': (f"https://api.ffbridge.fr/api/v1/simultaneous-tournaments/{st.session_state.simultane_id}/teams/{st.session_state.team_id}/roadsheets", False),
             'simultaneous_roadsheets': (f"https://api.ffbridge.fr/api/v1/simultaneous-tournaments/{st.session_state.simultane_id}/teams/{st.session_state.team_id}/roadsheets", False),
             'simultaneous_dealsNumber': (f"https://api.ffbridge.fr/api/v1/simultaneous-tournaments/{st.session_state.simultane_id}/teams/{st.session_state.team_id}/dealsNumber", False),
             'simultaneous_deals': (f"https://api.ffbridge.fr/api/v1/simultaneous-tournaments/{st.session_state.simultane_id}/teams/{st.session_state.team_id}/deals/{{i}}", False),
@@ -2393,12 +2451,25 @@ class FFBridgeApp(PostmortemBase):
         st.markdown(
             """
             <style>
-            [data-testid="stSidebar"] button[kind="primary"] {
+            /* Make primary sidebar buttons (e.g., Go) green.
+               Streamlit has used different DOM attributes across versions, so we target a few. */
+            [data-testid="stSidebar"] button[kind="primary"],
+            [data-testid="stSidebar"] button[data-testid="stBaseButton-primary"],
+            [data-testid="stSidebar"] button[data-testid="baseButton-primary"],
+            /* Most robust: our Go is a form submit, so style any button inside a sidebar form */
+            [data-testid="stSidebar"] form button,
+            [data-testid="stSidebar"] [data-testid="stForm"] button,
+            [data-testid="stSidebar"] [data-testid="stFormSubmitButton"] button {
                 background-color: #2e7d32 !important;
                 border-color: #2e7d32 !important;
                 color: #ffffff !important;
             }
-            [data-testid="stSidebar"] button[kind="primary"]:hover {
+            [data-testid="stSidebar"] button[kind="primary"]:hover,
+            [data-testid="stSidebar"] button[data-testid="stBaseButton-primary"]:hover,
+            [data-testid="stSidebar"] button[data-testid="baseButton-primary"]:hover,
+            [data-testid="stSidebar"] form button:hover,
+            [data-testid="stSidebar"] [data-testid="stForm"] button:hover,
+            [data-testid="stSidebar"] [data-testid="stFormSubmitButton"] button:hover {
                 background-color: #1b5e20 !important;
                 border-color: #1b5e20 !important;
                 color: #ffffff !important;
@@ -2419,58 +2490,29 @@ class FFBridgeApp(PostmortemBase):
             st.session_state.player_search_value = ''
             del st.session_state.clear_player_search
             
-        # Simple textbox with Go button below it (Enter also triggers)
-        # Use only key= to bind to session state (no value= to avoid conflict)
-        search_input = st.sidebar.text_input(
-            "Enter ffbridge license number",
-            key='player_search_input',
-            on_change=player_search_input_on_change,
-            placeholder="Enter license number",
-            help="Enter ffbridge license number or (partial) last name."
-        )
-        # If user pressed Enter, the on_change above already ran; if it populated a player, set deferred start
-        if (st.session_state.get('player_id') and
-            st.session_state.get('player_search_value') == st.session_state.get('player_search_input') and
-            not st.session_state.get('session_id') and
-            not st.session_state.get('deferred_start_report')):
-            # Ensure games are populated and then trigger report start on next cycle
-            try:
-                populate_game_urls_for_player(str(st.session_state.player_id))
-            except Exception:
-                pass
-            st.session_state.deferred_start_report = True
-        
-        # Show Go button directly under the input (enabled for any non-empty input)
-        current_input = st.session_state.player_search_input
-        has_input = bool(current_input and current_input.strip())
-        is_numeric_input = bool(current_input and current_input.strip().isdigit())
-        
-        if st.sidebar.button("Go", width="stretch", type="primary", disabled=not has_input):
-            input_value = current_input.strip()
-            if is_numeric_input:
-                # Numeric input - store for report generation
+        # Use a form so Enter and the Go button submit the current textbox value reliably.
+        # (Outside a form, Streamlit may not commit text_input into session_state until Enter/blur,
+        # which can make the Go button appear "disabled".)
+        with st.sidebar.form(key="player_search_form", clear_on_submit=False):
+            st.text_input(
+                "Enter ffbridge license number",
+                key='player_search_input',
+                placeholder="Enter license number",
+                help="Enter ffbridge license number or (partial) last name."
+            )
+            submitted = st.form_submit_button("Go", type="primary", use_container_width=True)
+
+        if submitted:
+            input_value = (st.session_state.get('player_search_input') or '').strip()
+            if input_value.isdigit():
+                # Numeric input - store for report generation (handled at top of this function)
                 st.session_state.process_go_button_input = input_value
                 st.rerun()
             else:
                 # Non-numeric input - trigger search/modal
-                # Don't rerun here - the modal will be shown in the current render cycle
-                player_search_input_on_change_with_query(input_value)
-            
-        # Auto-start the report once when numeric input appears
-        if (is_numeric_input and
-            not st.session_state.get('session_id') and
-            not st.session_state.get('deferred_start_report') and
-            not st.session_state.get('auto_go_triggered')):
-            st.session_state.process_go_button_input = current_input.strip()
-            st.session_state.auto_go_triggered = True
-            st.rerun()
-        
-        # Show instruction based on input type
-        if has_input:
-            if is_numeric_input:
-                st.sidebar.caption("👆 Click 'Go' to generate report")
-            else:
-                st.sidebar.caption("👆 Click 'Go' to search for player")
+                # No explicit rerun needed: the form submit already caused this render cycle.
+                if input_value:
+                    player_search_input_on_change_with_query(input_value)
         
         # Show modal dialog if we have matches AND the flag is set (meaning search processing is complete)
         if (st.session_state.get('show_player_modal', False) and
@@ -2508,16 +2550,17 @@ class FFBridgeApp(PostmortemBase):
         self.read_configs()
 
         is_report_running = bool(st.session_state.get('report_rendering'))
-        if st.session_state.player_id in st.session_state.game_urls_d:
+        player_id_key = str(st.session_state.player_id) if st.session_state.player_id is not None else None
+        if player_id_key is not None and player_id_key in st.session_state.game_urls_d:
             st.sidebar.selectbox(
                 "Choose a club game.", 
                 index=0, 
-                options=[f"{k}, {v['description']}" for k, v in st.session_state.game_urls_d[st.session_state.player_id].items()], 
+                options=[f"{k}, {v['description']}" for k, v in st.session_state.game_urls_d[player_id_key].items()], 
                 on_change=club_session_id_on_change, 
                 key='club_session_ids_selectbox'
             )
             # Show a small verification of how many games are available
-            st.sidebar.caption(f"Games found: {len(st.session_state.game_urls_d.get(st.session_state.player_id, {}))}")
+            st.sidebar.caption(f"Games found: {len(st.session_state.game_urls_d.get(player_id_key, {}))}")
 
         # External links (after render pass completes, even on error)
         if not is_report_running and st.session_state.get('game_url'):
@@ -2619,7 +2662,8 @@ def initialize_ffbridge_bearer_token() -> None:
     dfs, api_urls_d = get_ffbridge_data_using_url_licencie(api_urls_d, show_progress=False)
     assert len(dfs['my_infos']) == 1, f"Expected 1 row, got {len(dfs['my_infos'])}"
     # Use proper Polars syntax to get first value
-    st.session_state.player_id = dfs['my_infos']['person_id'].to_list()[0] # todo: remove this?
+    # Keep player_id consistently as a string so UI dict-keying remains stable.
+    st.session_state.player_id = str(dfs['my_infos']['person_id'].to_list()[0])  # todo: remove this?
     st.session_state.player_license_number = dfs['my_infos']['person_license_number'].to_list()[0]
 
         # # Try to import automation functions
