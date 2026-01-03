@@ -277,8 +277,8 @@ def filter_dataframe(df: pl.DataFrame) -> pl.DataFrame:
     if f"lineup_{full_directions_d[st.session_state.player_direction]}Player_id" in df.columns:
         df = df.with_columns(
         pl.col(f'lineup_{full_directions_d[st.session_state.player_direction]}Player_id').eq(pl.lit(str(st.session_state.player_id))).alias('Boards_I_Played'), # player_id could be numeric
-        pl.col('Declarer_ID').eq(pl.lit(str(st.session_state.player_license_number))).alias('Boards_I_Declared'), # player_id could be numeric
-        pl.col('Declarer_ID').eq(pl.lit(str(st.session_state.partner_license_number))).alias('Boards_Partner_Declared'), # partner_id could be numeric
+        pl.col('Declarer_ID').eq(pl.lit(str(st.session_state.player_id))).alias('Boards_I_Declared'), # Declarer_ID contains player_id, not license_number
+        pl.col('Declarer_ID').eq(pl.lit(str(st.session_state.partner_id))).alias('Boards_Partner_Declared'), # Declarer_ID contains player_id, not license_number
     )
     elif "Pair_Direction" in df.columns:
         # todo: better way to determine Boards_I_Played than above?
