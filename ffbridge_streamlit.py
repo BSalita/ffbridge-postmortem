@@ -41,6 +41,76 @@ from typing_extensions import TypedDict
 
 import endplay # for __version__
 
+# ----------------------------
+# Debug helpers (persist across reruns)
+# ----------------------------
+
+def _debug_init_state() -> None:
+    if '_debug_items' not in st.session_state:
+        st.session_state._debug_items = []
+    if '_debug_max_items' not in st.session_state:
+        st.session_state._debug_max_items = 50
+
+
+def debug_capture_df(label: str, df: Any, source: Optional[str] = None) -> None:
+    """Capture a dataframe for later viewing in the Debug expander."""
+    if not st.session_state.get('debug_mode', False):
+        return
+    _debug_init_state()
+    try:
+        shape = getattr(df, "shape", None)
+    except Exception:
+        shape = None
+    st.session_state._debug_items.append({
+        "type": "df",
+        "label": label,
+        "source": source,
+        "shape": shape,
+        "df": df,
+        "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    })
+    # Trim
+    if len(st.session_state._debug_items) > st.session_state._debug_max_items:
+        st.session_state._debug_items = st.session_state._debug_items[-st.session_state._debug_max_items:]
+
+
+def render_debug_expander() -> None:
+    """Render a persistent debug UI section in the main page (survives reruns)."""
+    if not st.session_state.get('debug_mode', False):
+        return
+
+    _debug_init_state()
+    
+    # Only show the debug expander if there's something to display
+    has_player_row = 'player_row' in st.session_state and st.session_state.player_row is not None
+    has_partner_row = 'partner_row' in st.session_state and st.session_state.partner_row is not None
+    has_df = 'df' in st.session_state and st.session_state.df is not None
+    has_debug_items = bool(st.session_state._debug_items)
+    
+    if not (has_player_row or has_partner_row or has_df or has_debug_items):
+        return
+    
+    with st.expander("Debug", expanded=True):
+        # Quick snapshots from session_state (if present)
+        if has_player_row:
+            st.caption("player_row (session_state)")
+            st.dataframe(st.session_state.player_row, selection_mode='single-row')
+        if has_partner_row:
+            st.caption("partner_row (session_state)")
+            st.dataframe(st.session_state.partner_row, selection_mode='single-row')
+        if has_df:
+            st.caption(f"df (session_state) shape: {getattr(st.session_state.df, 'shape', None)}")
+
+        # Captured debug items (all API accesses are shown as dfs) in chronological order
+        if has_debug_items:
+            if has_player_row or has_partner_row or has_df:
+                st.markdown("---")
+            for item in st.session_state._debug_items[-20:]:
+                if item.get("type") == "df":
+                    src = f" | {item['source']}" if item.get("source") else ""
+                    st.caption(f"{item.get('ts','')} | {item.get('label','')} shape: {item.get('shape')}{src}")
+                    st.dataframe(item.get("df"), selection_mode='single-row')
+
 # Only declared to display version information
 #import fastai
 import numpy as np
@@ -602,6 +672,39 @@ def get_df_from_api_name_licencie(k: str, url: str) -> pl.DataFrame:
                     )
                 ).explode(exploded_col_name).unnest(exploded_col_name)
                 #print(df)
+            
+            # Stringify nested struct/list columns so they display readable text instead of "Object"
+            # The frequencies column is List[Struct[5]] with fields: ewNote, ewScore, nsNote, nsScore, count
+            # We use list.eval with concat_str to build a readable string representation
+            # IMPORTANT: Worked on getting frequencies to display readable text instead of "[object Object]" but gave up. Might be bug in Polars or AgGrid.
+            for nested_col in ['frequencies', 'frequencies_organizations']:
+                if nested_col in df.columns:
+                    try:
+                        # Use pure Polars expressions to convert List[Struct] to readable string
+                        # Format: [EW=score/NS=score, ewNote/nsNote, n=count]; ...
+                        df = df.with_columns(
+                            pl.col(nested_col).list.eval(
+                                pl.concat_str([
+                                    pl.lit("[EW="),
+                                    pl.when(pl.element().struct.field("ewScore") != "")
+                                        .then(pl.element().struct.field("ewScore"))
+                                        .otherwise(pl.lit("-")),
+                                    pl.lit("/"),
+                                    pl.when(pl.element().struct.field("nsScore") != "")
+                                        .then(pl.element().struct.field("nsScore"))
+                                        .otherwise(pl.lit("-")),
+                                    pl.lit(", "),
+                                    pl.element().struct.field("ewNote").cast(pl.Utf8),
+                                    pl.lit("/"),
+                                    pl.element().struct.field("nsNote").cast(pl.Utf8),
+                                    pl.lit(", n="),
+                                    pl.element().struct.field("count").cast(pl.Utf8),
+                                    pl.lit("]"),
+                                ])
+                            ).list.join("; ").alias(nested_col)
+                        )
+                    except Exception as e:
+                        print(f"Warning: Could not stringify {nested_col}: {e}")
         case 'simultaneous_description_by_organization_id':
             json_datas = []
             for i in range(1, st.session_state.nb_deals+1):
@@ -866,9 +969,8 @@ def get_ffbridge_lancelot_data_using_url():
             print(f"dfs[{k}]:{dfs[k].shape}")
             print(f"dfs[{k}]:{dfs[k]}")
 
-            if st.session_state.debug_mode:
-                st.caption(f"{k}:{api_url_file_d[k][0]} Shape:{dfs[k].shape}")
-                st.dataframe(dfs[k],selection_mode='single-row')
+            if st.session_state.get('debug_mode', False):
+                debug_capture_df(f"{k}", dfs[k], source=api_url_file_d[k][0])
 
         group_df = dfs['group_url']
         session_df = dfs['session_url']
@@ -1072,10 +1174,15 @@ def get_ffbridge_licencie_get_urls(api_urls_d: Dict[str, Tuple[str, bool]]) -> T
 
     dfs, api_urls_d = get_ffbridge_data_using_url_licencie(api_urls_d)
 
-    if st.session_state.debug_mode:
-        for k,v in dfs.items():
-            st.caption(f"{k}:{api_urls_d[k][0]} Shape:{dfs[k].shape}")  # Use the URL part of the tuple
-            st.dataframe(v,selection_mode='single-row')
+    # Capture debug snapshots instead of rendering inline (so they persist across reruns).
+    if st.session_state.get('debug_mode', False):
+        for k, v in dfs.items():
+            url = None
+            try:
+                url = api_urls_d[k][0]
+            except Exception:
+                url = None
+            debug_capture_df(f"{k}", v, source=url)
 
     return dfs, api_urls_d
 
@@ -1227,9 +1334,8 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
         st.session_state.player_row = simultaneous_tournaments_df.filter(
             pl.col('team_players_id').cast(pl.Int64) == int(st.session_state.player_id)
         )
-        if st.session_state.debug_mode:
-            st.caption(f"player_row")
-            st.dataframe(st.session_state.player_row,selection_mode='single-row')
+        if st.session_state.get('debug_mode', False):
+            debug_capture_df("player_row", st.session_state.player_row, source="simultaneous_tournaments")
         # Do NOT change player_id type here; ensure it remains a string for consistent dict-keying and widgets.
         st.session_state.player_id = str(st.session_state.player_row['team_players_id'].first())
         st.session_state.player_license_number = st.session_state.player_row['team_players_license_number'].str.strip_chars_start('0').first()
@@ -1254,9 +1360,8 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
             pl.col('team_id').eq(st.session_state.team_id) &
             pl.col('team_players_position').eq(st.session_state.partner_position+1)
         )
-        if st.session_state.debug_mode:
-            st.caption(f"partner_row")
-            st.dataframe(st.session_state.partner_row,selection_mode='single-row')
+        if st.session_state.get('debug_mode', False):
+            debug_capture_df("partner_row", st.session_state.partner_row, source="simultaneous_tournaments")
         # might need more partner info?
         st.session_state.partner_id = st.session_state.partner_row['team_players_id'].first()
         st.session_state.partner_license_number = st.session_state.partner_row['team_players_license_number'].first()
@@ -1451,12 +1556,11 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
                         
                     except Exception as e:
                         st.error(f"Error getting boards for player {st.session_state.player_license_number}: {e}")
-                        boards_dfs = {'boards': pl.DataFrame(), 'score_frequency': pl.DataFrame()}
+                    boards_dfs = {'boards': pl.DataFrame(), 'score_frequency': pl.DataFrame()}
 
             if st.session_state.debug_mode:
-                for k,v in boards_dfs.items():
-                    st.caption(f"{k}: Shape:{v.shape}")
-                    st.dataframe(v,selection_mode='single-row')
+                for k, v in boards_dfs.items():
+                    debug_capture_df(f"boards_dfs.{k}", v, source="RRN boards scrape")
 
             df = dfs['simultaneous_roadsheets']
             # 'roadsheets_deals_dealNumber', 'roadsheets_deals_opponentsAvgNote', 'roadsheets_deals_opponentsNote', 'roadsheets_deals_opponentsOrientation', 'roadsheets_deals_opponentsScore',
@@ -1714,8 +1818,7 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
                 return True
 
         if st.session_state.debug_mode:
-            st.caption(f"Final dataframe: Shape:{df.shape}")
-            st.dataframe(df,selection_mode='single-row')
+            debug_capture_df("Final Dataframe", df, source="change_game_state")
 
         if df['Contract'].is_null().all(): # ouch. e.g. Monday Simultané Octopus
             st.error("No Contract data available. Unable to proceed.")
@@ -2259,6 +2362,71 @@ class FFBridgeApp(PostmortemBase):
         super().__init__()
         # App-specific initialization
     
+    def main(self):
+        """Main application entry point - shows Morty messages on first load."""
+        # Inject CSS for green Go button FIRST, before any content renders.
+        # This prevents the red flash when the button first appears.
+        self._inject_sidebar_button_css()
+        
+        if 'first_time' not in st.session_state:
+            st.session_state.first_time = True
+            self.initialize_session_state()
+        # Always call create_ui so Morty messages show on first load when player_id is None
+        self.create_ui()
+    
+    def _inject_sidebar_button_css(self):
+        """Inject CSS to style sidebar primary buttons green."""
+        st.markdown(
+            """
+            <style>
+            /* Make primary sidebar buttons (e.g., Go) green.
+               Streamlit has used different DOM attributes across versions, so we target a few. */
+            [data-testid="stSidebar"] button[kind="primary"],
+            [data-testid="stSidebar"] button[data-testid="stBaseButton-primary"],
+            [data-testid="stSidebar"] button[data-testid="baseButton-primary"],
+            /* Most robust: our Go is a form submit, so style any button inside a sidebar form */
+            [data-testid="stSidebar"] form button,
+            [data-testid="stSidebar"] [data-testid="stForm"] button,
+            [data-testid="stSidebar"] [data-testid="stFormSubmitButton"] button {
+                background-color: #2e7d32 !important;
+                border-color: #2e7d32 !important;
+                color: #ffffff !important;
+            }
+            [data-testid="stSidebar"] button[kind="primary"]:hover,
+            [data-testid="stSidebar"] button[data-testid="stBaseButton-primary"]:hover,
+            [data-testid="stSidebar"] button[data-testid="baseButton-primary"]:hover,
+            [data-testid="stSidebar"] form button:hover,
+            [data-testid="stSidebar"] [data-testid="stForm"] button:hover,
+            [data-testid="stSidebar"] [data-testid="stFormSubmitButton"] button:hover {
+                background-color: #1b5e20 !important;
+                border-color: #1b5e20 !important;
+                color: #ffffff !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+    
+    def ask_sql_query(self):
+        """Only show SQL query textbox after the report is fully rendered."""
+        # Don't show during initial load (no player selected)
+        if st.session_state.get('player_id') is None:
+            return
+        # Don't show if no session/game selected
+        if st.session_state.get('session_id') is None:
+            return
+        # Don't show if report data isn't available yet
+        if getattr(st.session_state, 'df', None) is None:
+            return
+        # Don't show while report is still rendering
+        if st.session_state.get('report_rendering', False):
+            return
+        # Don't show if show_sql_query is disabled
+        if not st.session_state.get('show_sql_query', False):
+            return
+        # All conditions met - show the SQL query input
+        self.ask_standard_sql_query()
+    
     def initialize_session_state(self):
         """Initialize FFBridge-specific session state."""
         # First initialize common session state
@@ -2354,37 +2522,36 @@ class FFBridgeApp(PostmortemBase):
             # Show Morty instructions if no player is selected
             if st.session_state.player_id is None:
                 # Display intro messages when no player is selected
-                with st.session_state.main_section_container.container():
-                    # Display any persistent error message first
-                    if hasattr(st.session_state, 'player_search_error'):
-                        st.error(st.session_state.player_search_error)
-                    
-                    streamlit_chat.message(
-                        "Hi. I'm Morty. Your friendly postmortem chatbot. I only want to chat about ffbridge pair matchpoint games using a Mitchell movement and not shuffled.",
-                        key='intro_message_1',
-                        logo=st.session_state.assistant_logo
-                    )
-                    streamlit_chat.message(
-                        "I'm optimized for large screen devices such as a notebook or monitor. Do not use a smartphone.",
-                        key='intro_message_2',
-                        logo=st.session_state.assistant_logo
-                    )
-                    streamlit_chat.message(
-                        "To start our postmortem chat, I'll need the a player number of your ffbridge game. It will be the subject of our chat.",
-                        key='intro_message_3',
-                        logo=st.session_state.assistant_logo
-                    )
-                    streamlit_chat.message(
-                        "Enter the player number in the left sidebar or just re-enter the default player number. Press the enter key to begin.",
-                        key='intro_message_4',
-                        logo=st.session_state.assistant_logo
-                    )
-                    streamlit_chat.message(
-                        "I'm just a Proof of Concept so don't double me.",
-                        key='intro_message_5',
-                        logo=st.session_state.assistant_logo
-                    )
-                    app_info()
+                # Display any persistent error message first
+                if hasattr(st.session_state, 'player_search_error'):
+                    st.error(st.session_state.player_search_error)
+                
+                streamlit_chat.message(
+                    "Hi. I'm Morty. Your friendly postmortem chatbot. I only want to chat about ffbridge pair matchpoint games using a Mitchell movement and not shuffled.",
+                    key='intro_message_1',
+                    logo=st.session_state.assistant_logo
+                )
+                streamlit_chat.message(
+                    "I'm optimized for large screen devices such as a notebook or monitor. Do not use a smartphone.",
+                    key='intro_message_2',
+                    logo=st.session_state.assistant_logo
+                )
+                streamlit_chat.message(
+                    "To start our postmortem chat, I'll need the a player number of your ffbridge game. It will be the subject of our chat.",
+                    key='intro_message_3',
+                    logo=st.session_state.assistant_logo
+                )
+                streamlit_chat.message(
+                    "Enter the player number in the left sidebar or just re-enter the default player number. Press the enter key to begin.",
+                    key='intro_message_4',
+                    logo=st.session_state.assistant_logo
+                )
+                streamlit_chat.message(
+                    "I'm just a Proof of Concept so don't double me.",
+                    key='intro_message_5',
+                    logo=st.session_state.assistant_logo
+                )
+                app_info()
             elif st.session_state.session_id is not None:
                 st.session_state.report_rendering = True
                 try:
@@ -2400,6 +2567,11 @@ class FFBridgeApp(PostmortemBase):
                     st.session_state.report_rendering = False
                     
         self.ask_sql_query()
+        # Always render debug section (when enabled) so it doesn't disappear on reruns.
+        render_debug_expander()
+        
+        # Re-inject CSS at the end to ensure it overrides any theme styles applied during render.
+        self._inject_sidebar_button_css()
 
     def create_sidebar(self):
         """Create FFBridge-specific sidebar."""
@@ -2447,38 +2619,6 @@ class FFBridgeApp(PostmortemBase):
         
         st.sidebar.caption(f"Build:{st.session_state.app_datetime}")
 
-        # Style primary buttons in the sidebar (e.g., Go) to green
-        st.markdown(
-            """
-            <style>
-            /* Make primary sidebar buttons (e.g., Go) green.
-               Streamlit has used different DOM attributes across versions, so we target a few. */
-            [data-testid="stSidebar"] button[kind="primary"],
-            [data-testid="stSidebar"] button[data-testid="stBaseButton-primary"],
-            [data-testid="stSidebar"] button[data-testid="baseButton-primary"],
-            /* Most robust: our Go is a form submit, so style any button inside a sidebar form */
-            [data-testid="stSidebar"] form button,
-            [data-testid="stSidebar"] [data-testid="stForm"] button,
-            [data-testid="stSidebar"] [data-testid="stFormSubmitButton"] button {
-                background-color: #2e7d32 !important;
-                border-color: #2e7d32 !important;
-                color: #ffffff !important;
-            }
-            [data-testid="stSidebar"] button[kind="primary"]:hover,
-            [data-testid="stSidebar"] button[data-testid="stBaseButton-primary"]:hover,
-            [data-testid="stSidebar"] button[data-testid="baseButton-primary"]:hover,
-            [data-testid="stSidebar"] form button:hover,
-            [data-testid="stSidebar"] [data-testid="stForm"] button:hover,
-            [data-testid="stSidebar"] [data-testid="stFormSubmitButton"] button:hover {
-                background-color: #1b5e20 !important;
-                border-color: #1b5e20 !important;
-                color: #ffffff !important;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
-
         # Player search with modal dialog
         # Initialize session state for text input if not exists (only use session state, not value= param)
         if 'player_search_input' not in st.session_state:
@@ -2495,11 +2635,11 @@ class FFBridgeApp(PostmortemBase):
         # which can make the Go button appear "disabled".)
         with st.sidebar.form(key="player_search_form", clear_on_submit=False):
             st.text_input(
-                "Enter ffbridge license number",
-                key='player_search_input',
-                placeholder="Enter license number",
-                help="Enter ffbridge license number or (partial) last name."
-            )
+            "Enter ffbridge license number",
+            key='player_search_input',
+            placeholder="Enter license number",
+            help="Enter ffbridge license number or (partial) last name."
+        )
             submitted = st.form_submit_button("Go", type="primary", use_container_width=True)
 
         if submitted:
@@ -2535,9 +2675,6 @@ class FFBridgeApp(PostmortemBase):
                 st.session_state.show_player_modal = False
                 # Show modal dialog with player selection
                 show_player_selection_modal(filtered_options)
-
-        if st.session_state.player_id is None:
-            st.sidebar.caption("Select a player or enter a license to continue.")
         
         # If a player is selected but games haven't been loaded yet, try to populate them
         if (st.session_state.player_id is not None and
@@ -2661,10 +2798,10 @@ def initialize_ffbridge_bearer_token() -> None:
 
     dfs, api_urls_d = get_ffbridge_data_using_url_licencie(api_urls_d, show_progress=False)
     assert len(dfs['my_infos']) == 1, f"Expected 1 row, got {len(dfs['my_infos'])}"
-    # Use proper Polars syntax to get first value
-    # Keep player_id consistently as a string so UI dict-keying remains stable.
-    st.session_state.player_id = str(dfs['my_infos']['person_id'].to_list()[0])  # todo: remove this?
-    st.session_state.player_license_number = dfs['my_infos']['person_license_number'].to_list()[0]
+    # Store the logged-in user's info but DON'T set player_id yet - 
+    # Morty messages should show until the user enters a player number in the textbox.
+    st.session_state.logged_in_player_id = str(dfs['my_infos']['person_id'].to_list()[0])
+    st.session_state.logged_in_license_number = dfs['my_infos']['person_license_number'].to_list()[0]
 
         # # Try to import automation functions
         # try:
