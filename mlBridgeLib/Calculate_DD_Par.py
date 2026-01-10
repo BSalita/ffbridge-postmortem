@@ -1,6 +1,6 @@
 # Assume all ACBL double dummy and par calculations are wrong! Recompute both.
 
-from mlBridgeLib.mlBridgeLib import NESW, vul_dds_d, NSHDC, seats
+from mlBridge.mlBridge import NESW, vul_dds_d, NSHDC, seats
 import dds
 import ctypes
 import functions

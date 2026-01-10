@@ -30,7 +30,7 @@ class PostmortemBase(ABC):
     
     def initialize_logging(self):
         """Set up logging configuration."""
-        from mlBridgeLib.logging_config import setup_logger
+        from mlBridge.logging_config import setup_logger
         self.logger = setup_logger(__name__)
     
     def print_to_log_info(self, *args):
@@ -154,8 +154,8 @@ class PostmortemBase(ABC):
             
         with st.spinner('Augmenting data...'):
             # Import augmentation library
-            sys.path.append(str(pathlib.Path.cwd().joinpath('mlBridgeLib')))
-            from mlBridgeLib.mlBridgeAugmentLib import AllAugmentations
+            sys.path.append(str(pathlib.Path.cwd().joinpath('mlBridge')))
+            from mlBridge.mlBridgeAugmentLib import AllAugmentations
             
             augmenter = AllAugmentations(
                 df, None, 
@@ -293,7 +293,7 @@ class PostmortemBase(ABC):
         
         # Import and setup streamlitlib
         sys.path.append(str(pathlib.Path.cwd().joinpath('streamlitlib')))
-        sys.path.append(str(pathlib.Path.cwd().joinpath('mlBridgeLib')))
+        sys.path.append(str(pathlib.Path.cwd().joinpath('mlBridge')))
         import streamlitlib
         streamlitlib.widen_scrollbars()
     

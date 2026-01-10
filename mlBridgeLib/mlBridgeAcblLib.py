@@ -31,10 +31,10 @@ from sqlalchemy import create_engine, inspect
 import sqlalchemy_utils
 from sqlalchemy_utils.functions import database_exists, create_database
 from typing import List, Optional
-sys.path.append(str(pathlib.Path.cwd().parent.joinpath('mlBridgeLib'))) # removed .parent
+sys.path.append(str(pathlib.Path.cwd().parent.joinpath('mlBridge'))) # removed .parent
 sys.path
 
-from mlBridgeLib.mlBridgeLib import (
+from mlBridge.mlBridge import (
     json_to_sql_walk,
     CreateSqlFile,
     ContractToScores,
@@ -1110,7 +1110,7 @@ def merge_clean_augment_tournament_dfs(dfs, json_results_d, sd_cache_d, player_i
     #     'overall_rank_strat_1', 'overall_rank_strat_2', 'overall_rank_strat_3', 'players', 'score_section']
     df_section_results = df['section_results'].to_frame().explode('section_results').unnest('section_results')
 
-    # from mlBridgeLib. todo: convert to polars
+    # from mlBridge. todo: convert to polars
     # def hrs_to_brss(hrs,void='',ten='10'):
     #     cols = [d+'_'+s for d in ['north','west','east','south'] for s in ['spades','hearts','diamonds','clubs']] # remake of hands below, comments says the order needs to be NWES?????
     #     return hrs[cols].apply(lambda r: ''.join(['SHDC'[i%4]+c for i,c in enumerate(r.values)]).replace(' ','').replace('-',void).replace('10',ten), axis='columns')
@@ -1586,7 +1586,7 @@ def get_club_results_from_acbl_number_playwright(acbl_number, headless=True, sav
         dict: Dictionary with event_id as key and tuple (my_results_url, details_url, msg, club_id) as value
     
     Example:
-        >>> from mlBridgeLib.mlBridgeAcblLib import get_club_results_from_acbl_number_playwright
+        >>> from mlBridge.mlBridgeAcblLib import get_club_results_from_acbl_number_playwright
         >>> results = get_club_results_from_acbl_number_playwright(2663279, limit=5)
         >>> for event_id, (url, details_url, msg, club_id) in results.items():
         ...     print(f"Event {event_id}: {msg}")
@@ -1763,7 +1763,7 @@ def get_club_results_details_data_playwright(url, headless=True, verbose=True):
         dict or None: Parsed JSON data from the page or None if not found
     
     Example:
-        >>> from mlBridgeLib.mlBridgeAcblLib import get_club_results_details_data_playwright
+        >>> from mlBridge.mlBridgeAcblLib import get_club_results_details_data_playwright
         >>> details = get_club_results_details_data_playwright("https://my.acbl.org/club-results/details/993420")
         >>> print(details['event_name'])
     """

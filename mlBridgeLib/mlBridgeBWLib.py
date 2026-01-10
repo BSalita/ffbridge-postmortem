@@ -5,8 +5,8 @@ from typing import Dict, List, Tuple
 from endplay.parsers import pbn
 from urllib.parse import urlparse, parse_qsl
 import streamlit as st
-import mlBridgeLib.mlBridgeEndplayLib as mlBridgeEndplayLib
-#from mlBridgeLib.mlBridgePostmortemLib import PBNResultsCalculator
+import mlBridge.mlBridgeEndplayLib as mlBridgeEndplayLib
+#from mlBridge.mlBridgePostmortemLib import PBNResultsCalculator
 import sys # todo: used for exit(1). keep or return None?
 import re
 import random
@@ -15,7 +15,7 @@ import html
 import pathlib
 from tqdm import tqdm
 
-from mlBridgeLib.mlBridgeAugmentLib import AllAugmentations
+from mlBridge.mlBridgeAugmentLib import AllAugmentations
 
 class BridgeWebResultsParser:
     """

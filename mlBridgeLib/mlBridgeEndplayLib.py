@@ -191,7 +191,7 @@ def endplay_boards_to_df(boards_d):
 
 # make sure the dicts have same dtypes for keys and values. It's required for some polars operations.
 
-# all these dicts have been copied to mlBridgeLib.py. todo: remove these but requires using import mlBridgeLib.
+# all these dicts have been copied to mlBridge.py. todo: remove these but requires using import mlBridge.
 Direction_to_NESW_d = {
     # removed because integer values are not compatible with polars replace_strict(return_dtype=pl.String). Fix is to cast(pl.Utf8) before replace_strict().
     #0:'N',
@@ -242,7 +242,7 @@ Strain_to_CDHSN_d = {
     'PASS':'PASS'
 }
 
-# todo: use mlBridgeLib.Vulnerability_to_Vul_d instead?
+# todo: use mlBridge.Vulnerability_to_Vul_d instead?
 Vulnerability_to_Vul_d = {
     0: 'None',
     1: 'Both',

@@ -11,11 +11,11 @@ from typing import List, Dict, Optional, Any, Tuple
 import polars as pl
 from playwright.async_api import async_playwright, Page, BrowserContext
 import logging
-from mlBridgeLib.logging_config import setup_logger
+from mlBridge.logging_config import setup_logger
 from contextlib import asynccontextmanager
 import time
 import sys
-import mlBridgeLib.mlBridgeLib
+import mlBridge.mlBridge
 
 # Set the policy at the beginning of the script, before any async operations
 if sys.platform == "win32":
@@ -925,7 +925,7 @@ async def parse_boards_html_async(page) -> List[Dict]:
                 'Ouest': 'W'
             }
             # ugh, sometimes roy rene games webpage shows dealer as an empty string. Must derive from board number.
-            dealer = dealer_translation.get(french_dealer, mlBridgeLib.mlBridgeLib.BoardNumberToDealer(board_number))
+            dealer = dealer_translation.get(french_dealer, mlBridge.mlBridge.BoardNumberToDealer(board_number))
             logger.info(f"Extracted dealer: {dealer}")
         else:
             raise ValueError(f"Could not find dealer in HTML div with required classes (col-8, p-0, h2)")

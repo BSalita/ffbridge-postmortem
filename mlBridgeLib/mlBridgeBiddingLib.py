@@ -671,8 +671,8 @@ class BiddingSequenceAnalyzer:
     def __init__(self):
         """Initialize analyzer."""
         self.reset()
-        self.next_bidding_seat_d = {'N': 'E', 'E': 'S', 'S': 'W', 'W': 'N'} # todo: put into mlBridgeLib.py?
-        self.pair_directions_d = {'N': 'NS', 'E': 'EW', 'S': 'NS', 'W': 'EW'} # todo: put into mlBridgeLib.py?
+        self.next_bidding_seat_d = {'N': 'E', 'E': 'S', 'S': 'W', 'W': 'N'} # todo: put into mlBridge.py?
+        self.pair_directions_d = {'N': 'NS', 'E': 'EW', 'S': 'NS', 'W': 'EW'} # todo: put into mlBridge.py?
 
     def reset(self):
         """Reset all state variables to initial values."""
@@ -816,7 +816,7 @@ class AuctionFinder:
         }
         self.bt_bid_to_next_bids_d = bt_bid_to_next_bids_d
         self.bt_prior_bids_to_bt_entry_d = bt_prior_bids_to_bt_entry_d
-        self.next_bidding_seat_d = {'N': 'E', 'E': 'S', 'S': 'W', 'W': 'N'} # todo: put into mlBridgeLib.py?
+        self.next_bidding_seat_d = {'N': 'E', 'E': 'S', 'S': 'W', 'W': 'N'} # todo: put into mlBridge.py?
         self.exprStr_to_exprID_d = exprStr_to_exprID_d
 
     def auction_finder(self, level, dealer, bidding_seat, prior_bids, r, auction_d, completed_auctions_d):

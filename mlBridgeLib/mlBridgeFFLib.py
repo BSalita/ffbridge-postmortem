@@ -7,12 +7,12 @@ iVulToVul_d = { # todo: make enum?
     2:'E_W',
     3:'Both',
 }
-FrenchPairDirectionToPairDirection_d = { # convert mlBridgeLib dealer to endplay dealer
+FrenchPairDirectionToPairDirection_d = { # convert mlBridge dealer to endplay dealer
     'NS':'NS',
     'EW':'EW',
     'EO':'EW',
 }
-FrenchDirectionToDirection_d = { # convert mlBridgeLib dealer to endplay dealer
+FrenchDirectionToDirection_d = { # convert mlBridge dealer to endplay dealer
     'N':'N',
     'E':'E',
     'S':'S',
@@ -21,7 +21,7 @@ FrenchDirectionToDirection_d = { # convert mlBridgeLib dealer to endplay dealer
     '-':None, # happened when computer failed to communicate with bridgemates.
     None:None,  # Map 'Unknown' to None/NULL
 }
-FrenchStrainToStrain_d = { # convert mlBridgeLib dealer to endplay dealer
+FrenchStrainToStrain_d = { # convert mlBridge dealer to endplay dealer
     'P':'S',
     'C':'H', # oh dear, ambiguous in English (cour vs club). Can only be used if totally French input.
     'K':'D',
