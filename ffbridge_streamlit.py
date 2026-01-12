@@ -120,7 +120,7 @@ import pandas as pd
 #import torch
 
 # assumes symlinks are created in current directory.
-sys.path.insert(0, str(pathlib.Path.cwd()))  # For mlBridge package (symlink in cwd)
+sys.path.append(str(pathlib.Path.cwd().joinpath('mlBridge')))  # global # Requires "./mlBridge" be in extraPaths in .vscode/settings.json
 sys.path.append(str(pathlib.Path.cwd().joinpath('streamlitlib')))  # global
 sys.path.append(str(pathlib.Path.cwd().joinpath('ffbridgelib')))  # global
 
