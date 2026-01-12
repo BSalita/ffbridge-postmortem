@@ -19,7 +19,6 @@ import streamlit as st
 import streamlit_chat
 from streamlit_extras.bottom_container import bottom
 from stqdm import stqdm
-from mlBridge import mlBridgeBPLib
 # from streamlit_autocomplete.autocomplete import st_textcomplete_autocomplete  # Not working as expected
 
 
@@ -127,6 +126,7 @@ sys.path.append(str(pathlib.Path.cwd().joinpath('mlBridge')))  # global # Requir
 sys.path.append(str(pathlib.Path.cwd().joinpath('ffbridgelib')))  # global
 
 import mlBridge.mlBridgeFFLib as mlBridgeFFLib
+from mlBridge import mlBridgeBPLib
 import streamlitlib
 import time
 #import mlBridgeLib
