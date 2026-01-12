@@ -118,13 +118,13 @@ import pandas as pd
 #import safetensors
 #import sklearn
 #import torch
-import mlBridge.mlBridgeLib as mlBridgeLib
 
 # assumes symlinks are created in current directory.
 sys.path.append(str(pathlib.Path.cwd().joinpath('streamlitlib')))  # global
 sys.path.append(str(pathlib.Path.cwd().joinpath('mlBridge')))  # global # Requires "./mlBridgeLib" be in extraPaths in .vscode/settings.json
 sys.path.append(str(pathlib.Path.cwd().joinpath('ffbridgelib')))  # global
 
+import mlBridge.mlBridgeLib as mlBridgeLib
 import mlBridge.mlBridgeFFLib as mlBridgeFFLib
 from mlBridge import mlBridgeBPLib
 import streamlitlib
