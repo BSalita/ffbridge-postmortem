@@ -19,6 +19,7 @@ import streamlit as st
 import streamlit_chat
 from streamlit_extras.bottom_container import bottom
 from stqdm import stqdm
+from mlBridge import mlBridgeBPLib
 # from streamlit_autocomplete.autocomplete import st_textcomplete_autocomplete  # Not working as expected
 
 
@@ -118,21 +119,21 @@ import pandas as pd
 #import safetensors
 #import sklearn
 #import torch
-import mlBridgeLib.mlBridgeBPLib
+import mlBridge.mlBridgeLib as mlBridgeLib
 
 # assumes symlinks are created in current directory.
 sys.path.append(str(pathlib.Path.cwd().joinpath('streamlitlib')))  # global
-sys.path.append(str(pathlib.Path.cwd().joinpath('mlBridgeLib')))  # global # Requires "./mlBridgeLib" be in extraPaths in .vscode/settings.json
+sys.path.append(str(pathlib.Path.cwd().joinpath('mlBridge')))  # global # Requires "./mlBridgeLib" be in extraPaths in .vscode/settings.json
 sys.path.append(str(pathlib.Path.cwd().joinpath('ffbridgelib')))  # global
 
-import mlBridgeFFLib
+import mlBridge.mlBridgeFFLib as mlBridgeFFLib
 import streamlitlib
 import time
 #import mlBridgeLib
-from mlBridgeLib.mlBridgeAugmentLib import (
+from mlBridge.mlBridgeAugmentLib import (
     AllAugmentations,
 )
-from mlBridgeLib.mlBridgePostmortemLib import PostmortemBase
+from mlBridge.mlBridgePostmortemLib import PostmortemBase
 #import mlBridgeEndplayLib
 
 # Type definitions for better type checking
@@ -1399,7 +1400,7 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
         if st.session_state.simultaneeCode  == 'RRN':
             # RRN (Roy Rene simultaneious tournament) has no deal related columns in the simultaneous_deals dataframe.
             # so we need to get the boards from the tournament date and add the deal related columns to the simultaneous_deals dataframe.
-            st.session_state.tournament_id = mlBridgeLib.mlBridgeBPLib.get_teams_by_tournament_date(st.session_state.tournament_date)
+            st.session_state.tournament_id = mlBridgeBPLib.get_teams_by_tournament_date(st.session_state.tournament_date)
             max_deals = 36 # todo: is max_deals (number of deals) available in any API at this point?
             deal_numbers = dfs['simultaneous_roadsheets']['roadsheets_deals_dealNumber'].unique().to_list()
             # uses st.session_state.player_license_number to get boards because Roy Rene website works with player_license_number to get boards.
@@ -1407,7 +1408,7 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
                 # Get the Bridge+ club page to find the player's route link
                 async def get_player_route_url():
                     # Fetch the club teams page which contains links to each pair's route
-                    teams_df = await mlBridgeLib.mlBridgeBPLib.get_teams_by_tournament_async(
+                    teams_df = await mlBridgeBPLib.get_teams_by_tournament_async(
                         st.session_state.tournament_id, 
                         st.session_state.organization_code
                     )
@@ -1441,7 +1442,7 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
                 if False:
                     # calls internal async version which takes 60s. almost 3x faster than asyncio version below
                     #  -- but this version doesn't show progress bar -- might overwhelm server as I'm getting blacklisted(?).
-                    boards_dfs = mlBridgeLib.mlBridgeBPLib.get_all_boards_for_player(st.session_state.tournament_id, st.session_state.organization_code, st.session_state.player_license_number, max_deals=36)
+                    boards_dfs = mlBridgeBPLib.get_all_boards_for_player(st.session_state.tournament_id, st.session_state.organization_code, st.session_state.player_license_number, max_deals=36)
                 else:
                     # Get boards data with progress bar by processing boards one by one using the existing function
                     boards_dfs = {'boards': None, 'score_frequency': None}
@@ -1451,7 +1452,7 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
                         async def get_boards_with_progress():
                             # First, get the route data to see which boards this player actually played
                             # We need to find the player's team first to get the route data
-                            # teams_df = await mlBridgeLib.mlBridgeBPLib.get_teams_by_tournament_async(st.session_state.tournament_id, st.session_state.organization_code)
+                            # teams_df = await mlBridgeBPLib.get_teams_by_tournament_async(st.session_state.tournament_id, st.session_state.organization_code)
                             
                             # # Normalize player_id by stripping leading zeros for robust string comparison
                             # norm_player_id = st.session_state.player_license_number.lstrip('0')
@@ -1475,9 +1476,9 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
                             # Get the route data to see which boards this team actually played
                             # e.g. "https://www.bridgeplus.com/nos-simultanes/resultats/?p=route&res=sim&tr=S202602&cl=5802079&sc=A&eq=212"
                             played_boards = []
-                            async with mlBridgeLib.mlBridgeBPLib.get_browser_context_async() as context:
+                            async with mlBridgeBPLib.get_browser_context_async() as context:
                                 try:
-                                    route_results = await mlBridgeLib.mlBridgeBPLib.request_board_results_dataframe_async(st.session_state.route_url, context)
+                                    route_results = await mlBridgeBPLib.request_board_results_dataframe_async(st.session_state.route_url, context)
                                     if len(route_results) == 0:
                                         st.warning(f"No route data found for team {st.session_state.team_number}")
                                         return {'boards': pl.DataFrame(), 'score_frequency': pl.DataFrame()}
@@ -1500,7 +1501,7 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
                             all_boards = []
                             all_frequency = []
                             
-                            async with mlBridgeLib.mlBridgeBPLib.get_browser_context_async() as context:
+                            async with mlBridgeBPLib.get_browser_context_async() as context:
                                 for idx, deal_num in enumerate(played_boards):
                                     try:
                                         # Update progress
@@ -1509,7 +1510,7 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
                                         progress_text.text(f"Processing board {idx + 1}/{len(played_boards)}: Board {deal_num}")
                                         
                                         # Use the existing function to get the specific board for this player
-                                        result = await mlBridgeLib.mlBridgeBPLib.get_board_for_player_async(
+                                        result = await mlBridgeBPLib.get_board_for_player_async(
                                             st.session_state.tournament_id, 
                                             st.session_state.organization_code, 
                                             st.session_state.player_license_number, 
