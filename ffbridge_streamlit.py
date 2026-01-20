@@ -30,7 +30,6 @@ import duckdb
 import json
 import sys
 import os
-import platform
 import asyncio
 from datetime import datetime, timezone
 from dotenv import load_dotenv
@@ -2081,6 +2080,21 @@ def player_search_input_on_change_with_query(query: str) -> None:
             print(f"Search dataframe:\n{dfs['search']}")
             raise Exception(f"Could not extract player_id from search results. Available columns: {dfs['search'].columns}")
         
+        # Try to populate games for this player
+        st.session_state.player_id = str(player_id)
+        try:
+            has_games = populate_game_urls_for_player(st.session_state.player_id)
+        except Exception as e:
+            st.session_state.player_search_error = f"Error loading games for player: {str(e)}"
+            st.session_state.player_id = None
+            return
+        
+        # Check if player has any games
+        if not has_games:
+            st.session_state.player_search_error = f"No games found for player '{query}'."
+            st.session_state.player_id = None
+            return
+        
         # Clear any previous error message and matches on successful search
         if hasattr(st.session_state, 'player_search_error'):
             del st.session_state.player_search_error
@@ -2088,11 +2102,6 @@ def player_search_input_on_change_with_query(query: str) -> None:
             del st.session_state.player_search_matches
         
         # Defer report start: first refresh sidebar with games, then start report
-        st.session_state.player_id = str(player_id)
-        try:
-            populate_game_urls_for_player(st.session_state.player_id)
-        except Exception as _:
-            pass
         st.session_state.deferred_start_report = True
         return
         
@@ -2619,7 +2628,13 @@ class FFBridgeApp(PostmortemBase):
                         
                         # Populate sidebar first, then defer report start until after sidebar refresh
                         st.session_state.player_id = str(player_id)
-                        populate_game_urls_for_player(st.session_state.player_id)
+                        has_games = populate_game_urls_for_player(st.session_state.player_id)
+                        
+                        if not has_games:
+                            st.error(f"No games found for license number '{input_value}'.")
+                            st.session_state.player_id = None
+                            return
+                        
                         st.session_state.deferred_start_report = True
                         return
                     else:
