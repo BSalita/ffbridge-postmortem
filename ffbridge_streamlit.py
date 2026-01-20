@@ -2010,8 +2010,7 @@ def player_search_input_on_change_with_query(query: str) -> None:
             st.session_state.player_search_error = f"No player found matching '{query}'. Please check the name or license number and try again."
             # Reset player_id to None to ensure Morty instructions are shown
             st.session_state.player_id = None
-            # Force UI refresh to display the error
-            st.rerun()
+            return
             
         if len(dfs['search']) > 1:
             # If input is more than 3 characters, show matches in selectbox
