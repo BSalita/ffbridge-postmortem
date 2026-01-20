@@ -798,8 +798,9 @@ def get_df_from_api_name_licencie(k: str, url: str) -> pl.DataFrame:
     
             # Create DataFrame from the JSON response. json_data can be a dict or a list.
             df = _df_from_json_normalize(json_data, sep='_')
-            # todo: at least one game doesn't have an 'id' to rename. https://api.ffbridge.fr/api/v1/simultaneous-tournaments/2991057
-            df = df.rename({'id': 'simultane_id'})
+            # Some API responses don't have an 'id' column (e.g., https://api.ffbridge.fr/api/v1/simultaneous-tournaments/2991057)
+            if 'id' in df.columns:
+                df = df.rename({'id': 'simultane_id'})
             
             # Explode to get individual structs, then get struct fields  
             exploded_col = df.explode('teams')
