@@ -798,8 +798,15 @@ def get_df_from_api_name_licencie(k: str, url: str) -> pl.DataFrame:
     
             # Create DataFrame from the JSON response. json_data can be a dict or a list.
             df = _df_from_json_normalize(json_data, sep='_')
-            # todo: at least one game doesn't have an 'id' to rename. https://api.ffbridge.fr/api/v1/simultaneous-tournaments/2991057
-            df = df.rename({'id': 'simultane_id'})
+            
+            # Check if we got an empty result (no matches found)
+            if df.is_empty():
+                raise Exception(f"No data found for {k} from {url}")
+            
+            # Rename 'id' to 'simultane_id' if it exists
+            # Some API responses don't have an 'id' column (e.g. https://api.ffbridge.fr/api/v1/simultaneous-tournaments/2991057)
+            if 'id' in df.columns:
+                df = df.rename({'id': 'simultane_id'})
             
             # Explode to get individual structs, then get struct fields  
             exploded_col = df.explode('teams')
@@ -2508,18 +2515,28 @@ class FFBridgeApp(PostmortemBase):
         if st.session_state.get('deferred_start_report', False):
             # Ensure games are available
             if st.session_state.player_id is not None:
-                populate_game_urls_for_player(str(st.session_state.player_id))
-                # Start report on first available game
-                game_urls = st.session_state.game_urls_d.get(st.session_state.player_id, {})
-                if len(game_urls) > 0:
+                try:
+                    populate_game_urls_for_player(str(st.session_state.player_id))
+                    # Start report on first available game
+                    game_urls = st.session_state.game_urls_d.get(st.session_state.player_id, {})
+                    if len(game_urls) > 0:
+                        st.session_state.deferred_start_report = False
+                        change_game_state(str(st.session_state.player_id), None)
+                        st.session_state.sql_query_mode = False
+                        # Defer clearing search inputs to before widget creation
+                        st.session_state.clear_player_search = True
+                        # Immediately rerun so the report renders without requiring Go
+                        st.rerun()
+                        return
+                    else:
+                        # No games found for this player
+                        st.session_state.deferred_start_report = False
+                        st.session_state.player_search_error = f"No games found for player ID '{st.session_state.player_id}'."
+                        st.session_state.player_id = None
+                except Exception as e:
                     st.session_state.deferred_start_report = False
-                    change_game_state(str(st.session_state.player_id), None)
-                    st.session_state.sql_query_mode = False
-                    # Defer clearing search inputs to before widget creation
-                    st.session_state.clear_player_search = True
-                    # Immediately rerun so the report renders without requiring Go
-                    st.rerun()
-                    return
+                    st.session_state.player_search_error = f"Error loading player data: {str(e)}"
+                    st.session_state.player_id = None
         if not st.session_state.sql_query_mode:
             # Show Morty instructions if no player is selected
             if st.session_state.player_id is None:
