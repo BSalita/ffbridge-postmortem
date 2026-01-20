@@ -798,9 +798,8 @@ def get_df_from_api_name_licencie(k: str, url: str) -> pl.DataFrame:
     
             # Create DataFrame from the JSON response. json_data can be a dict or a list.
             df = _df_from_json_normalize(json_data, sep='_')
-            # Some API responses don't have an 'id' column (e.g., https://api.ffbridge.fr/api/v1/simultaneous-tournaments/2991057)
-            if 'id' in df.columns:
-                df = df.rename({'id': 'simultane_id'})
+            # todo: at least one game doesn't have an 'id' to rename. https://api.ffbridge.fr/api/v1/simultaneous-tournaments/2991057
+            df = df.rename({'id': 'simultane_id'})
             
             # Explode to get individual structs, then get struct fields  
             exploded_col = df.explode('teams')
@@ -2001,10 +2000,11 @@ def player_search_input_on_change_with_query(query: str) -> None:
         
         if len(dfs['search']) == 0:
             # Store error message in session state to persist across reruns
-            st.session_state.player_search_error = f"Player number '{query}' not found. Please check the number and try again."
+            st.session_state.player_search_error = f"No player found matching '{query}'. Please check the name or license number and try again."
             # Reset player_id to None to ensure Morty instructions are shown
             st.session_state.player_id = None
-            return
+            # Force UI refresh to display the error
+            st.rerun()
             
         if len(dfs['search']) > 1:
             # If input is more than 3 characters, show matches in selectbox
@@ -2655,6 +2655,10 @@ class FFBridgeApp(PostmortemBase):
                 # No explicit rerun needed: the form submit already caused this render cycle.
                 if input_value:
                     player_search_input_on_change_with_query(input_value)
+        
+        # Display any search error in the sidebar
+        if hasattr(st.session_state, 'player_search_error'):
+            st.sidebar.error(st.session_state.player_search_error)
         
         # Show modal dialog if we have matches AND the flag is set (meaning search processing is complete)
         if (st.session_state.get('show_player_modal', False) and
