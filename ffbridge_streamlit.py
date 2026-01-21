@@ -2107,6 +2107,9 @@ def player_search_input_on_change_with_query(query: str) -> None:
         if hasattr(st.session_state, 'player_search_matches'):
             del st.session_state.player_search_matches
         
+        # Store the original search query for error messages
+        st.session_state.last_search_query = query
+        
         # Defer report start: first refresh sidebar with games, then start report
         st.session_state.deferred_start_report = True
         return
@@ -2552,9 +2555,15 @@ class FFBridgeApp(PostmortemBase):
                 except Exception as e:
                     st.session_state.deferred_start_report = False
                     error_msg = str(e)
+                    # Get the original search query for better error messages
+                    search_query = st.session_state.get('last_search_query', '')
+                    
                     # Make error messages more user-friendly
                     if "No data found" in error_msg or "simultaneous" in error_msg.lower():
-                        st.session_state.player_search_error = "Unable to load game data. The player may not have any recent games, or the game data is not yet available."
+                        if search_query:
+                            st.session_state.player_search_error = f"No valid game data found for '{search_query}'. The player may not exist or may not have any accessible games."
+                        else:
+                            st.session_state.player_search_error = "No valid game data found. The player may not exist or may not have any accessible games."
                     else:
                         st.session_state.player_search_error = f"Error loading player data: {error_msg}"
                     st.session_state.player_id = None
@@ -2563,6 +2572,8 @@ class FFBridgeApp(PostmortemBase):
                         del st.session_state.simultane_id
                     if hasattr(st.session_state, 'session_id'):
                         del st.session_state.session_id
+                    if hasattr(st.session_state, 'last_search_query'):
+                        del st.session_state.last_search_query
         if not st.session_state.sql_query_mode:
             # Show Morty instructions if no player is selected
             if st.session_state.player_id is None:
@@ -2653,6 +2664,8 @@ class FFBridgeApp(PostmortemBase):
                             st.session_state.player_id = None
                             return
                         
+                        # Store the original search query for error messages
+                        st.session_state.last_search_query = input_value
                         st.session_state.deferred_start_report = True
                         return
                     else:
