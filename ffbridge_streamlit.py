@@ -2007,8 +2007,14 @@ def player_search_input_on_change_with_query(query: str) -> None:
         if len(dfs['search']) == 0:
             # Store error message in session state to persist across reruns
             st.session_state.player_search_error = f"No player found matching '{query}'. Please check the name or license number and try again."
-            # Reset player_id to None to ensure Morty instructions are shown
+            # Clear all stale state to prevent proceeding with old data
             st.session_state.player_id = None
+            st.session_state.deferred_start_report = False
+            # Clear stale tournament/session IDs that might cause confusing errors
+            if hasattr(st.session_state, 'simultane_id'):
+                del st.session_state.simultane_id
+            if hasattr(st.session_state, 'session_id'):
+                del st.session_state.session_id
             return
             
         if len(dfs['search']) > 1:
@@ -2111,8 +2117,9 @@ def player_search_input_on_change_with_query(query: str) -> None:
         # Clear any previous matches
         if hasattr(st.session_state, 'player_search_matches'):
             del st.session_state.player_search_matches
-        # Reset player_id to None to ensure Morty instructions are shown
+        # Reset player_id and deferred_start_report to prevent stale state issues
         st.session_state.player_id = None
+        st.session_state.deferred_start_report = False
 
 
 def player_search_input_on_change() -> None:
@@ -2498,6 +2505,7 @@ class FFBridgeApp(PostmortemBase):
             'game_urls_d': {},
             'person_organization_id': None,
             'nb_deals': None,
+            'deferred_start_report': False,  # Flag to defer report generation until after sidebar refresh
         }
         
         for key, value in ffbridge_session_vars.items():
@@ -2543,8 +2551,18 @@ class FFBridgeApp(PostmortemBase):
                         st.session_state.player_id = None
                 except Exception as e:
                     st.session_state.deferred_start_report = False
-                    st.session_state.player_search_error = f"Error loading player data: {str(e)}"
+                    error_msg = str(e)
+                    # Make error messages more user-friendly
+                    if "No data found" in error_msg or "simultaneous" in error_msg.lower():
+                        st.session_state.player_search_error = "Unable to load game data. The player may not have any recent games, or the game data is not yet available."
+                    else:
+                        st.session_state.player_search_error = f"Error loading player data: {error_msg}"
                     st.session_state.player_id = None
+                    # Clear stale tournament/session state
+                    if hasattr(st.session_state, 'simultane_id'):
+                        del st.session_state.simultane_id
+                    if hasattr(st.session_state, 'session_id'):
+                        del st.session_state.session_id
         if not st.session_state.sql_query_mode:
             # Show Morty instructions if no player is selected
             if st.session_state.player_id is None:
