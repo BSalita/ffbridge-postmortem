@@ -1487,17 +1487,27 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
                                     route_results = await mlBridgeBPLib.request_board_results_dataframe_async(st.session_state.route_url, context)
                                     if len(route_results) == 0:
                                         st.warning(f"No route data found for team {st.session_state.team_number}")
-                                        return {'boards': pl.DataFrame(), 'score_frequency': pl.DataFrame()}
+                                        print(f"Route page returned empty - will try fallback: fetch boards directly")
+                                        # Don't return empty yet - try fallback below
+                                        played_boards = []  # Will trigger fallback
                                     else:
                                         played_boards = route_results['Board'].to_list()
                                         print(f"Found {len(played_boards)} boards played by team {st.session_state.team_number}: {played_boards}")
                                 except Exception as e:
                                     print(f"Error getting route data for team {st.session_state.team_number}: {e}")
-                                    raise
+                                    print(f"Will try fallback: fetch boards directly")
+                                    # Don't raise - try fallback instead
+                                    played_boards = []  # Will trigger fallback
                             
+                            # If no boards found in route, try fallback: fetch boards directly
                             if not played_boards:
-                                print(f"No boards found in route data for team {st.session_state.team_number}, returning empty results")
-                                return {'boards': pl.DataFrame(), 'score_frequency': pl.DataFrame()}
+                                print(f"No boards found in route data for team {st.session_state.team_number}")
+                                print("Attempting fallback: trying to fetch boards directly using p=donne URLs")
+                                print("This will try boards 1-40 (or until we find boards that exist)")
+                                # Try a reasonable range of boards (typically tournaments have 20-40 boards)
+                                max_deals = 40
+                                played_boards = list(range(1, max_deals + 1))
+                                print(f"Will try boards: {played_boards[:10]}... (up to {max_deals} boards)")
                             
                             # Create progress bar for board processing
                             progress_bar = st.progress(0)
@@ -1515,21 +1525,48 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
                                         progress_bar.progress(progress)
                                         progress_text.text(f"Processing board {idx + 1}/{len(played_boards)}: Board {deal_num}")
                                         
-                                        # Use the existing function to get the specific board for this player
-                                        result = await mlBridgeBPLib.get_board_for_player_async(
-                                            st.session_state.tournament_id, 
-                                            st.session_state.organization_code, 
-                                            st.session_state.player_license_number, 
-                                            str(deal_num), 
-                                            context
-                                        )
+                                        # Try p=donne URL first (team-specific)
+                                        result = None
+                                        try:
+                                            result = await mlBridgeBPLib.get_board_for_player_async(
+                                                st.session_state.tournament_id, 
+                                                st.session_state.organization_code, 
+                                                st.session_state.player_license_number, 
+                                                str(deal_num), 
+                                                context
+                                            )
+                                            print(f"Board {deal_num}: get_board_for_player_async returned result with {len(result.get('boards', []))} boards")
+                                        except Exception as e1:
+                                            # If p=donne fails, try p=board URL (tournament-wide fallback)
+                                            print(f"p=donne URL failed for board {deal_num}: {e1}")
+                                            print(f"Trying fallback: p=board URL (tournament-wide board view)")
+                                            try:
+                                                board_url = f"https://www.bridgeplus.com/nos-simultanes/resultats/?p=board&res=sim&d={deal_num}&tr={st.session_state.tournament_id}"
+                                                result = await mlBridgeBPLib.request_boards_dataframe_async(board_url, context)
+                                                print(f"Board {deal_num}: p=board fallback returned result with {len(result.get('boards', []))} boards")
+                                            except Exception as e2:
+                                                print(f"Both p=donne and p=board URLs failed for board {deal_num}: {e2}")
+                                                raise e2
                                         
-                                        if len(result['boards']) > 0:
-                                            all_boards.append(result['boards'])
-                                        if len(result['score_frequency']) > 0:
-                                            all_frequency.append(result['score_frequency'])
+                                        if result:
+                                            boards_count = len(result.get('boards', []))
+                                            freq_count = len(result.get('score_frequency', []))
+                                            print(f"Board {deal_num}: result has {boards_count} boards, {freq_count} frequency records")
+                                            
+                                            if boards_count > 0:
+                                                all_boards.append(result['boards'])
+                                                print(f"Successfully added board {deal_num} to all_boards (total: {len(all_boards)})")
+                                            else:
+                                                print(f"Board {deal_num}: result['boards'] is empty, skipping")
+                                                
+                                            if freq_count > 0:
+                                                all_frequency.append(result['score_frequency'])
+                                        else:
+                                            print(f"Board {deal_num}: result is None, skipping")
                                     except Exception as e:
                                         print(f"Failed to scrape board {deal_num} for player {st.session_state.player_license_number}: {e}")
+                                        import traceback
+                                        print(f"Traceback: {traceback.format_exc()}")
                                         continue
                             
                             # Complete progress bar
@@ -1543,16 +1580,20 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
                             progress_text.empty()
                             
                             # Combine all boards and frequency data
+                            print(f"Finished processing. Total boards fetched: {len(all_boards)}")
                             if all_boards:
                                 combined_boards = pl.concat(all_boards, how='vertical_relaxed')
+                                print(f"Combined boards DataFrame height: {combined_boards.height}")
                             else:
                                 combined_boards = pl.DataFrame()
+                                print("WARNING: No boards were accumulated in all_boards list!")
                             
                             if all_frequency:
                                 combined_frequency = pl.concat(all_frequency, how='vertical_relaxed')
                             else:
                                 combined_frequency = pl.DataFrame()
                             
+                            print(f"Returning boards_dfs with {combined_boards.height} boards")
                             return {
                                 'boards': combined_boards,
                                 'score_frequency': combined_frequency
@@ -1560,10 +1601,15 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
                         
                         # Run the async function
                         boards_dfs = asyncio.run(get_boards_with_progress())
+                        print(f"After asyncio.run: boards_dfs has {boards_dfs.get('boards', pl.DataFrame()).height} boards")
                         
                     except Exception as e:
                         st.error(f"Error getting boards for player {st.session_state.player_license_number}: {e}")
-                    boards_dfs = {'boards': pl.DataFrame(), 'score_frequency': pl.DataFrame()}
+                        import traceback
+                        print(f"Full traceback: {traceback.format_exc()}")
+                        # Only set empty DataFrames if there was an error
+                        boards_dfs = {'boards': pl.DataFrame(), 'score_frequency': pl.DataFrame()}
+                        print("Set boards_dfs to empty DataFrames due to exception")
 
             if st.session_state.debug_mode:
                 for k, v in boards_dfs.items():
@@ -1697,7 +1743,21 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
             #pair_ew_df = pair_ew_df['team_organization_code','team_table_number']
             #pair_ew_df = pair_ew_df.rename({'team_table_number':'Pair_Number_EW'})
             boards_df = boards_dfs['boards']
-            assert boards_df.height > 0, f"No boards found for {st.session_state.tournament_id}"
+            # todo: looks like board data reportedly cannot be found but actually is available at: https://www.bridgeplus.com/nos-simultanes/resultats/?p=board&res=sim&d=1&tr=S202639
+            if boards_df.height == 0:
+                error_msg = f"No boards found for tournament {st.session_state.tournament_id}"
+                error_msg += f"\n\nThis usually means:"
+                error_msg += f"\n  1. The route page (p=route) returned no boards"
+                error_msg += f"\n  2. The fallback (trying boards 1-40 directly) also found no boards"
+                error_msg += f"\n\nPossible causes:"
+                error_msg += f"\n  1. Team didn't play any boards"
+                error_msg += f"\n  2. Route page structure changed (expected div.row > div.col-1 a structure)"
+                error_msg += f"\n  3. Incorrect team/section/club parameters"
+                error_msg += f"\n  4. Board detail pages (p=donne) are not accessible or return errors"
+                error_msg += f"\n  5. Route URL: {st.session_state.get('route_url', 'Not set')}"
+                error_msg += f"\n\nNote: Board detail pages (p=board) exist but require different parsing."
+                error_msg += f"\nExample: https://www.bridgeplus.com/nos-simultanes/resultats/?p=board&res=sim&d=1&tr={st.session_state.tournament_id}"
+                raise ValueError(error_msg)
             
             # Debug: Check what columns we actually have
             print(f"Boards DataFrame columns: {boards_df.columns}")
