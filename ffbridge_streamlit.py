@@ -1284,6 +1284,66 @@ def get_ffbridge_licencie_get_urls(api_urls_d: Dict[str, Tuple[str, bool]]) -> T
     return dfs, api_urls_d
 
 
+def resolve_url_player_id_param(value: str) -> str:
+    """Map a URL ?player_id= value to a canonical FFBridge ``person_id``.
+
+    The sidebar Go-button accepts a license number (e.g. ``9500754``) and
+    transparently converts it to a person_id via ``search-members``. The URL
+    auto-load path historically required a person_id directly, which is
+    confusing because the user-visible "license number" in the sidebar is
+    what naturally ends up in URLs they share.
+
+    This helper makes the URL path forgiving:
+
+      * Try ``search-members?search={value}``.
+      * If exactly one result comes back AND its ``person_license_number``
+        equals ``value`` (after a defensive strip-leading-zeros normalize),
+        the value was a license number -- return the resolved ``person_id``.
+      * Otherwise return ``value`` unchanged so the existing
+        ``populate_game_urls_for_player`` / ``change_game_state`` flow treats
+        it as a person_id (the legacy behavior).
+
+    Failures inside the search call are silently ignored -- if the API is
+    down or the token expired, we fall through and the downstream call will
+    surface the real error via the existing st.error() handling.
+    """
+    v = (value or "").strip()
+    if not v or not v.isdigit():
+        return value  # non-numeric -- definitely not a license number
+
+    try:
+        api_urls_d = {
+            'search': (f"https://api.ffbridge.fr/api/v1/search-members?alive=1&search={v}", False),
+        }
+        dfs, _ = get_ffbridge_data_using_url_licencie(api_urls_d, show_progress=False)
+    except Exception as e:
+        print(f"resolve_url_player_id_param({v!r}): search call failed, "
+              f"falling through to direct lookup: {e}")
+        return value
+
+    search_df = dfs.get('search')
+    if search_df is None or len(search_df) != 1:
+        return value  # 0 or 2+ hits -- assume the URL value is already a person_id
+
+    row = list(search_df.iter_rows(named=True))[0]
+    # Match the field-name probing the manual flow uses (line ~2186).
+    license_from_api = (
+        row.get('person_license_number', '')
+        or row.get('license_number', '')
+        or row.get('licenseNumber', '')
+        or ''
+    )
+    license_norm = str(license_from_api).lstrip('0')
+    value_norm = v.lstrip('0')
+    if license_norm and license_norm == value_norm:
+        person_id = row.get('person_id')
+        if person_id is not None:
+            print(f"resolve_url_player_id_param: {v!r} matched license number; "
+                  f"resolved to person_id={person_id}.")
+            return str(person_id)
+    return value
+
+
 def populate_game_urls_for_player(player_id: str) -> bool:
     """Populate st.session_state.game_urls_d for a given player without changing session_id.
     Returns True if games were populated (length > 0), False otherwise.
@@ -2626,6 +2686,19 @@ class FFBridgeApp(PostmortemBase):
         # Apply URL query params last so they override any defaults set above
         # (e.g. ?player_id=...&session_id=...&debug_mode=1).
         apply_url_params_to_session_state()
+
+        # ?player_id= in shared URLs is often a license number (what the
+        # sidebar Go box accepts) rather than the FFBridge internal
+        # person_id. Resolve here -- BEFORE create_sidebar() runs and
+        # triggers its own implicit populate_game_urls_for_player() -- so
+        # license numbers Just Work and don't trip the API's 404-on-unknown-
+        # person_id path (which surfaces as a visible st.error and breaks
+        # the CLI's success/error race).
+        url_pid = st.session_state.get('player_id')
+        if url_pid:
+            resolved = resolve_url_player_id_param(str(url_pid))
+            if resolved != str(url_pid):
+                st.session_state.player_id = resolved
         
     def reset_game_data(self):
         """Reset FFBridge-specific game data."""
@@ -2738,6 +2811,9 @@ class FFBridgeApp(PostmortemBase):
                 and st.session_state.get('_url_loaded_session_key') != url_session_key):
             st.session_state._url_loaded_session_key = url_session_key
             try:
+                # ?player_id= license-number resolution happens upstream in
+                # initialize_session_state, so url_session_key[0] is already
+                # the canonical person_id by the time we get here.
                 populate_game_urls_for_player(url_session_key[0])
                 change_game_state(url_session_key[0], url_session_key[1])
                 st.rerun()
@@ -2790,7 +2866,7 @@ class FFBridgeApp(PostmortemBase):
             elif st.session_state.session_id is not None:
                 st.session_state.report_rendering = True
                 # Hidden machine-readable metadata for automation tools
-                # (e.g. send_pdf_report.py). Emitted BEFORE the (slow)
+                # (e.g. ffbridge_postmortem_generator.py). Emitted BEFORE the (slow)
                 # write_report() runs so the CLI can race this tag against
                 # any st.error() alert and bail out fast on a bad URL.
                 _td = st.session_state.get('tournament_date') or ''

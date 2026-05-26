@@ -18,7 +18,7 @@ FFBRIDGE_BEARER_TOKEN_LANCELOT=
 FFBRIDGE_EASI_TOKEN=
 
 # ---------------------------------------------------------------------------
-# SMTP configuration for send_pdf_report.py (CLI: PDF report -> email)
+# SMTP configuration for ffbridge_postmortem_generator.py (CLI: PDF report -> email)
 # ---------------------------------------------------------------------------
 # Required: SMTP_HOST, SMTP_USER, SMTP_PASSWORD
 # SMTP_FROM defaults to SMTP_USER if unset.

@@ -108,7 +108,7 @@ streamlit run ffbridge_streamlit.py
 
 ## Automation: email a PDF report
 
-`send_pdf_report.py` drives the live app in a headless browser, captures
+`ffbridge_postmortem_generator.py` drives the live app in a headless browser, captures
 the generated PDF, and emails it. Combined with the included PowerShell
 helper this becomes a daily "email me the report for session X" job.
 
@@ -147,7 +147,7 @@ Email the player's most recent game right now (SMTP creds come from
 `.env`):
 
 ```powershell
-python send_pdf_report.py `
+python ffbridge_postmortem_generator.py `
     --url   "https://ffbridge.postmortem.chat/?player_id=9500754" `
     --email coach@example.com
 ```
@@ -155,7 +155,7 @@ python send_pdf_report.py `
 Pick a specific session (rarely needed — usually you want auto-latest):
 
 ```powershell
-python send_pdf_report.py `
+python ffbridge_postmortem_generator.py `
     --url   "https://ffbridge.postmortem.chat/?player_id=9500754&session_id=107118" `
     --email coach@example.com
 ```
@@ -164,7 +164,7 @@ Force a re-send even if the cache says it already went out, and print
 the full SMTP conversation if something looks wrong:
 
 ```powershell
-python send_pdf_report.py `
+python ffbridge_postmortem_generator.py `
     --url   "https://ffbridge.postmortem.chat/?player_id=9500754" `
     --email coach@example.com `
     --force-email `
@@ -175,7 +175,7 @@ Generate the PDF locally without sending email (handy for testing the
 browser side in isolation):
 
 ```powershell
-python send_pdf_report.py `
+python ffbridge_postmortem_generator.py `
     --url   "https://ffbridge.postmortem.chat/?player_id=9500754" `
     --email me@example.com `
     --output report.pdf `
@@ -185,7 +185,7 @@ python send_pdf_report.py `
 Pass SMTP settings on the command line instead of via `.env`:
 
 ```powershell
-python send_pdf_report.py `
+python ffbridge_postmortem_generator.py `
     --url        "https://ffbridge.postmortem.chat/?player_id=9500754" `
     --email      coach@example.com `
     --from-email you@gmail.com `
