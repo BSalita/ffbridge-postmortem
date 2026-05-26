@@ -250,6 +250,96 @@ def ShowDataFrameTable(df: pl.DataFrame, key: str, query: str = 'SELECT * FROM s
         return result_df
 
 
+# ----------------------------
+# Sidebar <-> URL query-param sync
+# ----------------------------
+#
+# Each entry maps a URL query-param name to the underlying st.session_state key
+# that drives a sidebar widget, plus parser/serializer helpers.
+#
+# - parser:   str (from URL) -> typed value stored in session_state. Raise on bad input.
+# - serializer: typed value -> str (for URL). Return None to omit the param from the URL.
+#
+# Add new sidebar options here to make them URL-syncable.
+
+def _parse_bool_param(raw: str) -> bool:
+    s = str(raw).strip().lower()
+    if s in ('1', 'true', 't', 'yes', 'y', 'on'):
+        return True
+    if s in ('0', 'false', 'f', 'no', 'n', 'off'):
+        return False
+    raise ValueError(f"invalid boolean URL param value: {raw!r}")
+
+
+SIDEBAR_URL_PARAM_MAP: Dict[str, Dict[str, Callable[[Any], Any]]] = {
+    'player_id': {
+        'state_key': 'player_id',
+        'parser': lambda v: str(v),
+        'serializer': lambda v: None if v is None else str(v),
+    },
+    'session_id': {
+        'state_key': 'session_id',
+        'parser': lambda v: int(v),
+        'serializer': lambda v: None if v is None else str(int(v)),
+    },
+    'single_dummy_sample_count': {
+        'state_key': 'single_dummy_sample_count',
+        'parser': lambda v: int(v),
+        'serializer': lambda v: None if v is None else str(int(v)),
+    },
+    'show_sql_query': {
+        'state_key': 'show_sql_query',
+        'parser': _parse_bool_param,
+        'serializer': lambda v: None if v is None else ('1' if bool(v) else '0'),
+    },
+    'debug_mode': {
+        'state_key': 'debug_mode',
+        'parser': _parse_bool_param,
+        'serializer': lambda v: None if v is None else ('1' if bool(v) else '0'),
+    },
+}
+
+
+def apply_url_params_to_session_state() -> None:
+    """Read URL query params and write them into st.session_state for registered sidebar options.
+
+    Called once during session initialization (after defaults are set) so URL params
+    take precedence over defaults. Unknown / unparseable params are skipped with a warning.
+    """
+    qp = st.query_params
+    for url_key, cfg in SIDEBAR_URL_PARAM_MAP.items():
+        if url_key not in qp:
+            continue
+        raw = qp[url_key]
+        try:
+            value = cfg['parser'](raw)
+        except Exception as e:
+            print(f"Warning: ignoring URL param {url_key}={raw!r}: {e}")
+            continue
+        st.session_state[cfg['state_key']] = value
+
+
+def sync_session_state_to_url_params() -> None:
+    """Write registered sidebar options from st.session_state back to URL query params.
+
+    Called near the end of every render so the URL always reflects current sidebar state.
+    Idempotent: only writes when the serialized value differs from the current URL param.
+    Values that serialize to None (e.g. None state) are removed from the URL.
+    """
+    qp = st.query_params
+    for url_key, cfg in SIDEBAR_URL_PARAM_MAP.items():
+        state_key = cfg['state_key']
+        value = st.session_state.get(state_key, None)
+        serialized = cfg['serializer'](value)
+        current = qp.get(url_key)
+        if serialized is None:
+            if url_key in qp:
+                del qp[url_key]
+        else:
+            if current != serialized:
+                qp[url_key] = serialized
+
+
 def game_url_on_change() -> None:
     """Handle game URL input change event"""
     st.session_state.game_url = st.session_state.create_sidebar_game_url_on_change
@@ -2519,15 +2609,8 @@ class FFBridgeApp(PostmortemBase):
         # First initialize common session state
         self.initialize_common_session_state()
         
-        # FFBridge-specific initialization
-        if 'player_id' in st.query_params:
-            player_id = st.query_params['player_id']
-            if not isinstance(player_id, str):
-                st.error(f'player_id must be a string {player_id}')
-                st.stop()
-            st.session_state.player_id = player_id
-        else:
-            st.session_state.player_id = None
+        # Default before URL params are applied; URL ?player_id=... will override below.
+        st.session_state.player_id = None
 
         cache_dir = 'cache'
         pathlib.Path(cache_dir).mkdir(exist_ok=True, parents=True)
@@ -2539,6 +2622,10 @@ class FFBridgeApp(PostmortemBase):
         # Initialize website-specific components
         self.initialize_website_specific()
         self.reset_game_data()
+
+        # Apply URL query params last so they override any defaults set above
+        # (e.g. ?player_id=...&session_id=...&debug_mode=1).
+        apply_url_params_to_session_state()
         
     def reset_game_data(self):
         """Reset FFBridge-specific game data."""
@@ -2634,6 +2721,38 @@ class FFBridgeApp(PostmortemBase):
                         del st.session_state.session_id
                     if hasattr(st.session_state, 'last_search_query'):
                         del st.session_state.last_search_query
+        # URL-driven auto-load: when ?player_id=X[&session_id=Y] is in the URL on cold load,
+        # session_state has the ids but the report data (df) hasn't been fetched yet because
+        # the user never clicked the game-selector dropdown. Mirror that dropdown's effect
+        # by calling change_game_state once for the URL-specified pair, then rerun so the
+        # report renders cleanly. When session_id is omitted, change_game_state(player_id,
+        # None) auto-picks the player's most recent game -- same behavior as the sidebar
+        # "Enter ffbridge license number" path. Tracking key avoids re-loading on every
+        # script rerun.
+        url_session_key = (
+            str(st.session_state.player_id) if st.session_state.player_id is not None else None,
+            int(st.session_state.session_id) if st.session_state.session_id is not None else None,
+        )
+        if (url_session_key[0] is not None
+                and getattr(st.session_state, 'df', None) is None
+                and st.session_state.get('_url_loaded_session_key') != url_session_key):
+            st.session_state._url_loaded_session_key = url_session_key
+            try:
+                populate_game_urls_for_player(url_session_key[0])
+                change_game_state(url_session_key[0], url_session_key[1])
+                st.rerun()
+                return
+            except Exception as e:
+                print(f"URL auto-load failed for {url_session_key}: {e}")
+                import traceback
+                traceback.print_exc()
+                st.error(
+                    f"Failed to auto-load report for player_id={url_session_key[0]}, "
+                    f"session_id={url_session_key[1]}: {e}"
+                )
+                # Clear session_id so we fall through to the dropdown UX instead of looping.
+                st.session_state.session_id = None
+
         if not st.session_state.sql_query_mode:
             # Show Morty instructions if no player is selected
             if st.session_state.player_id is None:
@@ -2670,6 +2789,22 @@ class FFBridgeApp(PostmortemBase):
                 app_info()
             elif st.session_state.session_id is not None:
                 st.session_state.report_rendering = True
+                # Hidden machine-readable metadata for automation tools
+                # (e.g. send_pdf_report.py). Emitted BEFORE the (slow)
+                # write_report() runs so the CLI can race this tag against
+                # any st.error() alert and bail out fast on a bad URL.
+                _td = st.session_state.get('tournament_date') or ''
+                _pid = st.session_state.get('player_id') or ''
+                _sid = st.session_state.get('session_id')
+                _sid_str = '' if _sid is None else str(_sid)
+                st.markdown(
+                    f'<span id="cli-game-meta" '
+                    f'data-game-date="{_td}" '
+                    f'data-player-id="{_pid}" '
+                    f'data-session-id="{_sid_str}" '
+                    f'style="display:none;"></span>',
+                    unsafe_allow_html=True,
+                )
                 try:
                     print(f"Starting report generation for player_id={st.session_state.player_id}, session_id={st.session_state.session_id}")
                     self.write_report()
@@ -2688,6 +2823,10 @@ class FFBridgeApp(PostmortemBase):
         
         # Re-inject CSS at the end to ensure it overrides any theme styles applied during render.
         self._inject_sidebar_button_css()
+
+        # Mirror current sidebar state into the URL bar so the page is shareable/bookmarkable
+        # and reloading preserves the selected player, game, and developer settings.
+        sync_session_state_to_url_params()
 
     def create_sidebar(self):
         """Create FFBridge-specific sidebar."""

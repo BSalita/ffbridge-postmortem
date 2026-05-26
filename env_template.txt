@@ -17,3 +17,24 @@ FFBRIDGE_BEARER_TOKEN_LANCELOT=
 # EASI token for api.ffbridge.fr (manually set or automatically filled)
 FFBRIDGE_EASI_TOKEN=
 
+# ---------------------------------------------------------------------------
+# SMTP configuration for send_pdf_report.py (CLI: PDF report -> email)
+# ---------------------------------------------------------------------------
+# Required: SMTP_HOST, SMTP_USER, SMTP_PASSWORD
+# SMTP_FROM defaults to SMTP_USER if unset.
+#
+# Tested & recommended path: Gmail with an App Password.
+#   1. Enable 2-Step Verification on your Google account.
+#   2. https://myaccount.google.com/apppasswords -> generate one for "Mail".
+#   3. Copy the 16-char password (no spaces) into SMTP_PASSWORD below.
+#   4. SMTP_USER and SMTP_FROM must both be the @gmail.com address that
+#      owns the app password.
+#
+# Defaults in the CLI: smtp.gmail.com on port 587 with STARTTLS. Port 465
+# auto-promotes to implicit TLS, so you do not normally need to flip flags.
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your.email@gmail.com
+SMTP_PASSWORD=xxxxxxxxxxxxxxxx
+SMTP_FROM=your.email@gmail.com
+

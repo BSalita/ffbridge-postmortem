@@ -24,6 +24,7 @@
 # Rename to title case for column names. e.g. session_id to Session_ID
 # change Number_Declarer to Declarer or Declarer_ID or Player_ID_Declarer. Same with Declarer_Name or Player_Name_Declarer. Same with OnLead or OnLead_ID or Player_ID_OnLead.
 
+import pathlib
 import polars as pl
 import numpy as np
 import warnings
@@ -36,7 +37,12 @@ import endplay # for __version__
 from endplay.parsers import pbn, lin, json
 from endplay.types import Deal, Contract, Denom, Player, Penalty, Vul
 from endplay.dds import calc_dd_table, calc_all_tables, par
+from endplay.dds.ddtable import DDTable as _DDTable
+from endplay._dds import ddTableResults as _ddTableResults
 from endplay.dealer import generate_deals
+from mlBridge.dds_ddss import DDSS_AVAILABLE as _DDSS_AVAILABLE
+if _DDSS_AVAILABLE:
+    from mlBridge import dds_ddss as _dds_ddss
 
 from mlBridge.mlBridgeLib import (
     NESW, SHDC, CDHSN,NS_EW,
@@ -52,6 +58,15 @@ logger = setup_logger(__name__)
 
 
 # todo: use versions in mlBridge
+def _list_to_ddtable(dd_list: list[list[int]]) -> _DDTable:
+    """Convert a 4x5 nested list (NESW x SHDCN) to an endplay DDTable object."""
+    data = _ddTableResults()
+    for dir_idx in range(4):
+        for suit_idx in range(5):
+            data.resTable[suit_idx][dir_idx] = dd_list[dir_idx][suit_idx]
+    return _DDTable(data)
+
+
 VulToEndplayVul_d = { # convert mlBridge Vul to endplay Vul
     'None':Vul.none,
     'Both':Vul.both,
@@ -991,15 +1006,16 @@ def update_hand_records_cache(hrs_cache_df: pl.DataFrame, new_df: pl.DataFrame) 
         logger.info("No new data to process, returning original cache")
         return hrs_cache_df
     
-    # Calculate which PBNs will be updated vs added
-    existing_pbns = set(hrs_cache_df['PBN'].to_list())
-    new_pbns = set(new_df['PBN'].to_list())
-    
-    pbns_to_update = existing_pbns & new_pbns  # intersection
-    pbns_to_add = new_pbns - existing_pbns      # difference
-    
-    logger.info(f"PBNs to update (existing): {len(pbns_to_update)}")
-    logger.info(f"PBNs to add (new): {len(pbns_to_add)}")
+    join_keys = ['PBN', 'Dealer', 'Vul'] if {'PBN', 'Dealer', 'Vul'}.issubset(set(new_df.columns)) else ['PBN']
+    logger.info(f"Using cache join keys: {join_keys}")
+
+    existing_keys_df = hrs_cache_df.select(join_keys).unique()
+    new_keys_df = new_df.select(join_keys).unique()
+    keys_to_update_df = new_keys_df.join(existing_keys_df, on=join_keys, how='inner')
+    keys_to_add_df = new_keys_df.join(existing_keys_df, on=join_keys, how='anti')
+
+    logger.info(f"Keys to update (existing): {keys_to_update_df.height}")
+    logger.info(f"Keys to add (new): {keys_to_add_df.height}")
     
     # Check for duplicate PBNs in new_df with different Dealer/Vul combinations
     new_df_pbn_counts = new_df['PBN'].value_counts()
@@ -1008,11 +1024,8 @@ def update_hand_records_cache(hrs_cache_df: pl.DataFrame, new_df: pl.DataFrame) 
         logger.warning(f"Note: {duplicate_pbns_in_new.height} PBNs in new data have multiple Dealer/Vul combinations")
         logger.warning(f"      This will result in more rows than unique PBNs")
     
-    # Calculate expected final row count more accurately
-    # The update operation replaces existing rows with matching PBNs
-    # Then we add all rows from new_df that don't exist in hrs_cache_df
-    expected_final_rows = hrs_cache_df.height - len(pbns_to_update) + new_df.height
-    logger.info(f"Expected final rows: {expected_final_rows} (existing: {hrs_cache_df.height} - updated: {len(pbns_to_update)} + new: {len(pbns_to_add)})")
+    expected_final_rows = hrs_cache_df.height + keys_to_add_df.height
+    logger.info(f"Expected final rows: {expected_final_rows}")
 
     # check for differing dtypes
     common_cols = set(hrs_cache_df.columns) & set(new_df.columns)
@@ -1024,15 +1037,27 @@ def update_hand_records_cache(hrs_cache_df: pl.DataFrame, new_df: pl.DataFrame) 
     assert len(dtype_diffs) == 0, f"Differing dtypes: {dtype_diffs}"
 
     # Update existing rows (only columns from new_df)
-    hrs_cache_df = hrs_cache_df.update(new_df, on='PBN')
+    hrs_cache_df = hrs_cache_df.update(new_df, on=join_keys)
     
     # Add missing columns to new_df ONLY for new rows
     missing_columns = set(hrs_cache_df.columns) - set(new_df.columns)
-    new_rows = new_df.join(hrs_cache_df.select('PBN'), on='PBN', how='anti')
+    new_rows = new_df.join(hrs_cache_df.select(join_keys).unique(), on=join_keys, how='anti')
     if new_rows.height > 0:
-        new_rows = new_rows.with_columns([
-            pl.lit(None).alias(col) for col in missing_columns
-        ])
+        if join_keys == ['PBN', 'Dealer', 'Vul']:
+            # Seed new Dealer/Vul combinations from an existing row with the same PBN,
+            # then overlay the newly computed columns for the exact composite key.
+            template_rows = (
+                hrs_cache_df
+                .group_by('PBN')
+                .first()
+                .drop(['Dealer', 'Vul'])
+            )
+            seeded_rows = new_rows.select(join_keys).join(template_rows, on='PBN', how='left')
+            new_rows = seeded_rows.update(new_df, on=join_keys)
+        if missing_columns:
+            new_rows = new_rows.with_columns([
+                pl.lit(None).alias(col) for col in missing_columns if col not in new_rows.columns
+            ])
         hrs_cache_df = pl.concat([hrs_cache_df, new_rows.select(hrs_cache_df.columns)])
         logger.info(f"Added {len(missing_columns)} missing columns to {new_rows.height} new rows")
     
@@ -1170,55 +1195,80 @@ def display_dd_deals(deals: list[Deal], dd_result_tables: list[Any], deal_index:
         rt.pprint()
 
 
-# todo: could save a couple seconds by creating dict of deals
-def solve_dd_for_deals(deals: list[Deal], batch_size: int = 40, output_progress: bool = False, progress: Optional[Any] = None) -> list[Any]:
-    """Compute double-dummy tables for a list of `Deal`s in batches.
+def _log_dd_progress(b: int, total: int, output_progress: bool, progress: Optional[Any], final: bool = False) -> None:
+    """Emit a progress update for DD computation."""
+    if not output_progress:
+        return
+    if final:
+        msg = f"100%: Double dummies calculated for {total} unique deals."
+    else:
+        pct = int(b * 100 / total)
+        msg = f"{pct}%: Double dummies calculated for {b} of {total} unique deals."
+    if progress:
+        if hasattr(progress, 'progress'):
+            progress.progress(100 if final else pct, msg)
+            if final:
+                progress.empty()
+        elif hasattr(progress, 'set_description'):
+            progress.set_description(msg)
+    else:
+        logger.info(msg)
 
-    Purpose:
-    - Calculate double-dummy analysis results for multiple bridge deals efficiently
-    - Process deals in batches to optimize memory usage and performance
-    - Provide progress tracking for long-running computations
-    - Interface with endplay library's calc_all_tables function
+
+def _solve_dd_endplay(deals: list[Deal], batch_size: int, output_progress: bool, progress: Optional[Any]) -> list:
+    """Original endplay-based DD solver."""
+    all_result_tables = []
+    for i, b in enumerate(range(0, len(deals), batch_size)):
+        if output_progress and i % 100 == 0:
+            _log_dd_progress(b, len(deals), output_progress, progress)
+        result_tables = calc_all_tables(deals[b:b + batch_size])
+        all_result_tables.extend(result_tables)
+    if output_progress:
+        _log_dd_progress(0, len(deals), output_progress, progress, final=True)
+    return all_result_tables
+
+
+def _solve_dd_ddss(deals: list[Deal], batch_size: int, output_progress: bool, progress: Optional[Any]) -> list:
+    """ddss-based DD solver using CalcAllTablesPBNx."""
+    pbn_strings = [deal.to_pbn() for deal in deals]
+    all_result_tables = []
+    for i, b in enumerate(range(0, len(pbn_strings), batch_size)):
+        if output_progress and i % 10 == 0:
+            _log_dd_progress(b, len(pbn_strings), output_progress, progress)
+        batch = pbn_strings[b:b + batch_size]
+        result_tables = _dds_ddss.calc_all_tables_pbnx(batch)
+        all_result_tables.extend(result_tables)
+    if output_progress:
+        _log_dd_progress(0, len(pbn_strings), output_progress, progress, final=True)
+    return all_result_tables
+
+
+def solve_dd_for_deals(deals: list[Deal], batch_size: int = None, use_ddss: bool = True, output_progress: bool = False, progress: Optional[Any] = None) -> list[Any]:
+    """Compute double-dummy tables for a list of `Deal`s in batches.
 
     Parameters:
     - deals: tuple/list of endplay `Deal`.
-    - batch_size: number of deals per `calc_all_tables` call.
+    - batch_size: number of deals per batch. Default 1000 for ddss, 40 for endplay.
+    - use_ddss: prefer ddss if available. Falls back to endplay if unavailable.
     - output_progress: show progress to stdout or provided progress handler.
     - progress: tqdm/streamlit-like object with `set_description`/`progress`.
 
-    Input columns:
-    - None (operates on Deal objects, not DataFrame columns).
-
-    Output columns:
-    - None (returns result tables, not DataFrame columns).
-
     Returns:
-    - List of result tables, in the same order as deals.
+    - List of result tables (DDSSResult or DDTable), in the same order as deals.
     """
-    all_result_tables = []
-    for i,b in enumerate(range(0,len(deals),batch_size)):
-        if output_progress:
-            if i % 100 == 0: # only show progress every 100 batches
-                percent_complete = int(b*100/len(deals))
-                if progress:
-                    if hasattr(progress, 'progress'): # streamlit
-                        progress.progress(percent_complete, f"{percent_complete}%: Double dummies calculated for {b} of {len(deals)} unique deals.")
-                    elif hasattr(progress, 'set_description'): # tqdm
-                        progress.set_description(f"{percent_complete}%: Double dummies calculated for {b} of {len(deals)} unique deals.")
-                else:
-                    logger.info(f"{percent_complete}%: Double dummies calculated for {b} of {len(deals)} unique deals.")
-        result_tables = calc_all_tables(deals[b:b+batch_size])
-        all_result_tables.extend(result_tables)
-    if output_progress: 
-        if progress:
-            if hasattr(progress, 'progress'): # streamlit
-                progress.progress(100, f"100%: Double dummies calculated for {len(deals)} unique deals.")
-                progress.empty() # hmmm, this removes the progress bar so fast that 100% message won't be seen.
-            elif hasattr(progress, 'set_description'): # tqdm
-                progress.set_description(f"100%: Double dummies calculated for {len(deals)} unique deals.")
-        else:
-            logger.info(f"100%: Double dummies calculated for {len(deals)} unique deals.")
-    return all_result_tables
+    if len(deals) == 0:
+        return []
+
+    if use_ddss and _DDSS_AVAILABLE:
+        if batch_size is None:
+            batch_size = 1000
+        return _solve_dd_ddss(deals, batch_size, output_progress, progress)
+    else:
+        if batch_size is None:
+            batch_size = 40
+        if use_ddss and not _DDSS_AVAILABLE:
+            logger.info("ddss requested but not available; falling back to endplay")
+        return _solve_dd_endplay(deals, batch_size, output_progress, progress)
 
 
 def compute_dd_trick_tables(hrs_df: pl.DataFrame, hrs_cache_df: pl.DataFrame, max_dd_adds: Optional[int] = None, output_progress: bool = True, progress: Optional[Any] = None) -> Tuple[pl.DataFrame, Dict[str, Any]]:
@@ -1394,24 +1444,57 @@ def compute_par_scores_for_missing(hrs_df: pl.DataFrame, hrs_cache_df: pl.DataFr
     #     else:
     #         logger.info("No PBNs found with DD data but missing ParScore")
     
-    # Find PBNs that need par score calculation (only those that have DD calculations)
-    unique_hrs_df_pbns = set(hrs_df['PBN'])
-    logger.info(f"{len(unique_hrs_df_pbns)=}")
+    # Find exact PBN+Dealer+Vul combinations that are missing or need Par recalculation.
+    join_keys = ['PBN', 'Dealer', 'Vul']
+    df_unique_keys = hrs_df.select(join_keys).unique()
+    cache_unique_keys = hrs_cache_df.select(join_keys).unique()
+    missing_key_rows = df_unique_keys.join(cache_unique_keys, on=join_keys, how='anti')
+    logger.info(f"Missing cache key rows for Par: {missing_key_rows.height}")
+
     hrs_cache_with_nulls_df = hrs_cache_df.filter(pl.col('ParScore').is_null())
     logger.info(f"{len(hrs_cache_with_nulls_df)=}")
-    hrs_cache_with_nulls_pbns = set(hrs_cache_with_nulls_df['PBN'])
-    logger.info(f"{len(hrs_cache_with_nulls_pbns)=}")
-    
-    hrs_cache_all_pbns = set(hrs_cache_df['PBN'])
-    pbns_to_add = set(unique_hrs_df_pbns) - hrs_cache_all_pbns
+    replace_key_rows = (
+        hrs_cache_with_nulls_df
+        .select(join_keys)
+        .unique()
+        .join(df_unique_keys, on=join_keys, how='semi')
+    )
+    logger.info(f"Null Par cache key rows to replace: {replace_key_rows.height}")
+
+    pbns_to_add = set(missing_key_rows['PBN'].unique().to_list()) if missing_key_rows.height > 0 else set()
     logger.info(f"{len(pbns_to_add)=}")
-    pbns_to_replace = set(unique_hrs_df_pbns).intersection(hrs_cache_with_nulls_pbns)
+    pbns_to_replace = set(replace_key_rows['PBN'].unique().to_list()) if replace_key_rows.height > 0 else set()
     logger.info(f"{len(pbns_to_replace)=}")
     pbns_to_process = pbns_to_add.union(pbns_to_replace)
     logger.info(f"{len(pbns_to_process)=}")
+
+    # If DD tables were not recalculated in this run, reconstruct them from cache so
+    # newly observed Dealer/Vul combinations can still receive Par values.
+    missing_dd_pbns = pbns_to_process - set(unique_dd_tables_d.keys())
+    if missing_dd_pbns:
+        dd_cols = [
+            'DD_N_S', 'DD_N_H', 'DD_N_D', 'DD_N_C', 'DD_N_N',
+            'DD_E_S', 'DD_E_H', 'DD_E_D', 'DD_E_C', 'DD_E_N',
+            'DD_S_S', 'DD_S_H', 'DD_S_D', 'DD_S_C', 'DD_S_N',
+            'DD_W_S', 'DD_W_H', 'DD_W_D', 'DD_W_C', 'DD_W_N',
+        ]
+        cache_dd_rows = (
+            hrs_cache_df
+            .filter(pl.col('PBN').is_in(list(missing_dd_pbns)) & pl.col('DD_N_C').is_not_null())
+            .group_by('PBN')
+            .first()
+            .select(['PBN'] + dd_cols)
+            .rows(named=True)
+        )
+        for row in cache_dd_rows:
+            unique_dd_tables_d[row['PBN']] = _list_to_ddtable([
+                [row[f'DD_{direction}_{suit}'] for suit in ['S', 'H', 'D', 'C', 'N']]
+                for direction in ['N', 'E', 'S', 'W']
+            ])
+        logger.info(f"Built DD tables for {len(cache_dd_rows)} PBNs from cache")
     
     # Check which PBNs missing ParScore have DD tables available
-    pbns_missing_par = set(hrs_cache_with_nulls_pbns)  # Use the already calculated set
+    pbns_missing_par = set(replace_key_rows['PBN'].unique().to_list()) if replace_key_rows.height > 0 else set()
     pbns_with_dd_tables = set(unique_dd_tables_d.keys())
     pbns_missing_par_and_dd = pbns_missing_par - pbns_with_dd_tables
     pbns_missing_par_with_dd = pbns_missing_par & pbns_with_dd_tables
@@ -1428,12 +1511,12 @@ def compute_par_scores_for_missing(hrs_df: pl.DataFrame, hrs_cache_df: pl.DataFr
     # Get Dealer/Vul from appropriate source for each PBN type - optimized with Polars operations
     source_dfs = []
     
-    if pbns_to_add:
-        source_dfs.append(hrs_df.filter(pl.col('PBN').is_in(list(pbns_to_add)))[['PBN','Dealer','Vul']].unique())
+    if missing_key_rows.height > 0:
+        source_dfs.append(missing_key_rows)
     
-    if pbns_to_replace:
+    if replace_key_rows.height > 0:
         # Get rows from hrs_cache_df, but for None values in Dealer/Vul, get them from hrs_df
-        cache_rows = hrs_cache_df.filter(pl.col('PBN').is_in(list(pbns_to_replace)))[['PBN','Dealer','Vul']].unique()
+        cache_rows = replace_key_rows
         
         # Find rows with None values in Dealer or Vul
         rows_with_none = cache_rows.filter(pl.col('Dealer').is_null() | pl.col('Vul').is_null())
@@ -1452,7 +1535,7 @@ def compute_par_scores_for_missing(hrs_df: pl.DataFrame, hrs_cache_df: pl.DataFr
     
     # Combine all DataFrames efficiently and convert to rows only at the end
     if source_dfs:
-        combined_df = pl.concat(source_dfs)
+        combined_df = pl.concat(source_dfs).unique(subset=['PBN', 'Dealer', 'Vul'])
         source_rows = combined_df.rows()
     else:
         source_rows = []
@@ -1631,7 +1714,37 @@ def estimate_sd_trick_distributions(deal: str, produce: int = 100) -> Tuple[Dict
 #     return sd_cache_d
 
 
-def estimate_sd_trick_distributions_for_df(df: pl.DataFrame, hrs_cache_df: pl.DataFrame, sd_productions: int = 100, max_sd_adds=100, progress: Optional[Any] = None) -> Tuple[Dict[str, pl.DataFrame], pl.DataFrame]:
+SD_CACHE_PERSIST_EVERY = 50_000
+
+
+def _build_sd_probs_df(sd_d: Dict[str, Any]) -> pl.DataFrame:
+    """Convert accumulated SD probability results into the cache DataFrame shape."""
+    if sd_d:
+        pbns = list(sd_d.keys())
+        productions_list = [sd_d[pbn][0] for pbn in pbns]
+
+        sd_probs_d = {'PBN': pbns, 'Probs_Trials': productions_list}
+        for col_name in PROB_COLUMNS:
+            sd_probs_d[col_name] = []
+
+        for pbn in pbns:
+            _, probs_d = sd_d[pbn]
+            pbn_probs = {}
+            for (pair_direction, declarer_direction, suit), probs in probs_d.items():
+                for i, t in enumerate(probs):
+                    col_name = f'Probs_{pair_direction}_{declarer_direction}_{suit}_{i}'
+                    pbn_probs[col_name] = t
+
+            for col_name in PROB_COLUMNS:
+                sd_probs_d[col_name].append(pbn_probs.get(col_name, 0.0))
+    else:
+        sd_probs_d = {'PBN': [], 'Probs_Trials': []}
+
+    sd_probs_df = pl.DataFrame(sd_probs_d, orient='row')
+    return sd_probs_df.with_columns(pl.col(pl.Float64).cast(pl.Float32))
+
+
+def estimate_sd_trick_distributions_for_df(df: pl.DataFrame, hrs_cache_df: pl.DataFrame, sd_productions: int = 100, max_sd_adds=100, progress: Optional[Any] = None, cache_file_path: Optional[pathlib.Path] = None, persist_every: int = SD_CACHE_PERSIST_EVERY) -> Tuple[Dict[str, pl.DataFrame], pl.DataFrame]:
     """Compute and cache single-dummy probabilities for PBNs needing them.
 
     Purpose:
@@ -1646,6 +1759,8 @@ def estimate_sd_trick_distributions_for_df(df: pl.DataFrame, hrs_cache_df: pl.Da
     - sd_productions: number of generated deals per side.
     - max_sd_adds: cap on number of PBNs processed.
     - progress: optional progress sink.
+    - cache_file_path: optional parquet path; if provided, persist cache updates during long SD runs.
+    - persist_every: number of PBNs to process between cache persists.
 
     Input columns:
     - `PBN`: Bridge deal notation string for analysis
@@ -1663,25 +1778,34 @@ def estimate_sd_trick_distributions_for_df(df: pl.DataFrame, hrs_cache_df: pl.Da
     # todo: reduce Python set/dict usage; prefer Polars joins/group_bys for pbns_to_add/replace and probability assembly.
     sd_d = {}
     sd_dfs_d = {}
+    sd_probs_chunks = []
     assert hrs_cache_df.height == hrs_cache_df.unique(subset=['PBN', 'Dealer', 'Vul']).height, "PBN+Dealer+Vul combinations in hrs_cache_df must be unique"
     
-    # Calculate which PBNs to add vs replace
-    # Note: Single dummy calculations are the same for a given PBN regardless of Dealer/Vul
-    # So we work at the PBN level, but need to handle multiple Dealer/Vul combinations properly
-    
-    # Find PBNs to add (in df but not in hrs_cache_df)
-    df_pbns = set(df['PBN'].to_list())
-    hrs_cache_pbns = set(hrs_cache_df['PBN'].to_list())
-    pbns_to_add = df_pbns - hrs_cache_pbns
+    # SD calculations are PBN-invariant (independent of Dealer/Vul), so we only need
+    # to compute SD for genuinely new PBNs. Missing Dealer/Vul combos for existing PBNs
+    # are handled by update_hand_records_cache seeding from existing rows.
+    t_filter = time.time()
+    df_unique_pbns = df.select('PBN').unique()
+    cache_unique_pbns = hrs_cache_df.select('PBN').unique()
+
+    pbns_to_add = set(
+        df_unique_pbns.join(cache_unique_pbns, on='PBN', how='anti')['PBN'].to_list()
+    )
     logger.info(f"PBNs to add: {len(pbns_to_add)}")
-    
-    # Find PBNs to replace (in both, but with null Probs_Trials in hrs_cache_df)
-    # todo: this step takes 3m. find a faster way. perhaps using join?
-    pbns_to_replace = set(hrs_cache_df.filter(
-        pl.col('PBN').is_in(df['PBN'].to_list()) & 
-        pl.col('Probs_Trials').is_null()
-    )['PBN'].to_list())
-    logger.info(f"PBNs to replace: {len(pbns_to_replace)}")
+
+    # Also detect missing Dealer/Vul combos so we can seed them after SD completes
+    join_keys = ['PBN', 'Dealer', 'Vul']
+    df_unique_keys = df.select(join_keys).unique()
+    cache_unique_keys = hrs_cache_df.select(join_keys).unique()
+    missing_key_rows = df_unique_keys.join(cache_unique_keys, on=join_keys, how='anti')
+    logger.info(f"Missing cache key rows for SD (Dealer/Vul combos to seed): {missing_key_rows.height}")
+
+    # Find PBNs to replace (in both, but with null Probs_Trials) via semi-join
+    pbns_to_replace = set(
+        hrs_cache_df.filter(pl.col('Probs_Trials').is_null())
+        .join(df_unique_pbns, on='PBN', how='semi')['PBN'].to_list()
+    )
+    logger.info(f"PBNs to replace: {len(pbns_to_replace)}  (filter time: {time.time()-t_filter:.1f}s)")
     
     # Combine all PBNs that need processing
     pbns_to_process = list(pbns_to_add.union(pbns_to_replace))
@@ -1691,25 +1815,109 @@ def estimate_sd_trick_distributions_for_df(df: pl.DataFrame, hrs_cache_df: pl.Da
         logger.info(f"limit: {max_sd_adds=} {len(pbns_to_process)=}")
     cleaned_pbns = [Deal(pbn) for pbn in pbns_to_process]
     assert all([pbn == dpbn.to_pbn() for pbn,dpbn in zip(pbns_to_process,cleaned_pbns)]), [(pbn,dpbn.to_pbn()) for pbn,dpbn in zip(pbns_to_process,cleaned_pbns) if pbn != dpbn.to_pbn()] # usually a sort order issue which should have been fixed in previous step
+    SD_SOLVE_BATCH_PBNS = 200
     estimated_processing_time_per_hour = 8000
     logger.info(f"processing time assuming {estimated_processing_time_per_hour}/hour:{len(pbns_to_process)/estimated_processing_time_per_hour} hours")
-    for i,pbn in enumerate(pbns_to_process):
+    logger.info(f"Batched SD pipeline: {SD_SOLVE_BATCH_PBNS} PBNs per DD-solve batch")
+    total_pbns = len(pbns_to_process)
+    last_persist_count = 0
+
+    for batch_start in range(0, total_pbns, SD_SOLVE_BATCH_PBNS):
+        batch_end = min(batch_start + SD_SOLVE_BATCH_PBNS, total_pbns)
+        batch_pbns = pbns_to_process[batch_start:batch_end]
+
+        percent_complete = int(batch_start * 100 / total_pbns)
         if progress:
-            percent_complete = int(i*100/len(pbns_to_process))
-            if hasattr(progress, 'progress'): # streamlit
-                progress.progress(percent_complete, f"{percent_complete}%: Single dummies calculated for {i} of {len(pbns_to_process)} unique deals using {sd_productions} samples per deal. This step takes 30 seconds...")
-            elif hasattr(progress, 'set_description'): # tqdm
-                progress.set_description(f"{percent_complete}%: Single dummies calculated for {i} of {len(pbns_to_process)} unique deals using {sd_productions} samples per deal. This step takes 30 seconds...")
+            msg = f"{percent_complete}%: Single dummies calculated for {batch_start} of {total_pbns} unique deals using {sd_productions} samples per deal."
+            if hasattr(progress, 'progress'):
+                progress.progress(percent_complete, msg)
+            elif hasattr(progress, 'set_description'):
+                progress.set_description(msg)
         else:
-            if i < 10 or i % estimated_processing_time_per_hour == 0:
-                percent_complete = int(i*100/len(pbns_to_process))
-                logger.info(f"{percent_complete}%: Single dummies calculated for {i} of {len(pbns_to_process)} unique deals using {sd_productions} samples per deal.")
-        if not progress and (i < 10 or i % estimated_processing_time_per_hour == 0):
-            t = time.time()
-        sd_dfs_d[pbn], sd_d[pbn] = estimate_sd_trick_distributions(pbn, sd_productions) # all combinations of declarer pair direction, declarer direction, suit, tricks taken
-        if not progress and (i < 10 or i % estimated_processing_time_per_hour == 0):
-            logger.info(f"compute_sd_probabilities: time:{time.time()-t} seconds")
-        #error
+            logger.info(f"{percent_complete}%: Single dummies calculated for {batch_start} of {total_pbns} unique deals using {sd_productions} samples per deal.")
+
+        t_batch = time.time()
+
+        # --- Phase 1: generate deals for every PBN × {NS,EW} (no DD solving) ---
+        all_deals = []
+        deal_groups = []
+        for pbn in batch_pbns:
+            for ns_ew in ['NS', 'EW']:
+                s = pbn[2:].split()
+                if ns_ew == 'NS':
+                    s[1] = '...'
+                    s[3] = '...'
+                else:
+                    s[0] = '...'
+                    s[2] = '...'
+                predeal_string = 'N:' + ' '.join(s)
+                predeal = Deal(predeal_string)
+                deals_t = generate_deals(
+                    deal_generation_constraints,
+                    predeal=predeal,
+                    swapping=0,
+                    show_progress=False,
+                    produce=sd_productions,
+                    seed=42,
+                    max_attempts=1000000,
+                    env={},
+                    strict=True,
+                )
+                deals = tuple(deals_t)
+                start_idx = len(all_deals)
+                all_deals.extend(deals)
+                deal_groups.append((pbn, ns_ew, start_idx, len(deals), deals))
+
+        # --- Phase 2: solve ALL deals in one large batch ---
+        all_tables = solve_dd_for_deals(all_deals)
+
+        # --- Phase 3: regroup results and build probability tables ---
+        sd_tricks_schema = {'SD_Deal': pl.String}
+        sd_tricks_schema.update({f'SD_Tricks_{d}_{suit}': pl.UInt8
+                                 for suit in 'SHDCN' for d in 'NESW'})
+
+        for pbn, ns_ew, start_idx, count, deals in deal_groups:
+            tables = all_tables[start_idx:start_idx + count]
+
+            data_rows = []
+            for sddeal, t in zip(deals, tables):
+                row = [sddeal.to_pbn()]
+                row.extend([val for dd_col in t.to_list() for val in dd_col])
+                data_rows.append(row)
+
+            side_df = pl.DataFrame(data_rows, schema=sd_tricks_schema, orient='row')
+
+            sd_dfs_d.setdefault(pbn, {})[ns_ew] = side_df
+
+            ns_ew_rows_for_pbn = sd_d.get(pbn, (sd_productions, {}))[1] if pbn in sd_d else {}
+            for d in 'NESW':
+                for suit in 'SHDCN':
+                    col_name = f'SD_Tricks_{d}_{suit}'
+                    vc = dict(side_df[col_name].value_counts(normalize=True).rows())
+                    ns_ew_rows_for_pbn[(ns_ew, d, suit)] = [vc.get(i, 0.0) for i in range(14)]
+            sd_d[pbn] = (sd_productions, ns_ew_rows_for_pbn)
+
+        logger.info(
+            f"Batch {batch_start}-{batch_end}: {len(all_deals)} deals solved in "
+            f"{time.time()-t_batch:.1f}s"
+        )
+
+        # --- Cache persistence ---
+        processed = batch_end
+        if (cache_file_path is not None and persist_every > 0
+                and processed - last_persist_count >= persist_every and sd_d):
+            t_flush = time.time()
+            sd_probs_chunk_df = _build_sd_probs_df(sd_d)
+            sd_probs_chunks.append(sd_probs_chunk_df)
+            hrs_cache_df = update_hand_records_cache(hrs_cache_df, sd_probs_chunk_df)
+            hrs_cache_df.write_parquet(cache_file_path)
+            logger.info(
+                f"Persisted SD cache after {processed} PBNs: {cache_file_path} "
+                f"shape:{hrs_cache_df.shape} ({time.time()-t_flush:.1f}s)"
+            )
+            sd_d.clear()
+            last_persist_count = processed
+
     if progress:
         if hasattr(progress, 'progress'): # streamlit
             progress.progress(100, f"100%: Single dummies calculated for {len(pbns_to_process)} of {len(pbns_to_process)} unique deals using {sd_productions} samples per deal.")
@@ -1718,38 +1926,9 @@ def estimate_sd_trick_distributions_for_df(df: pl.DataFrame, hrs_cache_df: pl.Da
     else:
         logger.info(f"100%: Single dummies calculated for {len(pbns_to_process)} of {len(pbns_to_process)} unique deals using {sd_productions} samples per deal.")
 
-    # create single dummy trick taking probability distribution columns - vectorized approach
-    if sd_d:
-        # Extract PBNs and productions efficiently
-        pbns = list(sd_d.keys())
-        productions_list = [sd_d[pbn][0] for pbn in pbns]
-                
-        # Build data dictionary efficiently
-        sd_probs_d = {'PBN': pbns, 'Probs_Trials': productions_list}
-        
-        # Initialize all probability columns with empty lists
-        for col_name in PROB_COLUMNS:
-            sd_probs_d[col_name] = []
-        
-        # Fill probability data efficiently
-        for pbn in pbns:
-            _, probs_d = sd_d[pbn]
-            # Create a lookup dict for this PBN's probabilities
-            pbn_probs = {}
-            for (pair_direction, declarer_direction, suit), probs in probs_d.items():
-                for i, t in enumerate(probs):
-                    col_name = f'Probs_{pair_direction}_{declarer_direction}_{suit}_{i}'
-                    pbn_probs[col_name] = t
-            
-            # Append values for all columns (0.0 for missing ones)
-            for col_name in PROB_COLUMNS:
-                sd_probs_d[col_name].append(pbn_probs.get(col_name, 0.0))
-    else:
-        # Handle empty case
-        sd_probs_d = {'PBN': [], 'Probs_Trials': []}
-        
-    sd_probs_df = pl.DataFrame(sd_probs_d, orient='row')
-    sd_probs_df = sd_probs_df.with_columns(pl.col(pl.Float64).cast(pl.Float32))
+    sd_probs_df = _build_sd_probs_df(sd_d)
+    if not sd_probs_df.is_empty():
+        sd_probs_chunks.append(sd_probs_df)
 
     # update sd_df with sd_probs_df # doesn't work because sd_df isn't updated unless returned.
     # if sd_df.is_empty():
@@ -1762,7 +1941,12 @@ def estimate_sd_trick_distributions_for_df(df: pl.DataFrame, hrs_cache_df: pl.Da
     if progress and hasattr(progress, 'empty'):
         progress.empty()
 
-    return sd_dfs_d, sd_probs_df
+    if sd_probs_chunks:
+        combined_sd_probs_df = pl.concat(sd_probs_chunks, how='vertical_relaxed')
+    else:
+        combined_sd_probs_df = sd_probs_df
+
+    return sd_dfs_d, combined_sd_probs_df
 
 
 
@@ -3381,6 +3565,9 @@ def compute_pair_matchpoint_elo_ratings(
     elo_scale: float = 400.0,
     score_amplifier: float = 1.0,
     replace_existing: bool = True,
+    max_section_pairs: float = 60.0,   # cap Section_Pairs before scale = sqrt((p-1)/11)
+    min_rating: float = 200.0,         # hard floor for the running rating
+    max_rating: float = 3000.0,        # hard ceiling for the running rating
 ) -> pl.DataFrame:
     """Compute Elo-style ratings for pairs on matchpoint events.
 
@@ -3399,6 +3586,13 @@ def compute_pair_matchpoint_elo_ratings(
     - elo_scale: denominator in logistic expectation (chess default 400.0).
     - score_amplifier: amplifies per-board score around 0.5 (1.0 = no change).
     - replace_existing: if True, drop existing output columns before adding new ones.
+    - max_section_pairs: hard cap applied to `Section_Pairs`/`Num_Pairs`/`MP_Top`
+      before computing the K-factor scale `sqrt((pairs-1)/11)`. Bad upstream
+      values (e.g. a junk MP_Top) used to push the scale to absurd multiples
+      and blow ratings into ±100k territory. Default 60 -> max scale ≈ 2.32.
+    - min_rating / max_rating: hard clamp band for the running rating. Belt-and-
+      suspenders guard so a single pathological row can't poison every future
+      board for that pair. See TODO.md "K-factor / Elo outlier blow-up".
 
     Input columns:
     - `Pair_Number_NS`, `Pair_Number_EW`, `Pct_NS`, `session_id` (and optionally `Section_Pairs`/`Num_Pairs`/`MP_Top`).
@@ -3418,15 +3612,68 @@ def compute_pair_matchpoint_elo_ratings(
     # TODO(polars): Consider chunking by session and preparing arrays via Polars
     # group_by to minimize Python overhead; full vectorization of Elo updates is
     # non-trivial due to sequential dependency.
-    # Ensure schema
-    need_cols = {"Pair_Number_NS", "Pair_Number_EW", "Pct_NS", "session_id"}
+    # Ensure schema. Pair_Number_NS / Pair_Number_EW are session-scoped table
+    # numbers (Pair #1 in session A is a completely different partnership from
+    # Pair #1 in session B). Using them as the running-Elo key conflates many
+    # unrelated pairs into a single rating bucket — see TODO.md "Pair-level
+    # Elo column is broken". Prefer stable Player_ID-derived pair IDs when the
+    # caller has Player_ID_<seat> columns; fall back with a warning otherwise.
+    need_cols = {"Pct_NS", "session_id"}
     missing = need_cols - set(df_sorted.columns)
     if missing:
         raise ValueError(f"Missing columns: {missing}")
 
+    has_player_ids = all(
+        c in df_sorted.columns
+        for c in ("Player_ID_N", "Player_ID_S", "Player_ID_E", "Player_ID_W")
+    )
+    if has_player_ids:
+        df_sorted = df_sorted.with_columns(
+            _Pair_ID_NS=pl.concat_str([
+                pl.min_horizontal(
+                    pl.col("Player_ID_N").cast(pl.Utf8),
+                    pl.col("Player_ID_S").cast(pl.Utf8),
+                ),
+                pl.lit("-"),
+                pl.max_horizontal(
+                    pl.col("Player_ID_N").cast(pl.Utf8),
+                    pl.col("Player_ID_S").cast(pl.Utf8),
+                ),
+            ]),
+            _Pair_ID_EW=pl.concat_str([
+                pl.min_horizontal(
+                    pl.col("Player_ID_E").cast(pl.Utf8),
+                    pl.col("Player_ID_W").cast(pl.Utf8),
+                ),
+                pl.lit("-"),
+                pl.max_horizontal(
+                    pl.col("Player_ID_E").cast(pl.Utf8),
+                    pl.col("Player_ID_W").cast(pl.Utf8),
+                ),
+            ]),
+        )
+        ns_pair_col, ew_pair_col = "_Pair_ID_NS", "_Pair_ID_EW"
+        _added_temp_pair_cols = True
+    else:
+        if not {"Pair_Number_NS", "Pair_Number_EW"}.issubset(df_sorted.columns):
+            raise ValueError(
+                "compute_pair_matchpoint_elo_ratings: need either "
+                "Player_ID_<N|S|E|W> (preferred) or Pair_Number_NS/EW (fallback)."
+            )
+        import warnings
+        warnings.warn(
+            "compute_pair_matchpoint_elo_ratings: Player_ID_<seat> columns "
+            "not found. Falling back to session-scoped Pair_Number_NS/EW — "
+            "this conflates unrelated partnerships across sessions and is "
+            "INCORRECT. See TODO.md 'Pair-level Elo column is broken'.",
+            stacklevel=2,
+        )
+        ns_pair_col, ew_pair_col = "Pair_Number_NS", "Pair_Number_EW"
+        _added_temp_pair_cols = False
+
     n_rows = df_sorted.height
-    ns_pairs = df_sorted["Pair_Number_NS"].to_numpy()
-    ew_pairs = df_sorted["Pair_Number_EW"].to_numpy()
+    ns_pairs = df_sorted[ns_pair_col].to_numpy()
+    ew_pairs = df_sorted[ew_pair_col].to_numpy()
     pct_ns = df_sorted["Pct_NS"].to_numpy()
     session_ids = df_sorted["session_id"].to_numpy()
 
@@ -3441,14 +3688,20 @@ def compute_pair_matchpoint_elo_ratings(
     else:
         pairs = None
     if pairs is not None:
+        # Sanitize: NaN/inf -> 1.0 (no scale boost). Then cap to max_section_pairs
+        # so a junk upstream value can't drive K to absurd multiples (the original
+        # bug behind ±100k Elo outliers — see TODO.md).
+        pairs = np.where(np.isfinite(pairs), pairs, 1.0)
+        pairs = np.minimum(pairs, np.float32(max_section_pairs))
         with np.errstate(invalid="ignore"):
             valid = pairs > 1.0
         scale_valid = np.sqrt(np.maximum(pairs[valid] - 1.0, 1.0) / 11.0)
         scale[valid] = scale_valid
 
-    # Map pair ids to contiguous indices per direction
-    ns_unique = df_sorted["Pair_Number_NS"].unique().to_list()
-    ew_unique = df_sorted["Pair_Number_EW"].unique().to_list()
+    # Map pair ids to contiguous indices per direction. Uses the stable
+    # Player_ID-derived key when available, session-scoped Pair_Number otherwise.
+    ns_unique = df_sorted[ns_pair_col].unique().to_list()
+    ew_unique = df_sorted[ew_pair_col].unique().to_list()
     ns_index = {pid: i for i, pid in enumerate(ns_unique)}
     ew_index = {pid: i for i, pid in enumerate(ew_unique)}
 
@@ -3512,10 +3765,20 @@ def compute_pair_matchpoint_elo_ratings(
                     s_ns_f = 1.0
             s_ew_f = 1.0 - s_ns_f
             
-            # Update ratings using Elo formula
+            # Update ratings using Elo formula, then hard-clamp to [min_rating,
+            # max_rating]. Without this guard a single pathological (k, residual)
+            # combination poisons the running rating for every future board.
             r_ns += k_ns * (s_ns_f - e_ns)
             r_ew += k_ew * (s_ew_f - e_ew)
-            
+            if r_ns < min_rating:
+                r_ns = min_rating
+            elif r_ns > max_rating:
+                r_ns = max_rating
+            if r_ew < min_rating:
+                r_ew = min_rating
+            elif r_ew > max_rating:
+                r_ew = max_rating
+
             # Update arrays
             ratings_ns[idx_ns] = r_ns
             ratings_ew[idx_ew] = r_ew
@@ -3560,6 +3823,10 @@ def compute_pair_matchpoint_elo_ratings(
         cols = [c for c in out_df.columns if c in df_sorted.columns]
         if cols:
             df_sorted = df_sorted.drop(cols)
+    if _added_temp_pair_cols:
+        df_sorted = df_sorted.drop(
+            [c for c in ("_Pair_ID_NS", "_Pair_ID_EW") if c in df_sorted.columns]
+        )
     return df_sorted.hstack(out_df)
 
 
@@ -3573,6 +3840,9 @@ def compute_player_matchpoint_elo_ratings(
     elo_scale: float = 400.0,
     score_amplifier: float = 1.0,
     replace_existing: bool = True,
+    max_section_pairs: float = 60.0,   # cap Section_Pairs before scale = sqrt((p-1)/11)
+    min_rating: float = 200.0,         # hard floor for the running rating
+    max_rating: float = 3000.0,        # hard ceiling for the running rating
 ) -> pl.DataFrame:
     """Compute player Elo-style ratings for duplicate boards.
 
@@ -3591,6 +3861,12 @@ def compute_player_matchpoint_elo_ratings(
     - elo_scale: denominator in logistic expectation (chess default 400.0)
     - score_amplifier: amplifies per-board score around 0.5 (1.0 = no change)
     - replace_existing: if True, drop existing output columns before adding new ones.
+    - max_section_pairs: hard cap on `Section_Pairs`/`Num_Pairs`/`MP_Top` before
+      computing the K-factor scale `sqrt((pairs-1)/11)`. Default 60 -> max
+      scale ≈ 2.32. Prevents bad upstream values from blowing up K.
+    - min_rating / max_rating: hard clamp band for the running rating; guards
+      against numerical-stability blow-ups. See TODO.md "K-factor / Elo
+      outlier blow-up".
 
     Input columns:
     - `Date`: Game date for temporal ordering (any comparable type)
@@ -3644,6 +3920,11 @@ def compute_player_matchpoint_elo_ratings(
     else:
         pairs = None
     if pairs is not None:
+        # Same sanitize+cap as the pair Elo: NaN/inf -> 1.0, then clip to
+        # max_section_pairs so a junk Section_Pairs/MP_Top can't drive K to
+        # absurd multiples (root cause of ±100k Elo outliers — see TODO.md).
+        pairs = np.where(np.isfinite(pairs), pairs, 1.0)
+        pairs = np.minimum(pairs, np.float32(max_section_pairs))
         with np.errstate(invalid="ignore"):
             valid = pairs > 1.0
         scale_valid = np.sqrt(np.maximum(pairs[valid] - 1.0, 1.0) / 11.0)
@@ -3741,6 +4022,15 @@ def compute_player_matchpoint_elo_ratings(
             r_s_ns = r_s_ns + 0.5 * k_s * delta_ns
             r_e_ew = r_e_ew + 0.5 * k_e * delta_ew  # Use EW delta, not NS delta
             r_w_ew = r_w_ew + 0.5 * k_w * delta_ew  # Use EW delta, not NS delta
+            # Hard-clamp every player rating; see compute_pair_matchpoint_elo_ratings.
+            if r_n_ns < min_rating: r_n_ns = min_rating
+            elif r_n_ns > max_rating: r_n_ns = max_rating
+            if r_s_ns < min_rating: r_s_ns = min_rating
+            elif r_s_ns > max_rating: r_s_ns = max_rating
+            if r_e_ew < min_rating: r_e_ew = min_rating
+            elif r_e_ew > max_rating: r_e_ew = max_rating
+            if r_w_ew < min_rating: r_w_ew = min_rating
+            elif r_w_ew > max_rating: r_w_ew = max_rating
             ratings_ns[idx_n] = r_n_ns
             ratings_ns[idx_s] = r_s_ns
             ratings_ew[idx_e] = r_e_ew
@@ -5416,7 +5706,7 @@ class HandAugmenter:
 
 
 class DD_SD_Augmenter:
-    def __init__(self, df: pl.DataFrame, hrs_cache_df: pl.DataFrame, sd_productions: int = 40, max_dd_adds: Optional[int] = None, max_sd_adds: Optional[int] = None, output_progress: Optional[bool] = True, progress: Optional[Any] = None, lock_func: Optional[Callable[..., pl.DataFrame]] = None):
+    def __init__(self, df: pl.DataFrame, hrs_cache_df: pl.DataFrame, sd_productions: int = 40, max_dd_adds: Optional[int] = None, max_sd_adds: Optional[int] = None, output_progress: Optional[bool] = True, progress: Optional[Any] = None, lock_func: Optional[Callable[..., pl.DataFrame]] = None, cache_file_path: Optional[pathlib.Path] = None):
         self.df = df
         self.hrs_cache_df = hrs_cache_df
         self.sd_productions = sd_productions
@@ -5425,6 +5715,7 @@ class DD_SD_Augmenter:
         self.output_progress = output_progress
         self.progress = progress
         self.lock_func = lock_func
+        self.cache_file_path = cache_file_path
 
     def _time_operation(self, operation_name: str, func: Callable[..., Any], *args, **kwargs) -> Any:
         t = time.time()
@@ -5432,11 +5723,58 @@ class DD_SD_Augmenter:
         logger.info(f"{operation_name}: time:{time.time()-t} seconds")
         return result
 
+    def _persist_cache(self, stage: str) -> None:
+        """Write hrs_cache_df to disk so progress survives interruptions."""
+        if self.cache_file_path is None:
+            return
+        t = time.time()
+        self.hrs_cache_df.write_parquet(self.cache_file_path)
+        logger.info(f"Persisted cache after {stage}: {self.cache_file_path} "
+                     f"shape:{self.hrs_cache_df.shape} ({time.time()-t:.1f}s)")
+
     def _process_scores_and_tricks(self) -> pl.DataFrame:
         # Assert required columns exist
         assert 'PBN' in self.df.columns, "Required column 'PBN' not found in DataFrame"
         assert 'Dealer' in self.df.columns, "Required column 'Dealer' not found in DataFrame"
         assert 'Vul' in self.df.columns, "Required column 'Vul' not found in DataFrame"
+
+        # Migrate legacy null-Dealer/Vul cache rows to composite keys.
+        # Old cache entries pre-date composite keying and have null Dealer/Vul,
+        # making them invisible to the inner join on ['PBN','Dealer','Vul'].
+        null_key_mask = pl.col('Dealer').is_null() | pl.col('Vul').is_null()
+        null_key_rows = self.hrs_cache_df.filter(null_key_mask)
+        if null_key_rows.height > 0:
+            input_keys = self.df.select(['PBN', 'Dealer', 'Vul']).unique()
+            null_pbns_needing_migration = input_keys.select('PBN').unique().join(
+                null_key_rows.select('PBN').unique(), on='PBN', how='semi'
+            )
+            if null_pbns_needing_migration.height > 0:
+                logger.info(f"Migrating {null_pbns_needing_migration.height} null-key PBNs to composite keys "
+                            f"(out of {null_key_rows.height} total null-key cache rows)")
+                templates = (
+                    null_key_rows
+                    .join(null_pbns_needing_migration, on='PBN', how='semi')
+                    .group_by('PBN').first()
+                    .drop(['Dealer', 'Vul'])
+                )
+                non_null_cache = self.hrs_cache_df.filter(~null_key_mask)
+                keys_to_seed = input_keys.join(null_pbns_needing_migration, on='PBN', how='semi')
+                # Avoid duplicating combos already present with non-null keys
+                existing_nonnull_keys = non_null_cache.select(['PBN', 'Dealer', 'Vul']).unique()
+                keys_to_seed = keys_to_seed.join(existing_nonnull_keys, on=['PBN', 'Dealer', 'Vul'], how='anti')
+                migrated = keys_to_seed.join(templates, on='PBN', how='inner')
+
+                unmigrated_nulls = null_key_rows.join(
+                    null_pbns_needing_migration, on='PBN', how='anti'
+                )
+                self.hrs_cache_df = pl.concat([
+                    non_null_cache,
+                    unmigrated_nulls,
+                    migrated.select(self.hrs_cache_df.columns),
+                ])
+                logger.info(f"Cache after migration: {self.hrs_cache_df.height} rows, "
+                            f"null Dealer remaining: {self.hrs_cache_df['Dealer'].null_count()}")
+
         all_scores_d, scores_d, scores_df = self._time_operation("calculate_scores", precompute_contract_score_tables)
         
         # Calculate double dummy scores first
@@ -5448,6 +5786,7 @@ class DD_SD_Augmenter:
 
         if not dd_df.is_empty():
             self.hrs_cache_df = self._time_operation("update cache with DD", update_hand_records_cache, self.hrs_cache_df, dd_df)
+            self._persist_cache("DD")
         
         # Calculate par scores using the double dummy results
         par_df = self._time_operation(
@@ -5458,11 +5797,12 @@ class DD_SD_Augmenter:
 
         if not par_df.is_empty():
             self.hrs_cache_df = self._time_operation("update cache with Par", update_hand_records_cache, self.hrs_cache_df, par_df)
+            self._persist_cache("Par")
 
         sd_dfs_d, sd_df = self._time_operation(
             "calculate_sd_probs",
             estimate_sd_trick_distributions_for_df,
-            self.df, self.hrs_cache_df, self.sd_productions, self.max_sd_adds, self.progress
+            self.df, self.hrs_cache_df, self.sd_productions, self.max_sd_adds, self.progress, self.cache_file_path
         )
 
         if not sd_df.is_empty():
@@ -6426,7 +6766,8 @@ class AllHandRecordAugmentations:
                  max_sd_adds: Optional[int] = None,
                  output_progress: Optional[bool] = True,
                  progress: Optional[Any] = None,
-                 lock_func: Optional[Callable[..., pl.DataFrame]] = None):
+                 lock_func: Optional[Callable[..., pl.DataFrame]] = None,
+                 cache_file_path: Optional[pathlib.Path] = None):
         """Initialize the AllAugmentations class with a DataFrame and optional parameters.
         
         Args:
@@ -6438,6 +6779,7 @@ class AllHandRecordAugmentations:
             output_progress: Whether to output progress
             progress: Optional progress indicator object
             lock_func: Optional function for thread safety
+            cache_file_path: Path to write hrs_cache_df after DD/Par steps
         """
         self.df = df
         self.hrs_cache_df = hrs_cache_df
@@ -6447,6 +6789,7 @@ class AllHandRecordAugmentations:
         self.output_progress = output_progress
         self.progress = progress
         self.lock_func = lock_func
+        self.cache_file_path = cache_file_path
 
         # instance initialization
 
@@ -6510,7 +6853,8 @@ class AllHandRecordAugmentations:
             self.max_sd_adds, 
             self.output_progress,
             self.progress,
-            self.lock_func
+            self.lock_func,
+            cache_file_path=self.cache_file_path,
         )
         self.df, self.hrs_cache_df = dd_sd_augmenter.perform_dd_sd_augmentations()
 
