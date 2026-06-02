@@ -3555,6 +3555,127 @@ def add_direction_summaries(df: pl.DataFrame) -> pl.DataFrame:
     return df
 
 # todo: gpt5 suggested: Optional: JIT the loop with numba for 10–100x speedup on large datasets.
+# -------------------------------
+# Elo rating: stratum-mixed field K-dampening
+# -------------------------------
+# Anchors are expressed as ratios of per-board same-direction Elo stdev to
+# the GLOBAL same-direction Elo stdev, so they auto-scale as the rating
+# distribution widens. Derived empirically from
+# src/acbl/acbl_analyze_field_stdev.py over the ACBL club Elo dataset
+# (~5.4M boards): median ratio ~0.8, p95 ~1.3.
+STRATUM_DAMPENING_LOW_RATIO = 0.8     # full K up to this ratio
+STRATUM_DAMPENING_HIGH_RATIO = 1.3    # K reduced to k_min at this ratio
+STRATUM_DAMPENING_K_MIN = 0.25        # floor on the K multiplier
+# When the global stdev seed is unavailable (e.g., first ever run or the
+# caller can't supply one), fall back to this Elo-units value. Picked from
+# acbl_analyze_field_stdev.py: post-recompute global stdev observed at ~45
+# (tournament + club), so 50 gives K-dampening realistic anchors out of the
+# box without any caller-side seeding.
+STRATUM_DAMPENING_FALLBACK_GLOBAL_STDEV = 50.0
+
+
+# -------------------------------
+# Field-strength K-dampening (anchors)
+# -------------------------------
+# A second K-dampening factor that down-weights Elo gains earned in
+# below-population-mean fields. The structural failure mode this fixes:
+# pure-Elo math gives the SAME credit for "score 60% in a 3-table novice
+# club" as for "score 60% in a regional Open pair event" because both are
+# 10 percentage points above the field's own average — but the absolute
+# skill demonstrated is very different. Without this term, a player who
+# consistently wins in a weak local field accumulates Elo at the same rate
+# as a player winning in a strong field. Documented in the "Zubatch case"
+# (top ACBL club Elo with rank-35K DD-Tricks-Diff).
+#
+# Anchors are in z-score units against the population mean (initial_rating)
+# and global stdev. The same global stdev seed used by stratum dampening
+# (see _global_stdev_seed) doubles as the z-score denominator here.
+FIELD_STRENGTH_Z_FULL = 0.0     # full K at population mean (z >= 0)
+FIELD_STRENGTH_Z_FLOOR = -2.0   # k_min at this many sigmas below population mean
+FIELD_STRENGTH_K_MIN = 0.25     # floor on the K multiplier
+
+
+def _stratum_scale(ratio: float) -> float:
+    """K-dampening multiplier in [k_min, 1.0] given a stdev ratio.
+
+    Boards whose same-direction field-Elo stdev is at or below the global
+    median ratio get full K. As the ratio rises toward the high anchor the
+    multiplier decays linearly to ``STRATUM_DAMPENING_K_MIN``. Used by the
+    field-relative Elo update to down-weight stratum-mixed events.
+    """
+    low = STRATUM_DAMPENING_LOW_RATIO
+    high = STRATUM_DAMPENING_HIGH_RATIO
+    k_min = STRATUM_DAMPENING_K_MIN
+    if not np.isfinite(ratio) or ratio <= low:
+        return 1.0
+    if ratio >= high:
+        return k_min
+    return 1.0 - (ratio - low) / (high - low) * (1.0 - k_min)
+
+
+def _field_strength_scale(z: float) -> float:
+    """K-dampening multiplier in [k_min, 1.0] given a field-mean z-score.
+
+    ``z = (mean_field_rating - population_mean) / global_stdev``.
+
+    Boards whose same-direction field MEAN is at or above the population
+    mean (z >= 0) get full K — they're competitive fields and the existing
+    field-relative expectation already adjusts the expected score. As the
+    field-mean drifts below the population mean the multiplier decays
+    linearly to ``FIELD_STRENGTH_K_MIN`` by ``FIELD_STRENGTH_Z_FLOOR``,
+    capping the maximum Elo gain a weak-field player can accumulate per
+    board even if they routinely score above their own (weak) field.
+
+    Combined with :func:`_stratum_scale`, the effective K per board is::
+
+        K_eff = K_base * boost * section_scale * stratum_scale * field_strength_scale
+
+    so a board that is both stratum-mixed AND in a weak field gets the
+    product of both dampening factors. Each factor has its own floor of
+    0.25 by default; the joint floor is therefore 0.0625 ≈ 1/16 the
+    nominal K.
+    """
+    z_full = FIELD_STRENGTH_Z_FULL
+    z_floor = FIELD_STRENGTH_Z_FLOOR
+    k_min = FIELD_STRENGTH_K_MIN
+    # Handle NaN (degenerate input) before the comparisons; without this the
+    # bare `if z >= z_full` returns False for NaN and we'd silently floor.
+    if np.isnan(z):
+        return 1.0
+    if z >= z_full:
+        return 1.0
+    if z <= z_floor:
+        return k_min
+    return k_min + (1.0 - k_min) * (z - z_floor) / (z_full - z_floor)
+
+
+def _global_stdev_seed(df_sorted: pl.DataFrame, col: str) -> float:
+    """Compute the global stdev of an existing Elo Before column as a seed.
+
+    Used by the field-relative Elo computation to normalize per-board field
+    stdev into a scale-free ratio for K-dampening (option (i) "two-pass":
+    pre-pass on the current parquet's Before values seeds the ratio; the next
+    recompute will derive a tighter seed from its own output if desired).
+
+    Returns ``STRATUM_DAMPENING_FALLBACK_GLOBAL_STDEV`` if the column is
+    missing or its valid (non-NaN, non-null) population stdev is ≤ 0.
+    """
+    if col not in df_sorted.columns:
+        return STRATUM_DAMPENING_FALLBACK_GLOBAL_STDEV
+    try:
+        v = (
+            df_sorted.lazy()
+            .select(pl.col(col).drop_nulls().drop_nans().std(ddof=0).alias("sd"))
+            .collect()
+            .item()
+        )
+    except Exception:
+        return STRATUM_DAMPENING_FALLBACK_GLOBAL_STDEV
+    if v is None or not np.isfinite(v) or v <= 0.0:
+        return STRATUM_DAMPENING_FALLBACK_GLOBAL_STDEV
+    return float(v)
+
+
 def compute_pair_matchpoint_elo_ratings(
     df_sorted: pl.DataFrame,
     *,
@@ -3568,17 +3689,54 @@ def compute_pair_matchpoint_elo_ratings(
     max_section_pairs: float = 60.0,   # cap Section_Pairs before scale = sqrt((p-1)/11)
     min_rating: float = 200.0,         # hard floor for the running rating
     max_rating: float = 3000.0,        # hard ceiling for the running rating
+    global_stdev_ns: float | None = None,  # K-dampening normalizer; auto-derived if None
+    global_stdev_ew: float | None = None,
 ) -> pl.DataFrame:
-    """Compute Elo-style ratings for pairs on matchpoint events.
+    """Compute field-relative Elo-style ratings for pairs on matchpoint events.
 
     Purpose:
-    - Calculate Elo-style skill ratings for bridge pairs based on matchpoint performance
-    - Provide leakage-safe rating updates that prevent future information contamination
-    - Track rating progression over time with provisional boost for new pairs
-    - Generate expected scores and rating deltas for analysis
+    - Calculate Elo-style skill ratings for bridge pairs based on matchpoint
+      performance.
+    - **Field-relative expectation:** because Pct_NS is the matchpoint
+      percentage of the NS pair against the WHOLE NS field on that board (not
+      a head-to-head match against the EW pair at their own table), the
+      expected score is computed against the same-direction field average,
+      not against the opposing pair's rating. The previous head-to-head
+      formulation systematically inflated weak pairs and deflated strong
+      pairs whenever they faced opponents from a different stratum — the
+      structural source of the "intermediate strata appearing in the top Elo
+      rankings" problem.
+    - **Per-session snapshot:** within a single session every board uses the
+      pair's rating as it stood at session start. Boards within a session are
+      simultaneous events under MP scoring, so they all see the same field.
+      Updates accumulate across the session's boards and commit at session
+      end. This eliminates the within-session ordering artifacts of the
+      previous per-row update.
+    - **K-dampening on stratum-mixed fields:** when a board's same-direction
+      field-Elo stdev (relative to the global stdev) exceeds the typical
+      level, the K-factor is reduced linearly (full K up to ratio
+      ``STRATUM_DAMPENING_LOW_RATIO``, down to ``STRATUM_DAMPENING_K_MIN`` by
+      ``STRATUM_DAMPENING_HIGH_RATIO``). Anchors come from
+      ``src/acbl/acbl_analyze_field_stdev.py``.
+    - **K-dampening on weak fields (the "Zubatch fix"):** when a board's
+      same-direction field MEAN is below the population mean
+      (``initial_rating``), the K-factor is additionally reduced via
+      :func:`_field_strength_scale`. Without this, a player who wins
+      consistently in a 3-table novice club accumulates Elo at the same
+      rate as a player winning in a regional Open pair event — pure-Elo
+      math has no way to distinguish those two situations because both
+      score above their own (very different-strength) fields. With this
+      term, weak-field gains are damped from full K at z=0 down to
+      ``FIELD_STRENGTH_K_MIN`` at z=``FIELD_STRENGTH_Z_FLOOR``.
+    - Preserves the previous safety net: provisional boost for new pairs,
+      hard rating clamp, Section_Pairs scaling, leakage-safe Before values.
 
     Parameters:
-    - df_sorted: Sorted DataFrame ('Date','session_id','Round','Board') containing matchpoint game results with pair identifiers
+    - df_sorted: DataFrame whose rows are board×table results. Must be in a
+      chronologically meaningful order at the session granularity (sessions
+      processed oldest first). Boards within each session are re-grouped
+      internally via a (Date, session_id, Board) lexsort, so the input
+      ordering only needs to be correct at session level.
     - initial_rating: starting rating for all entities.
     - k_base: base K-factor.
     - provisional_boost_until: boards threshold for larger early K.
@@ -3595,29 +3753,37 @@ def compute_pair_matchpoint_elo_ratings(
       board for that pair. See TODO.md "K-factor / Elo outlier blow-up".
 
     Input columns:
-    - `Pair_Number_NS`, `Pair_Number_EW`, `Pct_NS`, `session_id` (and optionally `Section_Pairs`/`Num_Pairs`/`MP_Top`).
+    - `Pct_NS`, `session_id` (required).
+    - `Player_ID_<N|S|E|W>` (preferred; used to derive stable pair IDs) OR
+      `Pair_Number_<NS|EW>` (fallback, session-scoped, INCORRECT across sessions).
+    - `Date`, `Board` (optional but recommended): used for the
+      (Date, session_id, Board) processing sort. If absent, falls back to
+      input order with a single-row-per-board interpretation.
+    - `Section_Pairs` / `Num_Pairs` / `MP_Top` (optional, K-factor scale).
+    - `Elo_R_NS_Before` / `Elo_R_EW_Before` from a previous run (optional):
+      used as a global-stdev seed for the K-dampening ratio.
 
     Output columns:
-    - `Elo_R_NS_Before`, `Elo_R_EW_Before`: Ratings before the game (pl.Float32, None if Elo_N < minimum_sessions).
-    - `Elo_E_NS`, `Elo_E_EW`: Expected scores based on rating difference (pl.Float32).
-    - `Elo_R_NS_After`, `Elo_R_EW_After`: Updated ratings after the game (pl.Float32, None if Elo_N < minimum_sessions).
-    - `Elo_N_NS`, `Elo_N_EW`: Number of unique sessions played by each pair (pl.Int32).
-    - `Elo_Delta_Before`, `Elo_Delta_After`: Rating differences NS minus EW (pl.Float32).
-    
-    Note: Elo ratings are set to None for pairs with fewer than minimum_sessions sessions played to ensure statistical reliability.
+    - `Elo_R_NS_Before`, `Elo_R_EW_Before`: Per-table snapshot rating used as
+      input for the board's update (pl.Float32, None if Elo_N < minimum_sessions).
+      Equals the pair's rating at the start of this session.
+    - `Elo_E_NS`, `Elo_E_EW`: Field-relative expected scores (pl.Float32).
+      **Semantic change:** these are no longer head-to-head match win
+      probabilities; each side's expected score is the probability of beating
+      the same-direction self-excluded field average. `Elo_E_NS + Elo_E_EW` is
+      generally != 1.
+    - `Elo_R_NS`, `Elo_R_EW`: Updated ratings after this session's boards
+      have all been committed (pl.Float32, None if Elo_N < minimum_sessions).
+    - `Elo_N_NS`, `Elo_N_EW`: Number of unique sessions played by each pair.
+    - `Elo_Delta_Before`, `Elo_Delta_After`: Rating differentials NS minus EW
+      at the start and end of this session.
+    - `Field_Stdev_NS`, `Field_Stdev_EW`: Same-direction Elo stdev across
+      pairs that played this board (pl.Float32). Useful for drill-downs and
+      sanity checks on how stratum-mixed the field was.
 
     Returns:
-    - Original DataFrame with appended columns: Elo_R/E for NS/EW before/after, counts, deltas.
+    - Original DataFrame with the listed columns appended.
     """
-    # TODO(polars): Consider chunking by session and preparing arrays via Polars
-    # group_by to minimize Python overhead; full vectorization of Elo updates is
-    # non-trivial due to sequential dependency.
-    # Ensure schema. Pair_Number_NS / Pair_Number_EW are session-scoped table
-    # numbers (Pair #1 in session A is a completely different partnership from
-    # Pair #1 in session B). Using them as the running-Elo key conflates many
-    # unrelated pairs into a single rating bucket — see TODO.md "Pair-level
-    # Elo column is broken". Prefer stable Player_ID-derived pair IDs when the
-    # caller has Player_ID_<seat> columns; fall back with a warning otherwise.
     need_cols = {"Pct_NS", "session_id"}
     missing = need_cols - set(df_sorted.columns)
     if missing:
@@ -3707,14 +3873,12 @@ def compute_pair_matchpoint_elo_ratings(
 
     ratings_ns = np.full(len(ns_unique), initial_rating, dtype=np.float32)
     ratings_ew = np.full(len(ew_unique), initial_rating, dtype=np.float32)
-    boards_played_ns = np.zeros(len(ns_unique), dtype=np.int32)  # Track boards for provisional boost
-    boards_played_ew = np.zeros(len(ew_unique), dtype=np.int32)  # Track boards for provisional boost
-    
-    # Track unique sessions per pair using sets
+    boards_played_ns = np.zeros(len(ns_unique), dtype=np.int32)
+    boards_played_ew = np.zeros(len(ew_unique), dtype=np.int32)
     sessions_ns = [set() for _ in range(len(ns_unique))]
     sessions_ew = [set() for _ in range(len(ew_unique))]
 
-    # Outputs
+    # Outputs (indexed by ORIGINAL row position)
     r_ns_before_arr = np.empty(n_rows, dtype=np.float32)
     r_ew_before_arr = np.empty(n_rows, dtype=np.float32)
     e_ns_arr = np.empty(n_rows, dtype=np.float32)
@@ -3725,81 +3889,212 @@ def compute_pair_matchpoint_elo_ratings(
     n_ew_arr = np.empty(n_rows, dtype=np.int32)
     delta_before_arr = np.empty(n_rows, dtype=np.float32)
     delta_after_arr = np.empty(n_rows, dtype=np.float32)
+    field_stdev_ns_arr = np.empty(n_rows, dtype=np.float32)
+    field_stdev_ew_arr = np.empty(n_rows, dtype=np.float32)
+    # Per-board same-direction field MEAN. Output as a diagnostic column so
+    # the API/Streamlit can show how strong each board's field was, and so
+    # downstream analyses can verify the new field-strength dampening.
+    field_mean_ns_arr = np.empty(n_rows, dtype=np.float32)
+    field_mean_ew_arr = np.empty(n_rows, dtype=np.float32)
 
-    # Pre-compute indices for better performance
-    ns_indices = np.array([ns_index[ns] for ns in ns_pairs], dtype=np.int32)
-    ew_indices = np.array([ew_index[ew] for ew in ew_pairs], dtype=np.int32)
-    
-    # Optimized loop with pre-computed values and reduced function calls
-    for i in range(n_rows):
-        idx_ns = ns_indices[i]
-        idx_ew = ew_indices[i]
+    # Pre-compute pair-index lookups per row.
+    ns_indices = np.array([ns_index[v] for v in ns_pairs], dtype=np.int32)
+    ew_indices = np.array([ew_index[v] for v in ew_pairs], dtype=np.int32)
 
-        r_ns = ratings_ns[idx_ns]
-        r_ew = ratings_ew[idx_ew]
+    # K-dampening seeds. Order of preference:
+    #   1. Caller-supplied global_stdev_ns / _ew (e.g., from a previous-run
+    #      acbl_<side>_elo_ratings.parquet read by acbl_elo_ratings_create.py).
+    #   2. Stdev of an existing Before column in df_sorted (rarely populated;
+    #      the input augmented parquet doesn't carry Elo cols).
+    #   3. STRATUM_DAMPENING_FALLBACK_GLOBAL_STDEV.
+    if global_stdev_ns is None:
+        global_stdev_ns = _global_stdev_seed(df_sorted, "Elo_R_NS_Before")
+    if global_stdev_ew is None:
+        global_stdev_ew = _global_stdev_seed(df_sorted, "Elo_R_EW_Before")
+    logger.info(
+        "compute_pair_matchpoint_elo_ratings: K-dampening seeds "
+        f"global_stdev_ns={global_stdev_ns:.2f} global_stdev_ew={global_stdev_ew:.2f}; "
+        f"stratum anchors low={STRATUM_DAMPENING_LOW_RATIO} high={STRATUM_DAMPENING_HIGH_RATIO} "
+        f"k_min={STRATUM_DAMPENING_K_MIN}; "
+        f"field-strength anchors z_full={FIELD_STRENGTH_Z_FULL} z_floor={FIELD_STRENGTH_Z_FLOOR} "
+        f"k_min={FIELD_STRENGTH_K_MIN} pop_mean={initial_rating}"
+    )
 
-        # Expected probability calculation
-        rating_diff = r_ns - r_ew
-        e_ns = 1.0 / (1.0 + 10.0 ** (-rating_diff / elo_scale))
-        e_ew = 1.0 - e_ns
+    # Processing order: (Date, session_id, Board) so a session's boards are
+    # contiguous and oldest sessions are processed first. Falls back gracefully
+    # when Date / Board are absent.
+    if "Date" in df_sorted.columns:
+        date_arr = df_sorted["Date"].to_numpy()
+    else:
+        date_arr = np.zeros(n_rows, dtype=np.int64)
+    if "Board" in df_sorted.columns:
+        board_arr = df_sorted["Board"].to_numpy()
+    else:
+        board_arr = np.zeros(n_rows, dtype=np.int32)
+    proc_order = np.lexsort((board_arr, session_ids, date_arr))
 
-        # K factor calculation with provisional boost (based on boards played)
-        provisional_boost_ns = 1.5 if boards_played_ns[idx_ns] < provisional_boost_until else 1.0
-        provisional_boost_ew = 1.5 if boards_played_ew[idx_ew] < provisional_boost_until else 1.0
-        k_ns = k_base * provisional_boost_ns * scale[i]
-        k_ew = k_base * provisional_boost_ew * scale[i]
+    # Session boundaries in proc_order (start index, end index exclusive).
+    sess_proc_seq = session_ids[proc_order]
+    if n_rows > 0:
+        sess_change = np.where(sess_proc_seq[:-1] != sess_proc_seq[1:])[0] + 1
+        session_bounds_starts = np.concatenate(([0], sess_change))
+        session_bounds_ends = np.concatenate((sess_change, [n_rows]))
+    else:
+        session_bounds_starts = np.array([], dtype=np.int64)
+        session_bounds_ends = np.array([], dtype=np.int64)
 
-        r_ns_before = r_ns
-        r_ew_before = r_ew
+    # Per-session loop with per-board field-relative updates and per-session commit.
+    for s_start, s_end in zip(session_bounds_starts, session_bounds_ends):
+        rows = proc_order[s_start:s_end]
+        if rows.size == 0:
+            continue
+        session_id_value = session_ids[rows[0]]
 
-        # Update ratings if valid score exists
-        s_ns = pct_ns[i]
-        if s_ns is not None and not (isinstance(s_ns, float) and np.isnan(s_ns)):
-            # Optionally amplify score around 0.5 and clamp to [0,1]
-            s_ns_f = float(s_ns)
-            if score_amplifier != 1.0:
-                s_ns_f = 0.5 + score_amplifier * (s_ns_f - 0.5)
-                if s_ns_f < 0.0:
-                    s_ns_f = 0.0
-                elif s_ns_f > 1.0:
-                    s_ns_f = 1.0
-            s_ew_f = 1.0 - s_ns_f
-            
-            # Update ratings using Elo formula, then hard-clamp to [min_rating,
-            # max_rating]. Without this guard a single pathological (k, residual)
-            # combination poisons the running rating for every future board.
-            r_ns += k_ns * (s_ns_f - e_ns)
-            r_ew += k_ew * (s_ew_f - e_ew)
-            if r_ns < min_rating:
-                r_ns = min_rating
-            elif r_ns > max_rating:
-                r_ns = max_rating
-            if r_ew < min_rating:
-                r_ew = min_rating
-            elif r_ew > max_rating:
-                r_ew = max_rating
+        # Snapshot every participating pair's rating at session start.
+        ns_idx_in_session = np.unique(ns_indices[rows])
+        ew_idx_in_session = np.unique(ew_indices[rows])
+        snap_ns = {int(idx): float(ratings_ns[idx]) for idx in ns_idx_in_session}
+        snap_ew = {int(idx): float(ratings_ew[idx]) for idx in ew_idx_in_session}
+        delta_ns = {int(idx): 0.0 for idx in ns_idx_in_session}
+        delta_ew = {int(idx): 0.0 for idx in ew_idx_in_session}
+        bcount_ns = {int(idx): 0 for idx in ns_idx_in_session}
+        bcount_ew = {int(idx): 0 for idx in ew_idx_in_session}
 
-            # Update arrays
-            ratings_ns[idx_ns] = r_ns
-            ratings_ew[idx_ew] = r_ew
-            boards_played_ns[idx_ns] += 1
-            boards_played_ew[idx_ew] += 1
-            
-            # Track unique sessions
-            sessions_ns[idx_ns].add(session_ids[i])
-            sessions_ew[idx_ew].add(session_ids[i])
+        # Iterate boards within the session (contiguous runs of same Board in proc_order).
+        b_seq = board_arr[rows]
+        if rows.size > 0:
+            b_change = np.where(b_seq[:-1] != b_seq[1:])[0] + 1
+            board_starts = np.concatenate(([0], b_change))
+            board_ends = np.concatenate((b_change, [rows.size]))
+        else:
+            board_starts = np.array([], dtype=np.int64)
+            board_ends = np.array([], dtype=np.int64)
 
-        # Store results efficiently
-        r_ns_before_arr[i] = r_ns_before
-        r_ew_before_arr[i] = r_ew_before
-        e_ns_arr[i] = e_ns
-        e_ew_arr[i] = e_ew
-        r_ns_after_arr[i] = r_ns
-        r_ew_after_arr[i] = r_ew
-        n_ns_arr[i] = len(sessions_ns[idx_ns])  # Count unique sessions
-        n_ew_arr[i] = len(sessions_ew[idx_ew])  # Count unique sessions
-        delta_before_arr[i] = rating_diff
-        delta_after_arr[i] = r_ns - r_ew
+        for b_s, b_e in zip(board_starts, board_ends):
+            board_rows = rows[b_s:b_e]
+            n_board = board_rows.size
+            ns_idx_board = ns_indices[board_rows]
+            ew_idx_board = ew_indices[board_rows]
+            r_ns_snap = np.array([snap_ns[int(idx)] for idx in ns_idx_board], dtype=np.float32)
+            r_ew_snap = np.array([snap_ew[int(idx)] for idx in ew_idx_board], dtype=np.float32)
+            sum_ns = float(r_ns_snap.sum())
+            sum_ew = float(r_ew_snap.sum())
+            if n_board >= 2:
+                mean_ns_field = sum_ns / n_board
+                mean_ew_field = sum_ew / n_board
+                stdev_ns_field = float(np.sqrt(((r_ns_snap - mean_ns_field) ** 2).sum() / n_board))
+                stdev_ew_field = float(np.sqrt(((r_ew_snap - mean_ew_field) ** 2).sum() / n_board))
+                ratio_ns = stdev_ns_field / global_stdev_ns
+                ratio_ew = stdev_ew_field / global_stdev_ew
+                stratum_scale_ns = _stratum_scale(ratio_ns)
+                stratum_scale_ew = _stratum_scale(ratio_ew)
+                # Field-strength dampening: z-score of board's field-mean
+                # against the population mean (initial_rating). z >= 0 means
+                # at-or-above-average field → full K; z <= floor → k_min.
+                z_ns = (mean_ns_field - initial_rating) / global_stdev_ns
+                z_ew = (mean_ew_field - initial_rating) / global_stdev_ew
+                field_strength_ns = _field_strength_scale(z_ns)
+                field_strength_ew = _field_strength_scale(z_ew)
+            else:
+                mean_ns_field = float(r_ns_snap[0]) if n_board == 1 else 0.0
+                mean_ew_field = float(r_ew_snap[0]) if n_board == 1 else 0.0
+                stdev_ns_field = 0.0
+                stdev_ew_field = 0.0
+                stratum_scale_ns = 1.0
+                stratum_scale_ew = 1.0
+                field_strength_ns = 1.0
+                field_strength_ew = 1.0
+
+            for offset in range(n_board):
+                i = int(board_rows[offset])
+                idx_ns = int(ns_idx_board[offset])
+                idx_ew = int(ew_idx_board[offset])
+                r_ns_self = float(r_ns_snap[offset])
+                r_ew_self = float(r_ew_snap[offset])
+
+                if n_board >= 2:
+                    field_avg_ns = (sum_ns - r_ns_self) / (n_board - 1)
+                    field_avg_ew = (sum_ew - r_ew_self) / (n_board - 1)
+                else:
+                    # Degenerate single-table board: no field comparison possible.
+                    field_avg_ns = r_ns_self
+                    field_avg_ew = r_ew_self
+
+                e_ns = 1.0 / (1.0 + 10.0 ** (-(r_ns_self - field_avg_ns) / elo_scale))
+                e_ew = 1.0 / (1.0 + 10.0 ** (-(r_ew_self - field_avg_ew) / elo_scale))
+
+                # K factor with provisional boost (per-pair counter), section
+                # scaling, stratum-mixed dampening, AND field-strength
+                # dampening (Zubatch fix: a weak-field player can't farm Elo
+                # at the same rate as a competitive-field player even when
+                # winning their own field).
+                boost_ns = 1.5 if boards_played_ns[idx_ns] < provisional_boost_until else 1.0
+                boost_ew = 1.5 if boards_played_ew[idx_ew] < provisional_boost_until else 1.0
+                k_ns = k_base * boost_ns * float(scale[i]) * stratum_scale_ns * field_strength_ns
+                k_ew = k_base * boost_ew * float(scale[i]) * stratum_scale_ew * field_strength_ew
+
+                # Outputs: Before == session-start snapshot, E == field-relative.
+                r_ns_before_arr[i] = r_ns_self
+                r_ew_before_arr[i] = r_ew_self
+                e_ns_arr[i] = e_ns
+                e_ew_arr[i] = e_ew
+                field_stdev_ns_arr[i] = stdev_ns_field
+                field_stdev_ew_arr[i] = stdev_ew_field
+                field_mean_ns_arr[i] = mean_ns_field
+                field_mean_ew_arr[i] = mean_ew_field
+
+                s_ns = pct_ns[i]
+                if s_ns is not None and not (isinstance(s_ns, float) and np.isnan(s_ns)):
+                    s_ns_f = float(s_ns)
+                    if score_amplifier != 1.0:
+                        s_ns_f = 0.5 + score_amplifier * (s_ns_f - 0.5)
+                        if s_ns_f < 0.0:
+                            s_ns_f = 0.0
+                        elif s_ns_f > 1.0:
+                            s_ns_f = 1.0
+                    s_ew_f = 1.0 - s_ns_f
+
+                    # Accumulate per-pair delta for end-of-session commit.
+                    delta_ns[idx_ns] += k_ns * (s_ns_f - e_ns)
+                    delta_ew[idx_ew] += k_ew * (s_ew_f - e_ew)
+                    bcount_ns[idx_ns] += 1
+                    bcount_ew[idx_ew] += 1
+
+        # End of session: commit accumulated deltas with hard clamp, update
+        # counters, mark session participation.
+        for idx, d in delta_ns.items():
+            new_r = ratings_ns[idx] + d
+            if new_r < min_rating:
+                new_r = min_rating
+            elif new_r > max_rating:
+                new_r = max_rating
+            ratings_ns[idx] = new_r
+            boards_played_ns[idx] += bcount_ns[idx]
+            if bcount_ns[idx] > 0:
+                sessions_ns[idx].add(session_id_value)
+        for idx, d in delta_ew.items():
+            new_r = ratings_ew[idx] + d
+            if new_r < min_rating:
+                new_r = min_rating
+            elif new_r > max_rating:
+                new_r = max_rating
+            ratings_ew[idx] = new_r
+            boards_played_ew[idx] += bcount_ew[idx]
+            if bcount_ew[idx] > 0:
+                sessions_ew[idx].add(session_id_value)
+
+        # Second pass over the session's rows to write After / Elo_N / Delta_After
+        # using the now-committed ratings. r_ns_after for each row is the pair's
+        # final post-session rating (constant within session).
+        for i_int in (int(x) for x in rows):
+            idx_ns = int(ns_indices[i_int])
+            idx_ew = int(ew_indices[i_int])
+            r_ns_after_arr[i_int] = ratings_ns[idx_ns]
+            r_ew_after_arr[i_int] = ratings_ew[idx_ew]
+            n_ns_arr[i_int] = len(sessions_ns[idx_ns])
+            n_ew_arr[i_int] = len(sessions_ew[idx_ew])
+            delta_before_arr[i_int] = r_ns_before_arr[i_int] - r_ew_before_arr[i_int]
+            delta_after_arr[i_int] = r_ns_after_arr[i_int] - r_ew_after_arr[i_int]
 
     # Set Elo ratings to None if session count is less than minimum_sessions
     r_ns_final = np.where(n_ns_arr < minimum_sessions, np.nan, r_ns_after_arr)
@@ -3818,6 +4113,10 @@ def compute_pair_matchpoint_elo_ratings(
         "Elo_N_EW": n_ew_arr,
         "Elo_Delta_Before": delta_before_arr,
         "Elo_Delta_After": delta_after_arr,
+        "Field_Stdev_NS": field_stdev_ns_arr,
+        "Field_Stdev_EW": field_stdev_ew_arr,
+        "Field_Mean_NS": field_mean_ns_arr,
+        "Field_Mean_EW": field_mean_ew_arr,
     })
     if replace_existing:
         cols = [c for c in out_df.columns if c in df_sorted.columns]
@@ -3843,51 +4142,54 @@ def compute_player_matchpoint_elo_ratings(
     max_section_pairs: float = 60.0,   # cap Section_Pairs before scale = sqrt((p-1)/11)
     min_rating: float = 200.0,         # hard floor for the running rating
     max_rating: float = 3000.0,        # hard ceiling for the running rating
+    global_stdev_ns: float | None = None,  # K-dampening normalizer; auto-derived if None
+    global_stdev_ew: float | None = None,
 ) -> pl.DataFrame:
-    """Compute player Elo-style ratings for duplicate boards.
+    """Compute field-relative Elo-style player ratings for duplicate boards.
 
     Purpose:
-    - Calculate individual player Elo-style skill ratings based on bridge game results
-    - Track rating changes for each player at each table position (N/S/E/W)
-    - Provide leakage-safe updates that prevent future information contamination
-    - Generate expected scores and rating progression analytics per player
+    - Mirrors :func:`compute_pair_matchpoint_elo_ratings` but at the
+      individual-player granularity. Partnership rating is taken as the mean
+      of the two players' running ratings; updates split 50/50 across the
+      partnership.
+    - Uses the same field-relative expectation, per-session snapshot/commit,
+      and stratum-mixed K-dampening described in the pair function.
+    - The "field" for an NS partnership at a board is the set of partnership
+      averages of all NS partnerships that played that board; self is
+      excluded when computing the expected score.
 
     Parameters:
-    - df_sorted: Sorted DataFrame ('Date','session_id','Round','Board') containing duplicate bridge game results with individual player IDs
-    - initial_rating: starting rating for all players (default 1500.0)
-    - k_base: base K-factor for rating updates (default 24.0)
-    - provisional_boost_until: number of games before reducing K-factor (default 100)
-    - minimum_sessions: minimum sessions required for non-None rating (default 10)
-    - elo_scale: denominator in logistic expectation (chess default 400.0)
-    - score_amplifier: amplifies per-board score around 0.5 (1.0 = no change)
-    - replace_existing: if True, drop existing output columns before adding new ones.
-    - max_section_pairs: hard cap on `Section_Pairs`/`Num_Pairs`/`MP_Top` before
-      computing the K-factor scale `sqrt((pairs-1)/11)`. Default 60 -> max
-      scale ≈ 2.32. Prevents bad upstream values from blowing up K.
-    - min_rating / max_rating: hard clamp band for the running rating; guards
-      against numerical-stability blow-ups. See TODO.md "K-factor / Elo
-      outlier blow-up".
+    - df_sorted: DataFrame whose rows are board×table results, ordered such
+      that sessions appear oldest first. Boards within each session are
+      re-grouped internally via a (Date, session_id, Board) lexsort.
+    - initial_rating, k_base, provisional_boost_until, minimum_sessions,
+      elo_scale, score_amplifier, max_section_pairs, min_rating, max_rating:
+      same semantics as :func:`compute_pair_matchpoint_elo_ratings`.
 
     Input columns:
-    - `Date`: Game date for temporal ordering (any comparable type)
-    - `Player_ID_N`, `Player_ID_S`, `Player_ID_E`, `Player_ID_W`: Individual player identifiers
-    - `Pct_NS`: North-South percentage score in [0,1] range (pl.Float32)
-    - `session_id`: Session identifier (required for session counting)
+    - `Player_ID_N`, `Player_ID_S`, `Player_ID_E`, `Player_ID_W`, `Pct_NS`,
+      `session_id` (required).
+    - `Date`, `Board` (optional but recommended for processing-order sort).
+    - `Section_Pairs` / `Num_Pairs` / `MP_Top` (optional, K-factor scale).
+    - `Elo_R_N_Before` (optional, used as global-stdev seed for K-dampening
+      ratio; falls back to ``STRATUM_DAMPENING_FALLBACK_GLOBAL_STDEV``).
 
     Output columns:
-    - `Elo_R_N_Before`, `Elo_R_S_Before`, `Elo_R_E_Before`, `Elo_R_W_Before`: Pre-game ratings (pl.Float32, None if Elo_N < minimum_sessions)
-    - `Elo_E_NS`, `Elo_E_EW`: Expected scores from pre-board partnership ratings (pl.Float32)
-    - `Elo_R_N`, `Elo_R_S`, `Elo_R_E`, `Elo_R_W`: Post-game ratings (pl.Float32, None if Elo_N < minimum_sessions)  
-    - `Elo_N_N`, `Elo_N_S`, `Elo_N_E`, `Elo_N_W`: Session counts per player (pl.Int32)
-    
-    Note: Elo ratings are set to None for players with fewer than minimum_sessions sessions played to ensure statistical reliability.
+    - `Elo_R_{N|S|E|W}_Before`: session-start snapshot per seat (pl.Float32).
+    - `Elo_E_NS`, `Elo_E_EW`: field-relative expected scores for each
+      partnership (pl.Float32). **Semantic change** from previous releases:
+      these no longer sum to 1 — each is the expected score against the
+      same-direction self-excluded field average.
+    - `Elo_R_{N|S|E|W}`: post-session-commit ratings (pl.Float32).
+    - `Elo_N_{N|S|E|W}`: number of unique sessions played (pl.Int32).
+    - `Field_Stdev_NS_Player`, `Field_Stdev_EW_Player`: same-direction stdev
+      of the partnership-rating field at this board (pl.Float32). Different
+      column name from the pair function so both sets can coexist when the
+      same dataframe carries both pair- and player-Elo columns.
 
     Returns:
-    - Original DataFrame with appended per-player ratings before/after, expected partnership scores, and session counts.
+    - Original DataFrame with the listed columns appended.
     """
-    # TODO? (polars): Similar to pair Elo, consider chunking by session and preparing
-    # arrays via Polars pre-aggregation. Full vectorization is constrained by
-    # sequential updates but can reduce Python overhead with chunked updates.
     need_cols = {
         "Player_ID_N",
         "Player_ID_S",
@@ -3900,7 +4202,6 @@ def compute_player_matchpoint_elo_ratings(
     if missing:
         raise ValueError(f"Missing columns: {missing}")
 
-    # Extract arrays
     n_rows = df_sorted.height
     pid_n_arr = df_sorted["Player_ID_N"].to_numpy()
     pid_s_arr = df_sorted["Player_ID_S"].to_numpy()
@@ -3920,9 +4221,6 @@ def compute_player_matchpoint_elo_ratings(
     else:
         pairs = None
     if pairs is not None:
-        # Same sanitize+cap as the pair Elo: NaN/inf -> 1.0, then clip to
-        # max_section_pairs so a junk Section_Pairs/MP_Top can't drive K to
-        # absurd multiples (root cause of ±100k Elo outliers — see TODO.md).
         pairs = np.where(np.isfinite(pairs), pairs, 1.0)
         pairs = np.minimum(pairs, np.float32(max_section_pairs))
         with np.errstate(invalid="ignore"):
@@ -3939,26 +4237,27 @@ def compute_player_matchpoint_elo_ratings(
         df_sorted["Player_ID_E"],
         df_sorted["Player_ID_W"],
     ]).unique().to_list()
-
     idx_ns_map = {pid: i for i, pid in enumerate(ns_player_unique)}
     idx_ew_map = {pid: i for i, pid in enumerate(ew_player_unique)}
 
     ratings_ns = np.full(len(ns_player_unique), initial_rating, dtype=np.float32)
     ratings_ew = np.full(len(ew_player_unique), initial_rating, dtype=np.float32)
-    boards_played_ns = np.zeros(len(ns_player_unique), dtype=np.int32)  # Track boards for provisional boost
-    boards_played_ew = np.zeros(len(ew_player_unique), dtype=np.int32)  # Track boards for provisional boost
-    
-    # Track unique sessions per player using sets
+    boards_played_ns = np.zeros(len(ns_player_unique), dtype=np.int32)
+    boards_played_ew = np.zeros(len(ew_player_unique), dtype=np.int32)
     sessions_ns = [set() for _ in range(len(ns_player_unique))]
     sessions_ew = [set() for _ in range(len(ew_player_unique))]
 
-    # Outputs
+    # Pre-compute per-row seat indices.
+    idx_n_arr = np.array([idx_ns_map[pid] for pid in pid_n_arr], dtype=np.int32)
+    idx_s_arr = np.array([idx_ns_map[pid] for pid in pid_s_arr], dtype=np.int32)
+    idx_e_arr = np.array([idx_ew_map[pid] for pid in pid_e_arr], dtype=np.int32)
+    idx_w_arr = np.array([idx_ew_map[pid] for pid in pid_w_arr], dtype=np.int32)
+
+    # Outputs (indexed by ORIGINAL row position)
     R_N_Before = np.empty(n_rows, dtype=np.float32)
     R_S_Before = np.empty(n_rows, dtype=np.float32)
     R_E_Before = np.empty(n_rows, dtype=np.float32)
     R_W_Before = np.empty(n_rows, dtype=np.float32)
-    NS_side_Before = np.empty(n_rows, dtype=np.float32)
-    EW_side_Before = np.empty(n_rows, dtype=np.float32)
     E_NS = np.empty(n_rows, dtype=np.float32)
     E_EW = np.empty(n_rows, dtype=np.float32)
     R_N_after = np.empty(n_rows, dtype=np.float32)
@@ -3970,102 +4269,208 @@ def compute_player_matchpoint_elo_ratings(
     N_E = np.empty(n_rows, dtype=np.int32)
     N_W = np.empty(n_rows, dtype=np.int32)
     Elo_Delta_Before = np.empty(n_rows, dtype=np.float32)
+    Field_Stdev_NS_Player = np.empty(n_rows, dtype=np.float32)
+    Field_Stdev_EW_Player = np.empty(n_rows, dtype=np.float32)
+    # New (Zubatch fix): per-board same-direction partnership-rating MEAN.
+    # Output as a diagnostic alongside Field_Stdev_*_Player.
+    Field_Mean_NS_Player = np.empty(n_rows, dtype=np.float32)
+    Field_Mean_EW_Player = np.empty(n_rows, dtype=np.float32)
 
-    # Pre-compute all indices for better performance
-    idx_n_arr = np.array([idx_ns_map[pid] for pid in pid_n_arr], dtype=np.int32)
-    idx_s_arr = np.array([idx_ns_map[pid] for pid in pid_s_arr], dtype=np.int32)
-    idx_e_arr = np.array([idx_ew_map[pid] for pid in pid_e_arr], dtype=np.int32)
-    idx_w_arr = np.array([idx_ew_map[pid] for pid in pid_w_arr], dtype=np.int32)
-    
-    # Optimized loop with pre-computed indices
-    for i in range(n_rows):
-        idx_n = idx_n_arr[i]
-        idx_s = idx_s_arr[i]
-        idx_e = idx_e_arr[i]
-        idx_w = idx_w_arr[i]
+    # K-dampening seeds. Same caller-override-then-auto pattern as the pair
+    # function. Player-level Elo stdev is naturally about half the pair stdev,
+    # so the auto-derived value tends to be smaller — pass an explicit seed
+    # from the previous-run parquet for best behaviour.
+    if global_stdev_ns is None:
+        global_stdev_ns = _global_stdev_seed(df_sorted, "Elo_R_N_Before")
+    if global_stdev_ew is None:
+        global_stdev_ew = _global_stdev_seed(df_sorted, "Elo_R_E_Before")
+    logger.info(
+        "compute_player_matchpoint_elo_ratings: K-dampening seeds "
+        f"global_stdev_ns={global_stdev_ns:.2f} global_stdev_ew={global_stdev_ew:.2f}; "
+        f"field-strength anchors z_full={FIELD_STRENGTH_Z_FULL} z_floor={FIELD_STRENGTH_Z_FLOOR} "
+        f"k_min={FIELD_STRENGTH_K_MIN} pop_mean={initial_rating}"
+    )
 
-        r_n_ns = ratings_ns[idx_n]
-        r_s_ns = ratings_ns[idx_s]
-        r_e_ew = ratings_ew[idx_e]
-        r_w_ew = ratings_ew[idx_w]
+    # Processing order: (Date, session_id, Board) — same as pair function.
+    if "Date" in df_sorted.columns:
+        date_arr = df_sorted["Date"].to_numpy()
+    else:
+        date_arr = np.zeros(n_rows, dtype=np.int64)
+    if "Board" in df_sorted.columns:
+        board_arr = df_sorted["Board"].to_numpy()
+    else:
+        board_arr = np.zeros(n_rows, dtype=np.int32)
+    proc_order = np.lexsort((board_arr, session_ids, date_arr))
 
-        ns_before = (r_n_ns + r_s_ns) / 2.0
-        ew_before = (r_e_ew + r_w_ew) / 2.0
+    sess_proc_seq = session_ids[proc_order]
+    if n_rows > 0:
+        sess_change = np.where(sess_proc_seq[:-1] != sess_proc_seq[1:])[0] + 1
+        session_bounds_starts = np.concatenate(([0], sess_change))
+        session_bounds_ends = np.concatenate((sess_change, [n_rows]))
+    else:
+        session_bounds_starts = np.array([], dtype=np.int64)
+        session_bounds_ends = np.array([], dtype=np.int64)
 
-        e_ns = 1.0 / (1.0 + 10.0 ** (-(ns_before - ew_before) / elo_scale))
-        e_ew = 1.0 - e_ns
+    for s_start, s_end in zip(session_bounds_starts, session_bounds_ends):
+        rows = proc_order[s_start:s_end]
+        if rows.size == 0:
+            continue
+        session_id_value = session_ids[rows[0]]
 
-        # K per player with provisional boost and section-size scale (based on boards played)
-        k_n = k_base * (1.5 if boards_played_ns[idx_n] < provisional_boost_until else 1.0) * scale[i]
-        k_s = k_base * (1.5 if boards_played_ns[idx_s] < provisional_boost_until else 1.0) * scale[i]
-        k_e = k_base * (1.5 if boards_played_ew[idx_e] < provisional_boost_until else 1.0) * scale[i]
-        k_w = k_base * (1.5 if boards_played_ew[idx_w] < provisional_boost_until else 1.0) * scale[i]
+        # Snapshot participating players at session start.
+        ns_seats_in_session = np.unique(np.concatenate([idx_n_arr[rows], idx_s_arr[rows]]))
+        ew_seats_in_session = np.unique(np.concatenate([idx_e_arr[rows], idx_w_arr[rows]]))
+        snap_ns = {int(idx): float(ratings_ns[idx]) for idx in ns_seats_in_session}
+        snap_ew = {int(idx): float(ratings_ew[idx]) for idx in ew_seats_in_session}
+        delta_ns = {int(idx): 0.0 for idx in ns_seats_in_session}
+        delta_ew = {int(idx): 0.0 for idx in ew_seats_in_session}
+        bcount_ns = {int(idx): 0 for idx in ns_seats_in_session}
+        bcount_ew = {int(idx): 0 for idx in ew_seats_in_session}
 
-        r_n_before = r_n_ns
-        r_s_before = r_s_ns
-        r_e_before = r_e_ew
-        r_w_before = r_w_ew
+        b_seq = board_arr[rows]
+        if rows.size > 0:
+            b_change = np.where(b_seq[:-1] != b_seq[1:])[0] + 1
+            board_starts = np.concatenate(([0], b_change))
+            board_ends = np.concatenate((b_change, [rows.size]))
+        else:
+            board_starts = np.array([], dtype=np.int64)
+            board_ends = np.array([], dtype=np.int64)
 
-        s_ns = pct_ns[i]
-        if s_ns is not None and not (isinstance(s_ns, float) and np.isnan(s_ns)):
-            # Calculate proper deltas for each direction
-            s_ns_f = float(s_ns)
-            if score_amplifier != 1.0:
-                s_ns_f = 0.5 + score_amplifier * (s_ns_f - 0.5)
-                if s_ns_f < 0.0:
-                    s_ns_f = 0.0
-                elif s_ns_f > 1.0:
-                    s_ns_f = 1.0
-            delta_ns = s_ns_f - e_ns
-            delta_ew = (1.0 - s_ns_f) - e_ew  # Use EW score for EW players
-            r_n_ns = r_n_ns + 0.5 * k_n * delta_ns
-            r_s_ns = r_s_ns + 0.5 * k_s * delta_ns
-            r_e_ew = r_e_ew + 0.5 * k_e * delta_ew  # Use EW delta, not NS delta
-            r_w_ew = r_w_ew + 0.5 * k_w * delta_ew  # Use EW delta, not NS delta
-            # Hard-clamp every player rating; see compute_pair_matchpoint_elo_ratings.
-            if r_n_ns < min_rating: r_n_ns = min_rating
-            elif r_n_ns > max_rating: r_n_ns = max_rating
-            if r_s_ns < min_rating: r_s_ns = min_rating
-            elif r_s_ns > max_rating: r_s_ns = max_rating
-            if r_e_ew < min_rating: r_e_ew = min_rating
-            elif r_e_ew > max_rating: r_e_ew = max_rating
-            if r_w_ew < min_rating: r_w_ew = min_rating
-            elif r_w_ew > max_rating: r_w_ew = max_rating
-            ratings_ns[idx_n] = r_n_ns
-            ratings_ns[idx_s] = r_s_ns
-            ratings_ew[idx_e] = r_e_ew
-            ratings_ew[idx_w] = r_w_ew
-            boards_played_ns[idx_n] += 1
-            boards_played_ns[idx_s] += 1
-            boards_played_ew[idx_e] += 1
-            boards_played_ew[idx_w] += 1
-            
-            # Track unique sessions
-            sessions_ns[idx_n].add(session_ids[i])
-            sessions_ns[idx_s].add(session_ids[i])
-            sessions_ew[idx_e].add(session_ids[i])
-            sessions_ew[idx_w].add(session_ids[i])
+        for b_s, b_e in zip(board_starts, board_ends):
+            board_rows = rows[b_s:b_e]
+            n_board = board_rows.size
+            # Partnership averages for this board (snapshot).
+            r_n_snap = np.array([snap_ns[int(idx)] for idx in idx_n_arr[board_rows]], dtype=np.float32)
+            r_s_snap = np.array([snap_ns[int(idx)] for idx in idx_s_arr[board_rows]], dtype=np.float32)
+            r_e_snap = np.array([snap_ew[int(idx)] for idx in idx_e_arr[board_rows]], dtype=np.float32)
+            r_w_snap = np.array([snap_ew[int(idx)] for idx in idx_w_arr[board_rows]], dtype=np.float32)
+            ns_partnership = (r_n_snap + r_s_snap) / 2.0
+            ew_partnership = (r_e_snap + r_w_snap) / 2.0
+            sum_ns_part = float(ns_partnership.sum())
+            sum_ew_part = float(ew_partnership.sum())
+            if n_board >= 2:
+                mean_ns_field = sum_ns_part / n_board
+                mean_ew_field = sum_ew_part / n_board
+                stdev_ns_field = float(np.sqrt(((ns_partnership - mean_ns_field) ** 2).sum() / n_board))
+                stdev_ew_field = float(np.sqrt(((ew_partnership - mean_ew_field) ** 2).sum() / n_board))
+                stratum_scale_ns = _stratum_scale(stdev_ns_field / global_stdev_ns)
+                stratum_scale_ew = _stratum_scale(stdev_ew_field / global_stdev_ew)
+                # Field-strength dampening (Zubatch fix). Mirrors the same
+                # mechanism in compute_pair_matchpoint_elo_ratings — see
+                # docstring there for the structural motivation.
+                z_ns = (mean_ns_field - initial_rating) / global_stdev_ns
+                z_ew = (mean_ew_field - initial_rating) / global_stdev_ew
+                field_strength_ns = _field_strength_scale(z_ns)
+                field_strength_ew = _field_strength_scale(z_ew)
+            else:
+                mean_ns_field = float(ns_partnership[0]) if n_board == 1 else 0.0
+                mean_ew_field = float(ew_partnership[0]) if n_board == 1 else 0.0
+                stdev_ns_field = 0.0
+                stdev_ew_field = 0.0
+                stratum_scale_ns = 1.0
+                stratum_scale_ew = 1.0
+                field_strength_ns = 1.0
+                field_strength_ew = 1.0
 
-        # Save outputs
-        R_N_Before[i] = r_n_before
-        R_S_Before[i] = r_s_before
-        R_E_Before[i] = r_e_before
-        R_W_Before[i] = r_w_before
-        NS_side_Before[i] = ns_before
-        EW_side_Before[i] = ew_before
-        E_NS[i] = e_ns
-        E_EW[i] = e_ew
-        R_N_after[i] = r_n_ns
-        R_S_after[i] = r_s_ns
-        R_E_after[i] = r_e_ew
-        R_W_after[i] = r_w_ew
-        N_N[i] = len(sessions_ns[idx_n])  # Count unique sessions
-        N_S[i] = len(sessions_ns[idx_s])  # Count unique sessions
-        N_E[i] = len(sessions_ew[idx_e])  # Count unique sessions
-        N_W[i] = len(sessions_ew[idx_w])  # Count unique sessions
-        Elo_Delta_Before[i] = ns_before - ew_before
+            for offset in range(n_board):
+                i = int(board_rows[offset])
+                idx_n = int(idx_n_arr[i])
+                idx_s = int(idx_s_arr[i])
+                idx_e = int(idx_e_arr[i])
+                idx_w = int(idx_w_arr[i])
+                ns_self = float(ns_partnership[offset])
+                ew_self = float(ew_partnership[offset])
 
-    # Set Elo ratings to None if session count is less than minimum_sessions
+                if n_board >= 2:
+                    field_avg_ns = (sum_ns_part - ns_self) / (n_board - 1)
+                    field_avg_ew = (sum_ew_part - ew_self) / (n_board - 1)
+                else:
+                    field_avg_ns = ns_self
+                    field_avg_ew = ew_self
+
+                e_ns = 1.0 / (1.0 + 10.0 ** (-(ns_self - field_avg_ns) / elo_scale))
+                e_ew = 1.0 / (1.0 + 10.0 ** (-(ew_self - field_avg_ew) / elo_scale))
+
+                # K factor now includes BOTH stratum dampening AND
+                # field-strength dampening (Zubatch fix); see pair function
+                # for full rationale.
+                k_n = k_base * (1.5 if boards_played_ns[idx_n] < provisional_boost_until else 1.0) * float(scale[i]) * stratum_scale_ns * field_strength_ns
+                k_s = k_base * (1.5 if boards_played_ns[idx_s] < provisional_boost_until else 1.0) * float(scale[i]) * stratum_scale_ns * field_strength_ns
+                k_e = k_base * (1.5 if boards_played_ew[idx_e] < provisional_boost_until else 1.0) * float(scale[i]) * stratum_scale_ew * field_strength_ew
+                k_w = k_base * (1.5 if boards_played_ew[idx_w] < provisional_boost_until else 1.0) * float(scale[i]) * stratum_scale_ew * field_strength_ew
+
+                R_N_Before[i] = snap_ns[idx_n]
+                R_S_Before[i] = snap_ns[idx_s]
+                R_E_Before[i] = snap_ew[idx_e]
+                R_W_Before[i] = snap_ew[idx_w]
+                E_NS[i] = e_ns
+                E_EW[i] = e_ew
+                Field_Stdev_NS_Player[i] = stdev_ns_field
+                Field_Stdev_EW_Player[i] = stdev_ew_field
+                Field_Mean_NS_Player[i] = mean_ns_field
+                Field_Mean_EW_Player[i] = mean_ew_field
+
+                s_ns = pct_ns[i]
+                if s_ns is not None and not (isinstance(s_ns, float) and np.isnan(s_ns)):
+                    s_ns_f = float(s_ns)
+                    if score_amplifier != 1.0:
+                        s_ns_f = 0.5 + score_amplifier * (s_ns_f - 0.5)
+                        if s_ns_f < 0.0:
+                            s_ns_f = 0.0
+                        elif s_ns_f > 1.0:
+                            s_ns_f = 1.0
+                    delta_ns_residual = s_ns_f - e_ns
+                    delta_ew_residual = (1.0 - s_ns_f) - e_ew
+                    # Split partnership delta 50/50 across the two seats.
+                    delta_ns[idx_n] += 0.5 * k_n * delta_ns_residual
+                    delta_ns[idx_s] += 0.5 * k_s * delta_ns_residual
+                    delta_ew[idx_e] += 0.5 * k_e * delta_ew_residual
+                    delta_ew[idx_w] += 0.5 * k_w * delta_ew_residual
+                    bcount_ns[idx_n] += 1
+                    bcount_ns[idx_s] += 1
+                    bcount_ew[idx_e] += 1
+                    bcount_ew[idx_w] += 1
+
+        # Commit session deltas with hard clamp.
+        for idx, d in delta_ns.items():
+            new_r = ratings_ns[idx] + d
+            if new_r < min_rating:
+                new_r = min_rating
+            elif new_r > max_rating:
+                new_r = max_rating
+            ratings_ns[idx] = new_r
+            boards_played_ns[idx] += bcount_ns[idx]
+            if bcount_ns[idx] > 0:
+                sessions_ns[idx].add(session_id_value)
+        for idx, d in delta_ew.items():
+            new_r = ratings_ew[idx] + d
+            if new_r < min_rating:
+                new_r = min_rating
+            elif new_r > max_rating:
+                new_r = max_rating
+            ratings_ew[idx] = new_r
+            boards_played_ew[idx] += bcount_ew[idx]
+            if bcount_ew[idx] > 0:
+                sessions_ew[idx].add(session_id_value)
+
+        # Second pass to record post-commit After / counts / Delta_Before.
+        for i_int in (int(x) for x in rows):
+            idx_n = int(idx_n_arr[i_int])
+            idx_s = int(idx_s_arr[i_int])
+            idx_e = int(idx_e_arr[i_int])
+            idx_w = int(idx_w_arr[i_int])
+            R_N_after[i_int] = ratings_ns[idx_n]
+            R_S_after[i_int] = ratings_ns[idx_s]
+            R_E_after[i_int] = ratings_ew[idx_e]
+            R_W_after[i_int] = ratings_ew[idx_w]
+            N_N[i_int] = len(sessions_ns[idx_n])
+            N_S[i_int] = len(sessions_ns[idx_s])
+            N_E[i_int] = len(sessions_ew[idx_e])
+            N_W[i_int] = len(sessions_ew[idx_w])
+            Elo_Delta_Before[i_int] = ((R_N_Before[i_int] + R_S_Before[i_int]) / 2.0
+                                       - (R_E_Before[i_int] + R_W_Before[i_int]) / 2.0)
+
+    # Set ratings to None where session count is below threshold.
     R_N_final = np.where(N_N < minimum_sessions, np.nan, R_N_after)
     R_S_final = np.where(N_S < minimum_sessions, np.nan, R_S_after)
     R_E_final = np.where(N_E < minimum_sessions, np.nan, R_E_after)
@@ -4090,12 +4495,18 @@ def compute_player_matchpoint_elo_ratings(
         "Elo_N_E": N_E,
         "Elo_N_S": N_S,
         "Elo_N_W": N_W,
+        "Field_Stdev_NS_Player": Field_Stdev_NS_Player,
+        "Field_Stdev_EW_Player": Field_Stdev_EW_Player,
+        "Field_Mean_NS_Player": Field_Mean_NS_Player,
+        "Field_Mean_EW_Player": Field_Mean_EW_Player,
     })
     if replace_existing:
         cols = [c for c in out_df.columns if c in df_sorted.columns]
         if cols:
             df_sorted = df_sorted.drop(cols)
     return df_sorted.hstack(out_df)
+
+
 def compute_event_start_end_elo_columns(df_sorted: pl.DataFrame) -> pl.DataFrame:
     """Add constant per-session Elo columns for each seat and pair.
 
@@ -4187,6 +4598,10 @@ def compute_matchpoint_elo_ratings(
     minimum_sessions: int = 10,
     elo_scale: float = 400.0,
     score_amplifier: float = 1.0,
+    pair_global_stdev_ns: float | None = None,
+    pair_global_stdev_ew: float | None = None,
+    player_global_stdev_ns: float | None = None,
+    player_global_stdev_ew: float | None = None,
 ) -> pl.DataFrame:
     """Compute matchpoint Elo ratings for players and pairs.
 
@@ -4241,7 +4656,7 @@ def compute_matchpoint_elo_ratings(
     if 'Pct_NS' not in df.columns:
         df = add_percentage_scores(df)
 
-    # takes 2m30s. Adds 10 columns.
+    # takes 2m30s. Adds 12 columns (incl. Field_Stdev_NS / Field_Stdev_EW).
     df = compute_pair_matchpoint_elo_ratings(
         df,
         initial_rating=initial_rating,
@@ -4250,9 +4665,11 @@ def compute_matchpoint_elo_ratings(
         minimum_sessions=minimum_sessions,
         elo_scale=elo_scale,
         score_amplifier=score_amplifier,
+        global_stdev_ns=pair_global_stdev_ns,
+        global_stdev_ew=pair_global_stdev_ew,
     )
 
-    # takes 6m. Adds 14 columns.
+    # takes 6m. Adds 16 columns (incl. Field_Stdev_NS_Player / Field_Stdev_EW_Player).
     df = compute_player_matchpoint_elo_ratings(
         df, # select minimal columns
         initial_rating=initial_rating,
@@ -4261,6 +4678,8 @@ def compute_matchpoint_elo_ratings(
         minimum_sessions=minimum_sessions,
         elo_scale=elo_scale,
         score_amplifier=score_amplifier,
+        global_stdev_ns=player_global_stdev_ns,
+        global_stdev_ew=player_global_stdev_ew,
     )
 
     # takes 30s. Adds 12 columns.
