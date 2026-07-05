@@ -121,7 +121,6 @@ import pandas as pd
 # assumes symlinks are created in current directory.
 sys.path.append(str(pathlib.Path.cwd().joinpath('mlBridge')))  # global # Requires "./mlBridge" be in extraPaths in .vscode/settings.json
 sys.path.append(str(pathlib.Path.cwd().joinpath('streamlitlib')))  # global
-sys.path.append(str(pathlib.Path.cwd().joinpath('ffbridgelib')))  # global
 
 import mlBridge.mlBridgeLib as mlBridgeLib
 import mlBridge.mlBridgeFFLib as mlBridgeFFLib
@@ -228,10 +227,10 @@ def make_api_request_licencie(full_url: str, headers: Optional[Dict[str, str]] =
 # API source (Classic vs Lancelot) infrastructure
 # ----------------------------
 
-CLASSIC_API_BASE = "https://api.ffbridge.fr/api/v1"
-LANCELOT_API_BASE = "https://api-lancelot.ffbridge.fr"
-# Public Firebase web API key used by www.ffbridge.fr's SPA for password sign-in.
-FIREBASE_SIGNIN_URL = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=AIzaSyBjiLwewyM5PhXhfDSir5Cxvut0Yg4lYFQ"
+# API constants, URL builders, and the low-level Lancelot client live in the shared
+# mlBridgeFFLib (used by the Elo_Ratings project too).
+classic_api_url = mlBridgeFFLib.classic_api_url
+lancelot_api_url = mlBridgeFFLib.lancelot_api_url
 
 API_SOURCE_CLASSIC = 'classic'
 API_SOURCE_LANCELOT = 'lancelot'
@@ -241,38 +240,14 @@ API_SOURCE_LABELS = {
 }
 
 
-def classic_api_url(path: str) -> str:
-    """Build a Classic API URL from a path (no leading slash)."""
-    return f"{CLASSIC_API_BASE}/{path}"
-
-
-def lancelot_api_url(path: str) -> str:
-    """Build a Lancelot API URL from a path (no leading slash)."""
-    return f"{LANCELOT_API_BASE}/{path}"
-
-
 @st.cache_data(ttl=300, show_spinner=False)
 def probe_api_sources() -> Dict[str, Dict[str, Any]]:
     """Probe both API backends and report their health.
 
     Cached for 5 minutes so the sidebar doesn't re-probe on every rerun.
+    Keys are API_SOURCE_CLASSIC / API_SOURCE_LANCELOT.
     """
-    health = {}
-    probes = {
-        API_SOURCE_CLASSIC: classic_api_url('clubs'),
-        API_SOURCE_LANCELOT: lancelot_api_url('public/version'),
-    }
-    for source, url in probes.items():
-        try:
-            response = requests.get(url, timeout=3)
-            # 401/403 still means the service is up (endpoint just wants auth); 5xx means down.
-            health[source] = {
-                'ok': response.status_code < 500,
-                'detail': f"HTTP {response.status_code}",
-            }
-        except requests.exceptions.RequestException as e:
-            health[source] = {'ok': False, 'detail': type(e).__name__}
-    return health
+    return mlBridgeFFLib.probe_ffbridge_health()
 
 
 def auto_detect_api_source() -> str:
@@ -293,28 +268,24 @@ def is_lancelot_mode() -> bool:
     return get_api_source() == API_SOURCE_LANCELOT
 
 
+def get_lancelot_token() -> str:
+    """Return the session's Lancelot bearer token, failing fast if there is none."""
+    token = st.session_state.get('ffbridge_bearer_token')
+    if not token:
+        raise ValueError("No Lancelot bearer token available. Set FFBRIDGE_EMAIL/FFBRIDGE_PASSWORD or FFBRIDGE_BEARER_TOKEN_LANCELOT in .env.")
+    return token
+
+
 def make_lancelot_request(path: str, use_auth: bool = True) -> Any:
     """GET a Lancelot API path and return parsed JSON.
 
     Args:
-        path: path portion (no leading slash), e.g. 'persons/search?search=x'
+        path: path portion (no leading slash), e.g. 'persons/search?name=x'
         use_auth: include the Lancelot bearer token (required for user/person endpoints)
     """
-    headers = {
-        "accept": "application/json, text/plain, */*",
-        "origin": "https://www.ffbridge.fr",
-        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    }
-    if use_auth:
-        token = st.session_state.get('ffbridge_bearer_token')
-        if not token:
-            raise ValueError("No Lancelot bearer token available. Set FFBRIDGE_EMAIL/FFBRIDGE_PASSWORD or FFBRIDGE_BEARER_TOKEN_LANCELOT in .env.")
-        headers["Authorization"] = f"Bearer {token}"
-    url = lancelot_api_url(path)
-    print(f"Making Lancelot API request to: {url}")
-    response = requests.get(url, headers=headers, timeout=30)
-    response.raise_for_status()
-    return response.json()
+    token = get_lancelot_token() if use_auth else None
+    print(f"Making Lancelot API request to: {lancelot_api_url(path)}")
+    return mlBridgeFFLib.lancelot_get(path, token=token)
 
 
 def refresh_lancelot_token_via_firebase() -> Optional[str]:
@@ -330,14 +301,7 @@ def refresh_lancelot_token_via_firebase() -> Optional[str]:
         print("No FFBRIDGE_EMAIL/FFBRIDGE_PASSWORD in .env; cannot refresh Lancelot token.")
         return None
     try:
-        response = requests.post(
-            FIREBASE_SIGNIN_URL,
-            json={"returnSecureToken": True, "email": email, "password": password, "clientType": "CLIENT_TYPE_WEB"},
-            headers={"content-type": "application/json", "origin": "https://www.ffbridge.fr"},
-            timeout=15,
-        )
-        response.raise_for_status()
-        token = response.json()['idToken']
+        token = mlBridgeFFLib.firebase_sign_in(email, password)
         print(f"🔑 Refreshed Lancelot bearer token via Firebase sign-in (first 20 chars): {token[:20]}...")
         # Persist for future sessions.
         try:
@@ -361,12 +325,7 @@ def search_members(query: str) -> pl.DataFrame:
     """
     q = (query or '').strip()
     if is_lancelot_mode():
-        # Exact license-number lookup uses the ffbId param; name searches use the search param.
-        if q.isdigit():
-            json_data = make_lancelot_request(f"persons/search?ffbId={q.lstrip('0') or q}")
-        else:
-            json_data = make_lancelot_request(f"persons/search?search={q}")
-        items = json_data.get('items', [])
+        items = mlBridgeFFLib.search_persons(q, get_lancelot_token())
         rows = [
             {
                 'person_id': str(item['id']),
@@ -2292,6 +2251,9 @@ def show_player_selection_modal(filtered_options):
                             # Update both the value state AND the widget key to sync the textbox
                             st.session_state.player_search_value = str(license_number)
                             st.session_state.player_search_input = str(license_number)
+                            # Keep the resolved license number in the textbox after the report
+                            # starts (overrides the clear_player_search flag set by that path).
+                            st.session_state.insert_player_search_value = str(license_number)
                             
                             # Also set the player_id for downstream processing
                             st.session_state.player_id = str(player_id)
@@ -2444,15 +2406,28 @@ def player_search_input_on_change_with_query(query: str) -> None:
             
         # Single player found - get their ID using proper Polars syntax
         try:
-            player_id = dfs['search']['person_id'].to_list()[0]
+            row = list(dfs['search'].iter_rows(named=True))[0]
+            player_id = row['person_id']
         except Exception as e:
             # More informative error if column doesn't exist
             print(f"Error accessing person_id from search results: {e}")
             print(f"Available columns: {dfs['search'].columns}")
             print(f"Search dataframe:\n{dfs['search']}")
             raise Exception(f"Could not extract player_id from search results. Available columns: {dfs['search'].columns}")
-        
-        # Try to populate games for this player
+
+        # Resolve the license number and insert it into the sidebar textbox
+        # (replaces the name the user typed), even if loading games fails below.
+        license_number = (
+            row.get('person_license_number', '')
+            or row.get('license_number', '')
+            or row.get('licenseNumber', '')
+        )
+        if license_number and str(license_number) != query.strip():
+            st.session_state.insert_player_search_value = str(license_number)
+
+        # Try to populate games for this player. Clear any stale error first so the
+        # no-games guard below can distinguish a fresh populate-supplied message.
+        st.session_state.pop('player_search_error', None)
         st.session_state.player_id = str(player_id)
         try:
             has_games = populate_game_urls_for_player(st.session_state.player_id)
@@ -2461,9 +2436,11 @@ def player_search_input_on_change_with_query(query: str) -> None:
             st.session_state.player_id = None
             return
         
-        # Check if player has any games
+        # Check if player has any games. Keep a more specific message if populate
+        # already set one (e.g. the Lancelot logged-in-user-only limitation).
         if not has_games:
-            st.session_state.player_search_error = f"No games found for player '{query}'."
+            if not st.session_state.get('player_search_error'):
+                st.session_state.player_search_error = f"No games found for player '{query}'."
             st.session_state.player_id = None
             return
         
@@ -3146,8 +3123,16 @@ class FFBridgeApp(PostmortemBase):
         if 'player_search_input' not in st.session_state:
             st.session_state.player_search_input = ''
         
+        # Insert a resolved license number into the textbox before instantiation if flagged
+        # (set when a name search resolved to a single player). Takes precedence over the
+        # clear flag which the report-start path also sets.
+        if st.session_state.get('insert_player_search_value'):
+            st.session_state.player_search_input = st.session_state.insert_player_search_value
+            st.session_state.player_search_value = st.session_state.insert_player_search_value
+            del st.session_state.insert_player_search_value
+            st.session_state.pop('clear_player_search', None)
         # Clear the text input value before instantiation if flagged
-        if st.session_state.get('clear_player_search'):
+        elif st.session_state.get('clear_player_search'):
             st.session_state.player_search_input = ''
             st.session_state.player_search_value = ''
             del st.session_state.clear_player_search
@@ -3172,9 +3157,12 @@ class FFBridgeApp(PostmortemBase):
                 st.rerun()
             else:
                 # Non-numeric input - trigger search/modal
-                # No explicit rerun needed: the form submit already caused this render cycle.
                 if input_value:
                     player_search_input_on_change_with_query(input_value)
+                    # If a name resolved to a license number, rerun so the textbox
+                    # (already instantiated this render) picks up the inserted value.
+                    if st.session_state.get('insert_player_search_value'):
+                        st.rerun()
         
         # Display any search error in the sidebar
         if hasattr(st.session_state, 'player_search_error'):
@@ -3350,9 +3338,7 @@ def initialize_ffbridge_bearer_token() -> None:
 
         # Refresh the EASI token (used by the Classic API) from the valid Lancelot session.
         try:
-            easi_token = make_lancelot_request('users/me/easi-token')
-            if isinstance(easi_token, dict):
-                easi_token = easi_token.get('token') or easi_token.get('easi_token')
+            easi_token = mlBridgeFFLib.get_easi_token(get_lancelot_token())
             if easi_token:
                 st.session_state.ffbridge_easi_token = easi_token
                 try:
