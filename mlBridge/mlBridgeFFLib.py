@@ -475,10 +475,12 @@ def convert_ffdf_lancelot_to_mldf(ffdf):
                     pl.col('contract').str.replace('NT', 'N').str.slice(2), # double
                     pl.col('declarer'),
                 ]))
-            .when(pl.col('contract').eq('PASS'))
+            .when(pl.col('contract').str.to_uppercase().str.starts_with('PASS')) # e.g. 'PASS' or 'passe' or 'PASSE'
             .then(pl.lit('PASS'))
             .otherwise(None) # catch all for invalid contracts.
             .alias('Contract'),
+        # 'O' (Ouest) guards against French direction notation; the data is normally English N/E/S/W.
+        pl.col('declarer').replace('O', 'W').alias('Declarer'),
         pl.when(pl.col('result').str.starts_with('+'))
             .then(pl.col('result').str.slice(1))  # Remove '+'
             .when(pl.col('result').str.starts_with('-'))
@@ -490,6 +492,8 @@ def convert_ffdf_lancelot_to_mldf(ffdf):
         # although this may be an issue for director adjustments. Creating new columns (Score_NS and Score_EW) with opposite signs.
         pl.when(pl.col('nsScore').str.contains(r'^\d+$'))
             .then(pl.col('nsScore'))
+            .when(pl.col('nsScore').str.to_uppercase().str.starts_with('PASS') | pl.col('ewScore').str.to_uppercase().str.starts_with('PASS'))
+            .then(pl.lit('0'))
             .when(pl.col('ewScore').str.contains(r'^\d+$'))
             .then('-'+pl.col('ewScore'))
             .otherwise(pl.lit(None))
@@ -497,6 +501,8 @@ def convert_ffdf_lancelot_to_mldf(ffdf):
             .alias('Score_NS'),
         pl.when(pl.col('ewScore').str.contains(r'^\d+$'))
             .then(pl.col('ewScore'))
+            .when(pl.col('nsScore').str.to_uppercase().str.starts_with('PASS') | pl.col('ewScore').str.to_uppercase().str.starts_with('PASS'))
+            .then(pl.lit('0'))
             .when(pl.col('nsScore').str.contains(r'^\d+$'))
             .then('-'+pl.col('nsScore'))
             .otherwise(pl.lit(None))
@@ -515,14 +521,16 @@ def convert_ffdf_lancelot_to_mldf(ffdf):
         (pl.col('lineup_eastPlayer_firstName')+pl.lit(' ')+pl.col('lineup_eastPlayer_lastName')).alias('Player_Name_E'),
         (pl.col('lineup_southPlayer_firstName')+pl.lit(' ')+pl.col('lineup_southPlayer_lastName')).alias('Player_Name_S'),
         (pl.col('lineup_westPlayer_firstName')+pl.lit(' ')+pl.col('lineup_westPlayer_lastName')).alias('Player_Name_W'),
-        pl.col('lineup_northPlayer_id'),
-        pl.col('lineup_eastPlayer_id'),
-        pl.col('lineup_southPlayer_id'),
-        pl.col('lineup_westPlayer_id'),
-        pl.col('lineup_northPlayer_ffbId').cast(pl.String).alias('Player_ID_N'),
-        pl.col('lineup_eastPlayer_ffbId').cast(pl.String).alias('Player_ID_E'),
-        pl.col('lineup_southPlayer_ffbId').cast(pl.String).alias('Player_ID_S'),
-        pl.col('lineup_westPlayer_ffbId').cast(pl.String).alias('Player_ID_W'),
+        # Lancelot person ids (the scores endpoint no longer returns ffbId per lineup player).
+        # Cast through Int64 because pandas normalization makes these float when nulls exist (sitouts).
+        pl.col('lineup_northPlayer_id').cast(pl.Int64, strict=False).cast(pl.String).alias('lineup_northPlayer_id'),
+        pl.col('lineup_eastPlayer_id').cast(pl.Int64, strict=False).cast(pl.String).alias('lineup_eastPlayer_id'),
+        pl.col('lineup_southPlayer_id').cast(pl.Int64, strict=False).cast(pl.String).alias('lineup_southPlayer_id'),
+        pl.col('lineup_westPlayer_id').cast(pl.Int64, strict=False).cast(pl.String).alias('lineup_westPlayer_id'),
+        pl.col('lineup_northPlayer_id').cast(pl.Int64, strict=False).cast(pl.String).alias('Player_ID_N'),
+        pl.col('lineup_eastPlayer_id').cast(pl.Int64, strict=False).cast(pl.String).alias('Player_ID_E'),
+        pl.col('lineup_southPlayer_id').cast(pl.Int64, strict=False).cast(pl.String).alias('Player_ID_S'),
+        pl.col('lineup_westPlayer_id').cast(pl.Int64, strict=False).cast(pl.String).alias('Player_ID_W'),
         pl.col('lineup_segment_game_homeTeam_id').alias('team_id_home'),
         pl.col('lineup_segment_game_homeTeam_section').alias('section_id_home'),
         pl.col('lineup_segment_game_homeTeam_orientation').alias('Pair_Direction_Home'),
@@ -580,10 +588,24 @@ def convert_ffdf_lancelot_to_mldf(ffdf):
     #assert df['Pair_Number_NS'].is_not_null().all()
     #assert df['Pair_Number_EW'].is_not_null().all()
 
+    def _expand_scores(x):
+        # substitute None for adjusted scores (begin with %); PASSE/passe are French pass-outs.
+        expanded = []
+        for score_ns, score_ew, freq in zip(x['Scores_List_NS'], x['Scores_List_EW'], x['Score_Freq_List']):
+            if '%' in score_ns or '%' in score_ew:
+                value = None
+            elif score_ns.upper().startswith('PASS') or score_ew.upper().startswith('PASS'):
+                value = 0
+            elif len(score_ns):
+                value = int(score_ns)
+            else:
+                value = int('-' + score_ew)
+            expanded.extend([value] * freq)
+        return expanded
+
     df = df.with_columns(
         pl.struct(['Scores_List_NS', 'Scores_List_EW', 'Score_Freq_List'])
-            # substitute None for adjusted scores (begin with %).
-            .map_elements(lambda x: [None if '%' in score_ns or '%' in score_ew else 0 if score_ns == 'PASS' or score_ew == 'PASS' else int(score_ns) if len(score_ns) else int('-'+score_ew) for score_ns, score_ew, freq in zip(x['Scores_List_NS'], x['Scores_List_EW'], x['Score_Freq_List']) for _ in range(freq)],return_dtype=pl.List(pl.Int16))
+            .map_elements(_expand_scores, return_dtype=pl.List(pl.Int16))
             .alias('Expanded_Scores_List')
     )
     df = df.with_columns(

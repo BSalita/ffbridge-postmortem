@@ -449,11 +449,11 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_NS, COUNT(CASE WHEN Score_NS>=Par_NS THEN 1 ELSE NULL END) AS Count_GE, AVG(Pct_NS) AS Pct, STRING_AGG(CASE WHEN Score_NS>Par_NS THEN Board END, ', ') AS Boards_GT, STRING_AGG(CASE WHEN Score_NS=Par_NS THEN Board END, ', ') AS Boards_EQ, STRING_AGG(CASE WHEN Score_NS < Par_NS THEN Board END, ', ') AS Boards_LT, COUNT(CASE WHEN Score_NS=Par_NS THEN 1 ELSE NULL END) AS Count_EQ FROM self GROUP BY Pair_NS ORDER BY Count_GE DESC, Count_EQ"
+						"sql": "SELECT CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_NS, COUNT(Score_NS) AS Count, COUNT(CASE WHEN Score_NS>=Par_NS THEN 1 ELSE NULL END) AS Count_GE, AVG(Pct_NS) AS Pct, STRING_AGG(CASE WHEN Score_NS>Par_NS THEN Board END, ', ') AS Boards_GT, COUNT(CASE WHEN Score_NS=Par_NS THEN 1 ELSE NULL END) AS Count_EQ, STRING_AGG(CASE WHEN Score_NS=Par_NS THEN Board END, ', ') AS Boards_EQ, STRING_AGG(CASE WHEN Score_NS < Par_NS THEN Board END, ', ') AS Boards_LT FROM self GROUP BY Pair_NS ORDER BY Count_GE DESC, Count_EQ"
 					},
 					{
 						"prompt": "",
-						"sql": "SELECT CONCAT(section_name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_EW, COUNT(CASE WHEN Score_EW>=Par_EW THEN 1 ELSE NULL END) AS Count_GE, AVG(Pct_EW) AS Pct, STRING_AGG(CASE WHEN Score_EW>Par_EW THEN Board END, ', ') AS Boards_GT, STRING_AGG(CASE WHEN Score_EW=Par_EW THEN Board END, ', ') AS Boards_EQ, STRING_AGG(CASE WHEN Score_EW < Par_EW THEN Board END, ', ') AS Boards_LT, COUNT(CASE WHEN Score_EW=Par_EW THEN 1 ELSE NULL END) AS Count_EQ FROM self GROUP BY Pair_EW ORDER BY Count_GE DESC, Count_EQ"
+						"sql": "SELECT CONCAT(section_name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_EW, COUNT(Score_EW) AS Count, COUNT(CASE WHEN Score_EW>=Par_EW THEN 1 ELSE NULL END) AS Count_GE, AVG(Pct_EW) AS Pct, COUNT(CASE WHEN Score_EW=Par_EW THEN 1 ELSE NULL END) AS Count_EQ, STRING_AGG(CASE WHEN Score_EW>Par_EW THEN Board END, ', ') AS Boards_GT, STRING_AGG(CASE WHEN Score_EW=Par_EW THEN Board END, ', ') AS Boards_EQ, STRING_AGG(CASE WHEN Score_EW < Par_EW THEN Board END, ', ') AS Boards_LT FROM self GROUP BY Pair_EW ORDER BY Count_GE DESC, Count_EQ"
 					}
 				]
 			},
