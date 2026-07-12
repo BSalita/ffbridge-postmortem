@@ -1513,9 +1513,15 @@ def generate_and_save_schema_core(
             r'player_name_[nesw]', # Specific player name columns
             r'declarer_name',      # Declarer name column
             r'^is_(train|val|test)_set$',  # Split indicator columns (metadata)
+            # Raw ID columns: act as time/venue proxies, not deal signal.
+            # event_id/session_id ranked top-10 in first-layer importance for
+            # the 2026-07 club classifiers (see acbl/RESULTS.md). The
+            # DROP_PATTERNS in acbl_prediction_data.py only drop String
+            # columns, so club's numeric IDs slip through to training --
+            # exclude them here at schema time instead.
+            r'^(event_id|session_id|group_id|session_number)$',
             # Add more regex patterns as needed:
             # r'^id$',             # Exact match for 'id' column
-            # r'.*_id$',           # Any column ending with '_id'
             # r'^temp_.*',         # Any column starting with 'temp_'
         ]
     
@@ -5434,7 +5440,14 @@ def _create_classification_plots(y_true, y_pred, confusion_matrix, labels, per_c
         ax2.set_ylabel('Frequency')
         ax2.legend()
         plt.tight_layout()
-        plt.show()
+        # Non-blocking display: a plain plt.show() here stalled unattended
+        # pipeline runs until the figure window was manually closed
+        # (observed 2026-07-11 during acbl_prediction_train.py).
+        try:
+            plt.show(block=False)
+            plt.pause(0.001)
+        except TypeError:
+            plt.show()
 
 
 def analyze_prediction_results_classification(
