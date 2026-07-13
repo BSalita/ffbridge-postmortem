@@ -5298,6 +5298,11 @@ def _comparison_score_col(col: str) -> str:
     """Map a score column to the actual-score column used for matchpoint comparison."""
     if col.endswith('_Declarer'):
         return 'Score_Declarer'
+    # EV grid columns: EV_{NS|EW}_{declarer}_{strain}_{level}_{V|NV}
+    if col.startswith('EV_NS_'):
+        return 'Score_NS'
+    if col.startswith('EV_EW_'):
+        return 'Score_EW'
     if col.endswith('_NS'):
         return 'Score_NS'
     if col.endswith('_EW'):
@@ -5817,8 +5822,25 @@ def compute_max_scores(df: pl.DataFrame) -> pl.DataFrame:
             ])
         )
         .otherwise(pl.lit(0.0, dtype=pl.Float32)).alias('DD_Pct_Max_EW'),
-        compute_mp_percentage_from_score('EV_Max_NS').alias('EV_Pct_Max_NS'),
-        compute_mp_percentage_from_score('EV_Max_EW').alias('EV_Pct_Max_EW'),
+        # Match DD_Pct_Max: max per-contract MPs are summed beats vs MP_Top (not MP_Top+1).
+        pl.when(pl.col('MP_Top') > 0)
+        .then(
+            pl.min_horizontal([
+                (pl.coalesce([pl.col('MP_EV_Max_NS').cast(pl.Float32), pl.lit(0.0, dtype=pl.Float32)]).cast(pl.Float32))
+                / pl.col('MP_Top').cast(pl.Float32),
+                pl.lit(1.0, dtype=pl.Float32)
+            ])
+        )
+        .otherwise(pl.lit(0.0, dtype=pl.Float32)).alias('EV_Pct_Max_NS'),
+        pl.when(pl.col('MP_Top') > 0)
+        .then(
+            pl.min_horizontal([
+                (pl.coalesce([pl.col('MP_EV_Max_EW').cast(pl.Float32), pl.lit(0.0, dtype=pl.Float32)]).cast(pl.Float32))
+                / pl.col('MP_Top').cast(pl.Float32),
+                pl.lit(1.0, dtype=pl.Float32)
+            ])
+        )
+        .otherwise(pl.lit(0.0, dtype=pl.Float32)).alias('EV_Pct_Max_EW'),
     ])
     return out
 
