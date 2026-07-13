@@ -3117,6 +3117,7 @@ class FFBridgeApp(PostmortemBase):
             st.sidebar.warning(f"The selected API source ({get_api_source()}) is currently unreachable.")
 
         st.sidebar.caption(f"Build:{st.session_state.app_datetime}")
+        streamlitlib.render_memory_sidebar_caption(st)
 
         # Player search with modal dialog
         # Initialize session state for text input if not exists (only use session state, not value= param)

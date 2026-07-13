@@ -49,6 +49,7 @@ werkzeug
 regex
 termcolor
 tenacity
+psutil
 
 # Development and testing
 IPython
