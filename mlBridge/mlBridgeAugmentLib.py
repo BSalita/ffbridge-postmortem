@@ -3023,17 +3023,35 @@ def add_board_matchpoint_top(df: pl.DataFrame) -> pl.DataFrame:
     Input columns:
     - 'MP_NS': North-South matchpoint score
     - 'MP_EW': East-West matchpoint score
+    - 'Score_NS': Used to count tables actually present in this dataframe
 
     Output columns:
     - 'MP_Top': Maximum matchpoint score for each board in the session
     """
-    df = df.with_columns(
-        pl.col("MP_NS").add(pl.col('MP_EW')).cast(pl.Float64).round(0).cast(pl.UInt32).alias("MP_Top"),
-        # pl.col('Score').count().over(['session_id','PBN','Board']).sub(1).alias('MP_Top') # acceptable alternative?
-    )
-    # filtering out bad data. Only in club data?
-    # print(df.filter(pl.col('MP_Top').is_null())['MP_Top'])
-    df =  df.filter(pl.col('MP_Top').is_not_null() & pl.col('MP_Top').gt(0))
+    board_cols = ['session_id', 'Board']
+    if 'section_id' in df.columns:
+        board_cols.insert(1, 'section_id')
+
+    # Tables represented in this df (club-scoped Lancelot fetch may be << simultaneous freq list).
+    field_mp_top = pl.col('Score_NS').count().over(board_cols).sub(1).cast(pl.UInt32)
+
+    if 'MP_Top' in df.columns:
+        df = df.with_columns(pl.min_horizontal(pl.col('MP_Top'), field_mp_top).alias('MP_Top'))
+    else:
+        df = df.with_columns(field_mp_top.alias('MP_Top'))
+
+    # When Pct_* came from the API (Lancelot notes), resync MP totals to the corrected MP_Top.
+    if 'Pct_NS' in df.columns and 'Pct_EW' in df.columns:
+        df = df.with_columns(
+            (pl.col('Pct_NS') * pl.col('MP_Top')).round(2).alias('MP_NS'),
+            (pl.col('Pct_EW') * pl.col('MP_Top')).round(2).alias('MP_EW'),
+        )
+    elif 'MP_NS' in df.columns and 'MP_EW' in df.columns:
+        df = df.with_columns(
+            pl.col('MP_NS').add(pl.col('MP_EW')).cast(pl.Float64).round(0).cast(pl.UInt32).alias('MP_Top'),
+        )
+
+    df = df.filter(pl.col('MP_Top').is_not_null() & pl.col('MP_Top').gt(0))
     return df
 
 def add_matchpoint_scores_from_raw(df: pl.DataFrame) -> pl.DataFrame:
@@ -5594,6 +5612,71 @@ def compute_ev_score_percentages(df: pl.DataFrame) -> pl.DataFrame:
     return df
 
 
+def compute_ev_max_percentages(df: pl.DataFrame) -> pl.DataFrame:
+    """Compute EV_Pct_Max_{NS|EW} by ranking EV_Max scores against board Score distributions.
+
+    Uses the same lookup approach as compute_dd_score_percentages / compute_par_percentages
+    rather than dividing summed per-contract MPs by MP_Top.
+    """
+    import warnings
+    warnings.filterwarnings("ignore")
+
+    unique_cols = ['session_id', 'Board']
+    if 'section_id' in df.columns:
+        unique_cols.insert(1, 'section_id')
+
+    for pair in ['NS', 'EW']:
+        score_col = f'Score_{pair}'
+        ev_max_col = f'EV_Max_{pair}'
+        mp_col = f'MP_{ev_max_col}'
+        pct_col = f'EV_Pct_Max_{pair}'
+
+        if ev_max_col not in df.columns:
+            continue
+
+        score_unique_cols = unique_cols + [score_col]
+        all_scores_per_board = (
+            df.select(score_unique_cols)
+            .unique()
+            .group_by(unique_cols)
+            .agg([pl.col(score_col).alias('board_scores')])
+        )
+
+        ev_unique_scores = df.select(unique_cols + [ev_max_col]).unique()
+
+        matchpoint_lookup = (
+            ev_unique_scores
+            .join(all_scores_per_board, on=unique_cols, how='left')
+            .explode('board_scores')
+            .group_by(unique_cols + [ev_max_col])
+            .agg([
+                (pl.col('board_scores') < pl.col(ev_max_col)).sum().cast(pl.Float32).alias('beats'),
+                (pl.col('board_scores') == pl.col(ev_max_col)).sum().cast(pl.Float32).alias('ties'),
+                pl.col('board_scores').count().alias('total_comparisons'),
+            ])
+            .with_columns([
+                (pl.col('beats') + pl.col('ties') * 0.5).alias(mp_col),
+                ((pl.col('beats') + pl.col('ties') * 0.5) /
+                 pl.when(pl.col('total_comparisons') >= 1)
+                 .then(pl.col('total_comparisons'))
+                 .otherwise(pl.lit(1))).alias(pct_col),
+            ])
+            .select(unique_cols + [ev_max_col, mp_col, pct_col])
+        )
+
+        drop_cols = [c for c in (mp_col, pct_col) if c in df.columns]
+        if drop_cols:
+            df = df.drop(drop_cols)
+
+        df = df.join(matchpoint_lookup, on=unique_cols + [ev_max_col], how='left')
+        df = df.with_columns([
+            pl.col(mp_col).cast(pl.Float32),
+            pl.col(pct_col).cast(pl.Float32),
+        ])
+
+    return df
+
+
 def compute_par_percentages(df: pl.DataFrame) -> pl.DataFrame:
     """Compute Par-based percentages per side using pure Polars operations.
 
@@ -5822,27 +5905,8 @@ def compute_max_scores(df: pl.DataFrame) -> pl.DataFrame:
             ])
         )
         .otherwise(pl.lit(0.0, dtype=pl.Float32)).alias('DD_Pct_Max_EW'),
-        # Match DD_Pct_Max: max per-contract MPs are summed beats vs MP_Top (not MP_Top+1).
-        pl.when(pl.col('MP_Top') > 0)
-        .then(
-            pl.min_horizontal([
-                (pl.coalesce([pl.col('MP_EV_Max_NS').cast(pl.Float32), pl.lit(0.0, dtype=pl.Float32)]).cast(pl.Float32))
-                / pl.col('MP_Top').cast(pl.Float32),
-                pl.lit(1.0, dtype=pl.Float32)
-            ])
-        )
-        .otherwise(pl.lit(0.0, dtype=pl.Float32)).alias('EV_Pct_Max_NS'),
-        pl.when(pl.col('MP_Top') > 0)
-        .then(
-            pl.min_horizontal([
-                (pl.coalesce([pl.col('MP_EV_Max_EW').cast(pl.Float32), pl.lit(0.0, dtype=pl.Float32)]).cast(pl.Float32))
-                / pl.col('MP_Top').cast(pl.Float32),
-                pl.lit(1.0, dtype=pl.Float32)
-            ])
-        )
-        .otherwise(pl.lit(0.0, dtype=pl.Float32)).alias('EV_Pct_Max_EW'),
     ])
-    return out
+    return compute_ev_max_percentages(out)
 
 
 def compute_score_differences(df: pl.DataFrame) -> pl.DataFrame:
@@ -7046,9 +7110,8 @@ class MatchPointAugmenter:
         assert 'MP_NS' in self.df.columns, "Required column 'MP_NS' not found in DataFrame"
         assert 'MP_EW' in self.df.columns, "Required column 'MP_EW' not found in DataFrame"
         
-        if 'MP_Top' not in self.df.columns:
-            self.df = self._time_operation("create MP_Top", add_board_matchpoint_top, self.df)
-        
+        self.df = self._time_operation("create/correct MP_Top", add_board_matchpoint_top, self.df)
+
         # Assert column was created
         assert 'MP_Top' in self.df.columns, "Column 'MP_Top' was not created"
 

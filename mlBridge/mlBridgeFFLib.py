@@ -808,6 +808,8 @@ def convert_ffdf_lancelot_to_mldf(ffdf):
 
     df = df.with_columns([
         pl.col('section_id_home').alias('section_name'),
+        # Event-wide frequency count (full simultaneous field). Club-scoped postmortem
+        # dataframes overwrite this in add_board_matchpoint_top() to tables present.
         pl.col('Score_Freq_List').list.sum().sub(1).alias('MP_Top'), # todo: isn't there a 'top' available?
     ])
 
