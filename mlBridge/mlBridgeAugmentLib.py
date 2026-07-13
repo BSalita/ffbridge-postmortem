@@ -5191,6 +5191,8 @@ def add_declarer_scores(df: pl.DataFrame) -> pl.DataFrame:
 
     Output columns:
     - `EV_Score_Declarer`: Expected value score for declarer (pl.Float32)
+    - `EV_Score_NS`: EV score from NS perspective (+/- based on declarer)
+    - `EV_Score_EW`: EV score from EW perspective (+/- based on declarer)
     - `Computed_Score_Declarer`: Computed actual score for declarer (pl.Int32)
     - `Computed_Score_Declarer2`: Placeholder computed score variant (pl.Int32)
 
@@ -5200,7 +5202,7 @@ def add_declarer_scores(df: pl.DataFrame) -> pl.DataFrame:
     all_scores_d, _, _ = precompute_contract_score_tables()
     # NOTE: This block intentionally uses struct.map_elements for dynamic column selection.
     # Todo: replace with a pure-Polars approach (mask-based or index-based take) to remove Python row-wise code.
-    return df.with_columns([
+    df = df.with_columns([
         pl.when(pl.col('EV_Score_Col_Declarer').is_null()).then(None).otherwise(
             pl.struct(['EV_Score_Col_Declarer'] + EV_SCORE_COLUMNS
             ).map_elements(lambda x: x[x['EV_Score_Col_Declarer']] if x['EV_Score_Col_Declarer'] is not None else None, return_dtype=pl.Float64)
@@ -5211,6 +5213,20 @@ def add_declarer_scores(df: pl.DataFrame) -> pl.DataFrame:
             lambda x: all_scores_d.get(tuple(x.values()), None), return_dtype=pl.Int16
         ).alias('Computed_Score_Declarer'),
         pl.lit(None).alias('Computed_Score_Declarer2'),
+    ])
+    return df.with_columns([
+        pl.when(pl.col('Declarer_Pair_Direction').eq('NS'))
+        .then(pl.col('EV_Score_Declarer'))
+        .when(pl.col('Declarer_Pair_Direction').eq('EW'))
+        .then(pl.col('EV_Score_Declarer').neg())
+        .otherwise(None)
+        .alias('EV_Score_NS'),
+        pl.when(pl.col('Declarer_Pair_Direction').eq('EW'))
+        .then(pl.col('EV_Score_Declarer'))
+        .when(pl.col('Declarer_Pair_Direction').eq('NS'))
+        .then(pl.col('EV_Score_Declarer').neg())
+        .otherwise(None)
+        .alias('EV_Score_EW'),
     ])
 
 
@@ -5317,9 +5333,10 @@ def compute_matchpoints_for_scores(df: pl.DataFrame, score_columns: list[str]) -
     """
     out = df
     
-    # Note: DD_Score and Par columns are intentionally NOT included here because they
-    # get more sophisticated computation in compute_dd_score_percentages() and 
-    # compute_par_percentages() which use a proper lookup-based algorithm.
+    # Note: DD_Score, Par, and EV_Score pair-direction columns are intentionally NOT
+    # included here because they get more sophisticated computation in
+    # compute_dd_score_percentages(), compute_par_percentages(), and
+    # compute_ev_score_percentages() which use a proper lookup-based algorithm.
     # Including them here would create duplicate columns with _right suffix.
     all_columns = list(score_columns)  # Make a copy to avoid modifying the input
     
@@ -5496,6 +5513,79 @@ def compute_dd_score_percentages(df: pl.DataFrame) -> pl.DataFrame:
             pl.col(pct_col).cast(pl.Float32)
         ])
     
+    return df
+
+
+def compute_ev_score_percentages(df: pl.DataFrame) -> pl.DataFrame:
+    """Compute EV_Score_Pct_{NS|EW} using pure Polars operations (no map_elements).
+
+    Purpose:
+    - Calculate percentile rankings for contract-strain EV scores across all boards
+    - Mirror ``compute_dd_score_percentages`` / ``compute_par_percentages`` so
+      postmortem summaries can use ``EV_Score_Pct_{Pair_Direction}`` instead of
+      declarer-centric ``MP_EV_Pct_Declarer`` (which skews EW pairs toward NS pcts).
+
+    Input columns:
+    - `Score_NS`, `Score_EW`: Actual partnership scores achieved
+    - `EV_Score_NS`, `EV_Score_EW`: Expected-value scores in the actual contract
+    - `session_id`, `section_id` (optional), `Board`
+
+    Output columns:
+    - `MP_EV_Score_{NS|EW}`: Matchpoint scores for EV contract results (pl.Float32)
+    - `EV_Score_Pct_{NS|EW}`: Percentage rankings for EV contract scores (pl.Float32)
+    """
+    import warnings
+    warnings.filterwarnings("ignore")
+
+    unique_cols = ['session_id', 'Board']
+    if 'section_id' in df.columns:
+        unique_cols.insert(1, 'section_id')
+
+    for pair in ['NS', 'EW']:
+        score_col = f'Score_{pair}'
+        ev_score_col = f'EV_Score_{pair}'
+        mp_col = f'MP_{ev_score_col}'
+        pct_col = f'EV_Score_Pct_{pair}'
+
+        score_unique_cols = unique_cols + [score_col]
+        all_scores_per_board = (
+            df.select(score_unique_cols)
+            .unique()
+            .group_by(unique_cols)
+            .agg([
+                pl.col(score_col).alias('board_scores')
+            ])
+        )
+
+        ev_unique_scores = df.select(unique_cols + [ev_score_col]).unique()
+
+        matchpoint_lookup = (
+            ev_unique_scores
+            .join(all_scores_per_board, on=unique_cols, how='left')
+            .explode('board_scores')
+            .group_by(unique_cols + [ev_score_col])
+            .agg([
+                (pl.col('board_scores') < pl.col(ev_score_col)).sum().cast(pl.Float32).alias('beats'),
+                (pl.col('board_scores') == pl.col(ev_score_col)).sum().cast(pl.Float32).alias('ties'),
+                pl.col('board_scores').count().alias('total_comparisons')
+            ])
+            .with_columns([
+                (pl.col('beats') + pl.col('ties') * 0.5).alias(mp_col),
+                ((pl.col('beats') + pl.col('ties') * 0.5) /
+                 pl.when(pl.col('total_comparisons') >= 1)
+                 .then(pl.col('total_comparisons'))
+                 .otherwise(pl.lit(1))).alias(pct_col)
+            ])
+            .select(unique_cols + [ev_score_col, mp_col, pct_col])
+        )
+
+        df = df.join(matchpoint_lookup, on=unique_cols + [ev_score_col], how='left')
+
+        df = df.with_columns([
+            pl.col(mp_col).cast(pl.Float32),
+            pl.col(pct_col).cast(pl.Float32)
+        ])
+
     return df
 
 
@@ -6999,6 +7089,8 @@ class MatchPointAugmenter:
         assert 'MP_DD_Score_EW' not in self.df.columns, "_compute_comprehensive_matchpoints: Incorrectly created 'MP_DD_Score_EW' (should only be created by _convert_dd_scores_to_percentages)"
         assert 'MP_Par_NS' not in self.df.columns, "_compute_comprehensive_matchpoints: Incorrectly created 'MP_Par_NS' (should only be created by _convert_par_scores_to_percentages)"
         assert 'MP_Par_EW' not in self.df.columns, "_compute_comprehensive_matchpoints: Incorrectly created 'MP_Par_EW' (should only be created by _convert_par_scores_to_percentages)"
+        assert 'MP_EV_Score_NS' not in self.df.columns, "_compute_comprehensive_matchpoints: Incorrectly created 'MP_EV_Score_NS' (should only be created by _convert_ev_scores_to_percentages)"
+        assert 'MP_EV_Score_EW' not in self.df.columns, "_compute_comprehensive_matchpoints: Incorrectly created 'MP_EV_Score_EW' (should only be created by _convert_ev_scores_to_percentages)"
 
     def _compute_mp_percentage_from_score(self, col: str) -> pl.Series:
         """Calculate matchpoint percentage from MP column."""
@@ -7069,6 +7161,7 @@ class MatchPointAugmenter:
         # Split into smaller, more efficient functions
         self._convert_dd_scores_to_percentages()
         self._convert_par_scores_to_percentages()
+        self._convert_ev_scores_to_percentages()
         self._convert_declarer_scores_to_percentages()
         self._identify_maximum_scores()
         self._calculate_score_differentials()
@@ -7125,6 +7218,29 @@ class MatchPointAugmenter:
             assert 'Par_Pct_EW' in self.df.columns, "_convert_par_scores_to_percentages: Failed to create output 'Par_Pct_EW'"
         else:
             logger.warning("Skipping Par percentage computation - Par columns not found (ParScore likely missing from DD analysis)")
+
+    def _convert_ev_scores_to_percentages(self) -> None:
+        """Delegate to global EV contract-strain percentage computation."""
+        required_ev_cols = ['EV_Score_NS', 'EV_Score_EW']
+        if not all(col in self.df.columns for col in required_ev_cols):
+            logger.warning("Skipping EV score percentage computation - EV_Score_NS/EW not found")
+            return
+
+        assert 'MP_EV_Score_NS' not in self.df.columns, "_convert_ev_scores_to_percentages: Output 'MP_EV_Score_NS' already exists (duplicate computation)"
+        assert 'MP_EV_Score_EW' not in self.df.columns, "_convert_ev_scores_to_percentages: Output 'MP_EV_Score_EW' already exists (duplicate computation)"
+        assert 'EV_Score_Pct_NS' not in self.df.columns, "_convert_ev_scores_to_percentages: Output 'EV_Score_Pct_NS' already exists (duplicate computation)"
+        assert 'EV_Score_Pct_EW' not in self.df.columns, "_convert_ev_scores_to_percentages: Output 'EV_Score_Pct_EW' already exists (duplicate computation)"
+
+        self.df = self._time_operation(
+            "EV score percentages",
+            compute_ev_score_percentages,
+            self.df,
+        )
+
+        assert 'MP_EV_Score_NS' in self.df.columns, "_convert_ev_scores_to_percentages: Failed to create output 'MP_EV_Score_NS'"
+        assert 'MP_EV_Score_EW' in self.df.columns, "_convert_ev_scores_to_percentages: Failed to create output 'MP_EV_Score_EW'"
+        assert 'EV_Score_Pct_NS' in self.df.columns, "_convert_ev_scores_to_percentages: Failed to create output 'EV_Score_Pct_NS'"
+        assert 'EV_Score_Pct_EW' in self.df.columns, "_convert_ev_scores_to_percentages: Failed to create output 'EV_Score_Pct_EW'"
 
     def _convert_declarer_scores_to_percentages(self) -> None:
         """Delegate to global declarer percentage computation."""

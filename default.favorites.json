@@ -314,7 +314,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT AVG(CASE WHEN Boards_We_Declared THEN MP_DD_Pct_Declarer ELSE NULL END) AS Avg_DD_Pct_Of_Boards_We_Declared, AVG(CASE WHEN Boards_I_Declared THEN MP_DD_Pct_Declarer ELSE NULL END) AS Avg_DD_Pct_Of_Boards_I_Declared, AVG(CASE WHEN Boards_Partner_Declared THEN MP_DD_Pct_Declarer ELSE NULL END) AS Avg_DD_Pct_Of_Boards_Partner_Declared FROM self"
+						"sql": "SELECT AVG(CASE WHEN Boards_We_Declared THEN DD_Score_Pct_{Pair_Direction} ELSE NULL END) AS Avg_DD_Pct_Of_Boards_We_Declared, AVG(CASE WHEN Boards_I_Declared THEN DD_Score_Pct_{Pair_Direction} ELSE NULL END) AS Avg_DD_Pct_Of_Boards_I_Declared, AVG(CASE WHEN Boards_Partner_Declared THEN DD_Score_Pct_{Pair_Direction} ELSE NULL END) AS Avg_DD_Pct_Of_Boards_Partner_Declared FROM self"
 					}
 				]
 			},
@@ -324,7 +324,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT AVG(CASE WHEN Boards_We_Declared THEN MP_Par_Pct_Declarer ELSE NULL END) AS Avg_Par_Pct_Of_Boards_We_Declared, AVG(CASE WHEN Boards_I_Declared THEN MP_Par_Pct_Declarer ELSE NULL END) AS Avg_Par_Pct_Of_Boards_I_Declared, AVG(CASE WHEN Boards_Partner_Declared THEN MP_Par_Pct_Declarer ELSE NULL END) AS Avg_Par_Pct_Of_Boards_Partner_Declared FROM self"
+						"sql": "SELECT AVG(CASE WHEN Boards_We_Declared THEN Par_Pct_{Pair_Direction} ELSE NULL END) AS Avg_Par_Pct_Of_Boards_We_Declared, AVG(CASE WHEN Boards_I_Declared THEN Par_Pct_{Pair_Direction} ELSE NULL END) AS Avg_Par_Pct_Of_Boards_I_Declared, AVG(CASE WHEN Boards_Partner_Declared THEN Par_Pct_{Pair_Direction} ELSE NULL END) AS Avg_Par_Pct_Of_Boards_Partner_Declared FROM self"
 					}
 				]
 			},
@@ -334,7 +334,7 @@
 				"prompts": [
 					{
 						"prompt": "",
-						"sql": "SELECT AVG(CASE WHEN Boards_We_Declared THEN MP_EV_Pct_Declarer ELSE NULL END) AS Avg_EV_Pct_Of_Boards_We_Declared, AVG(CASE WHEN Boards_I_Declared THEN MP_EV_Pct_Declarer ELSE NULL END) AS Avg_EV_Pct_Of_Boards_I_Declared, AVG(CASE WHEN Boards_Partner_Declared THEN MP_EV_Pct_Declarer ELSE NULL END) AS Avg_EV_Pct_Of_Boards_Partner_Declared FROM self"
+						"sql": "SELECT AVG(CASE WHEN Boards_We_Declared THEN EV_Score_Pct_{Pair_Direction} ELSE NULL END) AS Avg_EV_Pct_Of_Boards_We_Declared, AVG(CASE WHEN Boards_I_Declared THEN EV_Score_Pct_{Pair_Direction} ELSE NULL END) AS Avg_EV_Pct_Of_Boards_I_Declared, AVG(CASE WHEN Boards_Partner_Declared THEN EV_Score_Pct_{Pair_Direction} ELSE NULL END) AS Avg_EV_Pct_Of_Boards_Partner_Declared FROM self"
 					}
 				]
 			},

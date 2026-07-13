@@ -1526,6 +1526,9 @@ def create_acbl_browser_context(p, headless=True):
                     '--no-default-browser-check',
                     f'--window-position={_OFFSCREEN_WINDOW_POS}',
                     f'--window-size={ACBL_VIEWPORT_WIDTH},{ACBL_VIEWPORT_HEIGHT}',
+                    # Chrome refuses to run as root (typical in containers)
+                    # with its sandbox enabled.
+                    *(['--no-sandbox'] if os.name == 'posix' and os.geteuid() == 0 else []),
                 ],
                 no_viewport=True,
             )
