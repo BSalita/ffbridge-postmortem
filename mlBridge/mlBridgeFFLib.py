@@ -646,6 +646,27 @@ def convert_ffdf_api_to_mldf(ffldfs):
     return df
 
 
+def _lancelot_trick_score_magnitude(ns_score: str, ew_score: str) -> int | None:
+    """Absolute trick score from whichever Lancelot nsScore/ewScore field is populated.
+
+    Lancelot often stores the magnitude in either column regardless of which side made.
+    """
+    for s in (ns_score or '', ew_score or ''):
+        if s and s[0].isdigit():
+            return int(s)
+        if s.upper().startswith('PASS'):
+            return 0
+    return None
+
+
+def _lancelot_signed_ns_score(ns_score: str, ew_score: str, ns_note: float, ew_note: float) -> int | None:
+    """Signed NS trick score using matchpoint notes to determine direction."""
+    mag = _lancelot_trick_score_magnitude(ns_score, ew_score)
+    if mag is None:
+        return None
+    return mag if (ns_note or 0) >= (ew_note or 0) else -mag
+
+
 # this function uses lancelot api to create mldf.
 # todo: update with newer algorithms from convert_ffdf_to_mldf().
 def convert_ffdf_lancelot_to_mldf(ffdf):
@@ -705,24 +726,48 @@ def convert_ffdf_lancelot_to_mldf(ffdf):
             .otherwise(pl.lit('0'))  # Replace '=' with '0'
             .cast(pl.Int16)
             .alias('Result'),
-        # not liking that only one of the two columns (nsScore or ewScore) has a value. I prefer to have both with opposite signs.
-        # although this may be an issue for director adjustments. Creating new columns (Score_NS and Score_EW) with opposite signs.
-        pl.when(pl.col('nsScore').str.contains(r'^\d+$'))
-            .then(pl.col('nsScore'))
-            .when(pl.col('nsScore').str.to_uppercase().str.starts_with('PASS') | pl.col('ewScore').str.to_uppercase().str.starts_with('PASS'))
-            .then(pl.lit('0'))
-            .when(pl.col('ewScore').str.contains(r'^\d+$'))
-            .then('-'+pl.col('ewScore'))
-            .otherwise(pl.lit(None))
+        # Lancelot puts trick-score magnitude in either nsScore or ewScore; the populated
+        # column name does NOT reliably indicate which side made. Use nsNote vs ewNote.
+        pl.when(
+            pl.col('nsScore').str.contains(r'^\d+$') | pl.col('ewScore').str.contains(r'^\d+$')
+            | pl.col('nsScore').str.to_uppercase().str.starts_with('PASS')
+            | pl.col('ewScore').str.to_uppercase().str.starts_with('PASS')
+        )
+            .then(
+                pl.when(pl.col('nsNote').fill_null(0) >= pl.col('ewNote').fill_null(0))
+                .then(
+                    pl.when(pl.col('nsScore').str.contains(r'^\d+$')).then(pl.col('nsScore'))
+                    .when(pl.col('ewScore').str.contains(r'^\d+$')).then(pl.col('ewScore'))
+                    .otherwise(pl.lit('0'))
+                )
+                .otherwise(
+                    pl.when(pl.col('nsScore').str.contains(r'^\d+$')).then('-' + pl.col('nsScore'))
+                    .when(pl.col('ewScore').str.contains(r'^\d+$')).then('-' + pl.col('ewScore'))
+                    .otherwise(pl.lit('0'))
+                )
+            )
+            .otherwise(None)
             .cast(pl.Int16)
             .alias('Score_NS'),
-        pl.when(pl.col('ewScore').str.contains(r'^\d+$'))
-            .then(pl.col('ewScore'))
-            .when(pl.col('nsScore').str.to_uppercase().str.starts_with('PASS') | pl.col('ewScore').str.to_uppercase().str.starts_with('PASS'))
-            .then(pl.lit('0'))
-            .when(pl.col('nsScore').str.contains(r'^\d+$'))
-            .then('-'+pl.col('nsScore'))
-            .otherwise(pl.lit(None))
+        pl.when(
+            pl.col('nsScore').str.contains(r'^\d+$') | pl.col('ewScore').str.contains(r'^\d+$')
+            | pl.col('nsScore').str.to_uppercase().str.starts_with('PASS')
+            | pl.col('ewScore').str.to_uppercase().str.starts_with('PASS')
+        )
+            .then(
+                pl.when(pl.col('nsNote').fill_null(0) >= pl.col('ewNote').fill_null(0))
+                .then(
+                    pl.when(pl.col('ewScore').str.contains(r'^\d+$')).then('-' + pl.col('ewScore'))
+                    .when(pl.col('nsScore').str.contains(r'^\d+$')).then('-' + pl.col('nsScore'))
+                    .otherwise(pl.lit('0'))
+                )
+                .otherwise(
+                    pl.when(pl.col('ewScore').str.contains(r'^\d+$')).then(pl.col('ewScore'))
+                    .when(pl.col('nsScore').str.contains(r'^\d+$')).then(pl.col('nsScore'))
+                    .otherwise(pl.lit('0'))
+                )
+            )
+            .otherwise(None)
             .cast(pl.Int16)
             .alias('Score_EW'),
         (pl.col('nsNote')/100.0).alias('Pct_NS'),
@@ -807,21 +852,20 @@ def convert_ffdf_lancelot_to_mldf(ffdf):
 
     def _expand_scores(x):
         # substitute None for adjusted scores (begin with %); PASSE/passe are French pass-outs.
+        # Lancelot may put trick-score magnitude in either nsScore or ewScore; use notes for sign.
         expanded = []
-        for score_ns, score_ew, freq in zip(x['Scores_List_NS'], x['Scores_List_EW'], x['Score_Freq_List']):
+        for score_ns, score_ew, pct_ns, pct_ew, freq in zip(
+            x['Scores_List_NS'], x['Scores_List_EW'], x['Pcts_List_NS'], x['Pcts_List_EW'], x['Score_Freq_List']
+        ):
             if '%' in score_ns or '%' in score_ew:
                 value = None
-            elif score_ns.upper().startswith('PASS') or score_ew.upper().startswith('PASS'):
-                value = 0
-            elif len(score_ns):
-                value = int(score_ns)
             else:
-                value = int('-' + score_ew)
+                value = _lancelot_signed_ns_score(score_ns, score_ew, pct_ns, pct_ew)
             expanded.extend([value] * freq)
         return expanded
 
     df = df.with_columns(
-        pl.struct(['Scores_List_NS', 'Scores_List_EW', 'Score_Freq_List'])
+        pl.struct(['Scores_List_NS', 'Scores_List_EW', 'Pcts_List_NS', 'Pcts_List_EW', 'Score_Freq_List'])
             .map_elements(_expand_scores, return_dtype=pl.List(pl.Int16))
             .alias('Expanded_Scores_List')
     )

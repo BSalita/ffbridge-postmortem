@@ -5278,6 +5278,19 @@ def add_player_ratings(df: pl.DataFrame) -> pl.DataFrame:
     ])
 
 
+def _comparison_score_col(col: str) -> str:
+    """Map a score column to the actual-score column used for matchpoint comparison."""
+    if col.endswith('_Declarer'):
+        return 'Score_Declarer'
+    if col.endswith('_NS'):
+        return 'Score_NS'
+    if col.endswith('_EW'):
+        return 'Score_EW'
+    if col and col[-1] in 'NS':
+        return 'Score_NS'
+    return 'Score_EW'
+
+
 def compute_matchpoints_for_scores(df: pl.DataFrame, score_columns: list[str]) -> pl.DataFrame:
     """Compute matchpoints for a set of score columns in batches.
 
@@ -5326,7 +5339,7 @@ def compute_matchpoints_for_scores(df: pl.DataFrame, score_columns: list[str]) -
         
         batch_expressions = []
         for col in batch:
-            comparison_col = 'Score_NS' if (col.endswith('_NS') or (len(col)>0 and col[-1] in 'NS')) else 'Score_EW'
+            comparison_col = _comparison_score_col(col)
             batch_expressions.append(
                 pl.when(pl.col(col) > pl.col(comparison_col)).then(1.0)
                 .when(pl.col(col) == pl.col(comparison_col)).then(0.5)
