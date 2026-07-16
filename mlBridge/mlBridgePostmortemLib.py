@@ -19,6 +19,8 @@ import sys
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any, Union
 
+from mlBridge.mlBridgeLib import cast_numeric_display_columns
+
 # todo: shouldn't other methods be abstract and initialized in main()?
 class PostmortemBase(ABC):
     """Base class containing standard mlBridge code shared across applications."""
@@ -87,7 +89,7 @@ class PostmortemBase(ABC):
             df: The Polars DataFrame to display (None to use existing registered table)
             key: Unique key for the Streamlit component
             query: SQL query to execute on the DataFrame
-            show_sql_query: Whether to display the SQL query text
+            show_sql_query: Whether to display the SQL query text (row count is always shown)
             height_rows: Number of rows to display in the table (default: 4)
             
         Returns:
@@ -112,9 +114,8 @@ class PostmortemBase(ABC):
                 st.info("Data is loading... Please wait for processing to complete.")
                 return None
 
-            result_df = con.execute(query).pl()
-            if show_sql_query and st.session_state.show_sql_query:
-                st.text(f"Result is a dataframe of {len(result_df)} rows.")
+            result_df = cast_numeric_display_columns(con.execute(query).pl())
+            st.text(f"Result is a dataframe of {len(result_df)} rows.")
             
             # Import streamlitlib for display
             sys.path.append(str(pathlib.Path.cwd().joinpath('streamlitlib')))

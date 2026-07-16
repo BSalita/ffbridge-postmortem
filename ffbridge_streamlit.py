@@ -412,7 +412,8 @@ SIDEBAR_URL_PARAM_MAP: Dict[str, Dict[str, Callable[[Any], Any]]] = {
     },
     'session_id': {
         'state_key': 'session_id',
-        'parser': lambda v: int(v),
+        # 'latest' means most recent game (same as omitting session_id).
+        'parser': lambda v: None if str(v).strip().lower() == 'latest' else int(v),
         'serializer': lambda v: None if v is None else str(int(v)),
     },
     'single_dummy_sample_count': {
@@ -1537,8 +1538,16 @@ def _finalize_mldf_for_report(df: pl.DataFrame) -> bool:
     return False
 
 
+def _normalize_session_id_arg(session_id: Any) -> Any:
+    """Treat 'latest' (case-insensitive) as None so callers pick the most recent game."""
+    if isinstance(session_id, str) and session_id.strip().lower() == 'latest':
+        return None
+    return session_id
+
+
 def _change_game_state_lancelot(player_id: str, session_id: Optional[int]) -> bool:
     """Lancelot branch of change_game_state. Returns True on error, False on success."""
+    session_id = _normalize_session_id_arg(session_id)
     with st.spinner(f"Retrieving a list of games for {player_id} ..."):
         if not populate_game_urls_for_player(player_id):
             st.error(st.session_state.get('player_search_error') or f"Could not find any games for {player_id}.")
@@ -1565,6 +1574,7 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
 
     # Keep player_id stable as a string; other parts of the UI (e.g., game_urls_d keys) depend on this.
     player_id = str(player_id) if player_id is not None else player_id
+    session_id = _normalize_session_id_arg(session_id)
 
     print(f"=== change_game_state START: player_id={player_id}, session_id={session_id} ===")
 
@@ -2495,7 +2505,7 @@ def create_sidebar() -> None:
         st.session_state.app.create_sidebar()
     else:
         # Fallback for backward compatibility - basic sidebar
-        st.sidebar.caption(st.session_state.get('app_datetime', ''))
+        st.sidebar.caption(f"Build:{st.session_state.get('app_datetime', '')}")
         st.sidebar.text_input(
             "Enter ffbridge license number", 
             on_change=player_search_input_on_change, 
@@ -2940,10 +2950,9 @@ class FFBridgeApp(PostmortemBase):
         # session_state has the ids but the report data (df) hasn't been fetched yet because
         # the user never clicked the game-selector dropdown. Mirror that dropdown's effect
         # by calling change_game_state once for the URL-specified pair, then rerun so the
-        # report renders cleanly. When session_id is omitted, change_game_state(player_id,
-        # None) auto-picks the player's most recent game -- same behavior as the sidebar
-        # "Enter ffbridge license number" path. Tracking key avoids re-loading on every
-        # script rerun.
+        # report renders cleanly. When session_id is omitted or 'latest', change_game_state
+        # auto-picks the player's most recent game -- same as the sidebar license path.
+        # Tracking key avoids re-loading on every script rerun.
         url_session_key = (
             str(st.session_state.player_id) if st.session_state.player_id is not None else None,
             int(st.session_state.session_id) if st.session_state.session_id is not None else None,
@@ -3038,6 +3047,9 @@ class FFBridgeApp(PostmortemBase):
         self.ask_sql_query()
         # Always render debug section (when enabled) so it doesn't disappear on reruns.
         render_debug_expander()
+
+        # Memory footer on the main page (same pattern as Elo_Ratings apps).
+        st.caption(streamlitlib.get_memory_caption_line(st))
         
         # Re-inject CSS at the end to ensure it overrides any theme styles applied during render.
         self._inject_sidebar_button_css()
@@ -3048,6 +3060,7 @@ class FFBridgeApp(PostmortemBase):
 
     def create_sidebar(self):
         """Create FFBridge-specific sidebar."""
+        st.sidebar.caption(f"Build:{st.session_state.app_datetime}")
         
         # Process Go button input OUTSIDE sidebar context (so output goes to main window)
         if hasattr(st.session_state, 'process_go_button_input'):
@@ -3097,7 +3110,7 @@ class FFBridgeApp(PostmortemBase):
         
         # Modal dialog just updates the textbox - user must press Enter to generate report
 
-        # API source selector (top of sidebar). Classic and Lancelot are different FFBridge
+        # API source selector. Classic and Lancelot are different FFBridge
         # backends with different id spaces; switching clears player/game state.
         api_health = probe_api_sources()
         st.sidebar.selectbox(
@@ -3116,9 +3129,6 @@ class FFBridgeApp(PostmortemBase):
         st.sidebar.caption(' | '.join(health_parts))
         if not api_health[get_api_source()]['ok']:
             st.sidebar.warning(f"The selected API source ({get_api_source()}) is currently unreachable.")
-
-        st.sidebar.caption(f"Build:{st.session_state.app_datetime}")
-        streamlitlib.render_memory_sidebar_caption(st)
 
         # Player search with modal dialog
         # Initialize session state for text input if not exists (only use session state, not value= param)

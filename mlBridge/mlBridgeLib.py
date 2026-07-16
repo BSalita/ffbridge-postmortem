@@ -212,6 +212,19 @@ Dbl_to_x_d = {
     'xx':'xx'
 }
 
+_NUMERIC_DISPLAY_COLUMNS = ('Board', 'Tricks', 'DD_Tricks', 'DD_Tricks_Dummy', 'Board_Count', 'Board_Plays')
+
+def cast_numeric_display_columns(df: pl.DataFrame) -> pl.DataFrame:
+    """Cast board/trick columns to Int32 for DuckDB ORDER BY and AgGrid numeric sort."""
+    casts = [
+        pl.col(c).cast(pl.Int32, strict=False)
+        for c in _NUMERIC_DISPLAY_COLUMNS
+        if c in df.columns
+    ]
+    if not casts:
+        return df
+    return df.with_columns(casts)
+
 def pd_options_display():
     # display options overrides
     pd.options.display.max_columns = 0
