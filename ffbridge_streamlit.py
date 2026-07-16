@@ -3238,6 +3238,7 @@ class FFBridgeApp(PostmortemBase):
         st.sidebar.markdown("**Automated Postmortem Apps**")
         st.sidebar.markdown("🔗 [ACBL Postmortem](https://acbl.postmortem.chat)")
         st.sidebar.markdown("🔗 [French ffbridge Postmortem](https://ffbridge.postmortem.chat)")
+        st.sidebar.markdown("🔗 [Calculate PBN](https://pbn.postmortem.chat)")
         #st.sidebar.markdown("🔗 [BridgeWebs Postmortem](https://bridgewebs.postmortem.chat)")
 
         # Separator above Developer Settings
