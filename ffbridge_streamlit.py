@@ -118,9 +118,10 @@ import pandas as pd
 #import sklearn
 #import torch
 
-# assumes symlinks are created in current directory.
-sys.path.append(str(pathlib.Path.cwd().joinpath('mlBridge')))  # global # Requires "./mlBridge" be in extraPaths in .vscode/settings.json
-sys.path.append(str(pathlib.Path.cwd().joinpath('streamlitlib')))  # global
+_APP_DIR = pathlib.Path(__file__).resolve().parent
+for _p in (_APP_DIR, _APP_DIR / 'mlBridge', _APP_DIR / 'streamlitlib'):
+    if _p.is_dir() and str(_p) not in sys.path:
+        sys.path.append(str(_p))
 
 import mlBridge.mlBridgeLib as mlBridgeLib
 import mlBridge.mlBridgeFFLib as mlBridgeFFLib
