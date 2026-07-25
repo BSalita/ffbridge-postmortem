@@ -252,17 +252,17 @@ def probe_api_sources() -> Dict[str, Dict[str, Any]]:
 
 
 def auto_detect_api_source() -> str:
-    """Pick the default API source: Classic if it responds (preserves prior behavior), else Lancelot."""
+    """Pick the default API source: Lancelot if it responds, else Classic."""
     health = probe_api_sources()
-    if health[API_SOURCE_CLASSIC]['ok']:
-        return API_SOURCE_CLASSIC
     if health[API_SOURCE_LANCELOT]['ok']:
         return API_SOURCE_LANCELOT
-    return API_SOURCE_CLASSIC
+    if health[API_SOURCE_CLASSIC]['ok']:
+        return API_SOURCE_CLASSIC
+    return API_SOURCE_LANCELOT
 
 
 def get_api_source() -> str:
-    return st.session_state.get('api_source', API_SOURCE_CLASSIC)
+    return st.session_state.get('api_source', API_SOURCE_LANCELOT)
 
 
 def is_lancelot_mode() -> bool:
@@ -2816,7 +2816,7 @@ class FFBridgeApp(PostmortemBase):
         # Default before URL params are applied; URL ?player_id=... will override below.
         st.session_state.player_id = None
 
-        # Pick the API backend by probing both (Classic preferred when up). URL ?api_source=
+        # Pick the API backend by probing both (Lancelot preferred when up). URL ?api_source=
         # overrides this below via apply_url_params_to_session_state().
         if 'api_source' not in st.session_state:
             st.session_state.api_source = auto_detect_api_source()
@@ -3115,15 +3115,15 @@ class FFBridgeApp(PostmortemBase):
         api_health = probe_api_sources()
         st.sidebar.selectbox(
             "API source",
-            options=[API_SOURCE_CLASSIC, API_SOURCE_LANCELOT],
-            index=[API_SOURCE_CLASSIC, API_SOURCE_LANCELOT].index(get_api_source()),
+            options=[API_SOURCE_LANCELOT, API_SOURCE_CLASSIC],
+            index=[API_SOURCE_LANCELOT, API_SOURCE_CLASSIC].index(get_api_source()),
             format_func=lambda v: API_SOURCE_LABELS[v],
             on_change=api_source_on_change,
             key='api_source_selectbox',
-            help="Choose which FFBridge API backend to use. Classic is the pre-2026 API; Lancelot powers the current ffbridge.fr website.",
+            help="Choose which FFBridge API backend to use. Lancelot (default) powers the current ffbridge.fr website; Classic is the pre-2026 API.",
         )
         health_parts = []
-        for source in (API_SOURCE_CLASSIC, API_SOURCE_LANCELOT):
+        for source in (API_SOURCE_LANCELOT, API_SOURCE_CLASSIC):
             status = 'up' if api_health[source]['ok'] else f"unreachable ({api_health[source]['detail']})"
             health_parts.append(f"{source.capitalize()}: {status}")
         st.sidebar.caption(' | '.join(health_parts))
