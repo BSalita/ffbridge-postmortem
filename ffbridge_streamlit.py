@@ -119,18 +119,29 @@ import pandas as pd
 #import torch
 
 _APP_DIR = pathlib.Path(__file__).resolve().parent
-_SRC_DIR = _APP_DIR.parent
+# Docker: /app/<app>; monorepo: src/<app> or src/ffbridge/<app>
 _REQUIRED_LIBS = ('mlBridge', 'streamlitlib')
+
+def _is_lib_dir(p: pathlib.Path) -> bool:
+    # Reject empty leftover dirs after git removes vendored junction copies
+    # (__pycache__ alone still makes Path.is_dir() true).
+    return p.is_dir() and (p / '__init__.py').is_file()
+
 _resolved_libs = []
 for _name in _REQUIRED_LIBS:
-    _local, _sibling = _APP_DIR / _name, _SRC_DIR / _name
-    if _local.is_dir():
-        _resolved_libs.append(_local)
-    elif _sibling.is_dir():
-        _resolved_libs.append(_sibling)
-    else:
-        raise FileNotFoundError(f"{_name} not found at {_local} or {_sibling}")
-for _p in (_SRC_DIR, _APP_DIR):
+    _candidates = (
+        _APP_DIR / _name,
+        _APP_DIR.parent / _name,
+        _APP_DIR.parent.parent / _name,
+    )
+    _found = next((p for p in _candidates if _is_lib_dir(p)), None)
+    if _found is None:
+        raise FileNotFoundError(
+            f"{_name} not found at " + " or ".join(str(p) for p in _candidates)
+        )
+    _resolved_libs.append(_found)
+_path_roots = {_APP_DIR, *(_p.parent for _p in _resolved_libs)}
+for _p in _path_roots:
     _s = str(_p)
     if _s not in sys.path:
         sys.path.append(_s)
@@ -138,7 +149,7 @@ for _p in _resolved_libs:
     _s = str(_p)
     if _p.name == 'mlBridge':
         if _s not in sys.path:
-            sys.path.append(_s)
+            sys.path.append(_s)  # logging_config and friends
     else:
         if _s in sys.path:
             sys.path.remove(_s)
