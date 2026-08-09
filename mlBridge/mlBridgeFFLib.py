@@ -646,25 +646,50 @@ def convert_ffdf_api_to_mldf(ffldfs):
     return df
 
 
-def _lancelot_trick_score_magnitude(ns_score: str, ew_score: str) -> int | None:
-    """Absolute trick score from whichever Lancelot nsScore/ewScore field is populated.
+def _lancelot_score_field_kind(score: str) -> str | None:
+    """Classify a Lancelot nsScore/ewScore field: 'digit', 'pass', or None if empty."""
+    s = (score or '').strip()
+    if not s:
+        return None
+    if s[0].isdigit():
+        return 'digit'
+    if s.upper().startswith('PASS'):  # PASS / PASSE / passe
+        return 'pass'
+    return None
 
-    Lancelot often stores the magnitude in either column regardless of which side made.
-    """
+
+def _lancelot_trick_score_magnitude(ns_score: str, ew_score: str) -> int | None:
+    """Absolute trick score from whichever Lancelot nsScore/ewScore field is populated."""
     for s in (ns_score or '', ew_score or ''):
-        if s and s[0].isdigit():
-            return int(s)
-        if s.upper().startswith('PASS'):
+        kind = _lancelot_score_field_kind(s)
+        if kind == 'digit':
+            return int(s.strip())
+        if kind == 'pass':
             return 0
     return None
 
 
-def _lancelot_signed_ns_score(ns_score: str, ew_score: str, ns_note: float, ew_note: float) -> int | None:
-    """Signed NS trick score using matchpoint notes to determine direction."""
-    mag = _lancelot_trick_score_magnitude(ns_score, ew_score)
-    if mag is None:
-        return None
-    return mag if (ns_note or 0) >= (ew_note or 0) else -mag
+def _lancelot_signed_ns_score(ns_score: str, ew_score: str) -> int | None:
+    """Signed NS trick score from which Lancelot score column is populated.
+
+    The populated ``nsScore`` / ``ewScore`` field is the side that received the
+    *positive* trick points. Matchpoint notes must not be used for sign: a side
+    can score +140 and still get a poor percentage vs the field, which previously
+    flipped ``Score_NS`` / ``Score_EW``.
+    """
+    ns_kind = _lancelot_score_field_kind(ns_score)
+    ew_kind = _lancelot_score_field_kind(ew_score)
+    if ns_kind == 'digit' and ew_kind == 'digit':
+        raise ValueError(
+            f"Lancelot nsScore and ewScore both populated: {ns_score!r} / {ew_score!r}"
+        )
+    if ns_kind == 'digit':
+        return int(ns_score.strip())
+    if ew_kind == 'digit':
+        return -int(ew_score.strip())
+    if ns_kind == 'pass' or ew_kind == 'pass':
+        return 0
+    return None
 
 
 # this function uses lancelot api to create mldf.
@@ -726,50 +751,13 @@ def convert_ffdf_lancelot_to_mldf(ffdf):
             .otherwise(pl.lit('0'))  # Replace '=' with '0'
             .cast(pl.Int16)
             .alias('Result'),
-        # Lancelot puts trick-score magnitude in either nsScore or ewScore; the populated
-        # column name does NOT reliably indicate which side made. Use nsNote vs ewNote.
-        pl.when(
-            pl.col('nsScore').str.contains(r'^\d+$') | pl.col('ewScore').str.contains(r'^\d+$')
-            | pl.col('nsScore').str.to_uppercase().str.starts_with('PASS')
-            | pl.col('ewScore').str.to_uppercase().str.starts_with('PASS')
-        )
-            .then(
-                pl.when(pl.col('nsNote').fill_null(0) >= pl.col('ewNote').fill_null(0))
-                .then(
-                    pl.when(pl.col('nsScore').str.contains(r'^\d+$')).then(pl.col('nsScore'))
-                    .when(pl.col('ewScore').str.contains(r'^\d+$')).then(pl.col('ewScore'))
-                    .otherwise(pl.lit('0'))
-                )
-                .otherwise(
-                    pl.when(pl.col('nsScore').str.contains(r'^\d+$')).then('-' + pl.col('nsScore'))
-                    .when(pl.col('ewScore').str.contains(r'^\d+$')).then('-' + pl.col('ewScore'))
-                    .otherwise(pl.lit('0'))
-                )
+        # Populated nsScore/ewScore = side that received positive trick points (not notes).
+        pl.struct(['nsScore', 'ewScore'])
+            .map_elements(
+                lambda r: _lancelot_signed_ns_score(r['nsScore'], r['ewScore']),
+                return_dtype=pl.Int16,
             )
-            .otherwise(None)
-            .cast(pl.Int16)
             .alias('Score_NS'),
-        pl.when(
-            pl.col('nsScore').str.contains(r'^\d+$') | pl.col('ewScore').str.contains(r'^\d+$')
-            | pl.col('nsScore').str.to_uppercase().str.starts_with('PASS')
-            | pl.col('ewScore').str.to_uppercase().str.starts_with('PASS')
-        )
-            .then(
-                pl.when(pl.col('nsNote').fill_null(0) >= pl.col('ewNote').fill_null(0))
-                .then(
-                    pl.when(pl.col('ewScore').str.contains(r'^\d+$')).then('-' + pl.col('ewScore'))
-                    .when(pl.col('nsScore').str.contains(r'^\d+$')).then('-' + pl.col('nsScore'))
-                    .otherwise(pl.lit('0'))
-                )
-                .otherwise(
-                    pl.when(pl.col('ewScore').str.contains(r'^\d+$')).then(pl.col('ewScore'))
-                    .when(pl.col('nsScore').str.contains(r'^\d+$')).then(pl.col('nsScore'))
-                    .otherwise(pl.lit('0'))
-                )
-            )
-            .otherwise(None)
-            .cast(pl.Int16)
-            .alias('Score_EW'),
         (pl.col('nsNote')/100.0).alias('Pct_NS'),
         (pl.col('ewNote')/100.0).alias('Pct_EW'),
         # is this player1_id for every row table or just the requested team? remove until understood.
@@ -807,6 +795,7 @@ def convert_ffdf_lancelot_to_mldf(ffdf):
     assert all(df['section_id_home'] == df['section_id_away'])
 
     df = df.with_columns([
+        (-pl.col('Score_NS')).alias('Score_EW'),
         pl.col('section_id_home').alias('section_name'),
         # Event-wide frequency count (full simultaneous field). Club-scoped postmortem
         # dataframes overwrite this in add_board_matchpoint_top() to tables present.
@@ -854,20 +843,20 @@ def convert_ffdf_lancelot_to_mldf(ffdf):
 
     def _expand_scores(x):
         # substitute None for adjusted scores (begin with %); PASSE/passe are French pass-outs.
-        # Lancelot may put trick-score magnitude in either nsScore or ewScore; use notes for sign.
+        # Populated nsScore/ewScore = side that received positive trick points.
         expanded = []
-        for score_ns, score_ew, pct_ns, pct_ew, freq in zip(
-            x['Scores_List_NS'], x['Scores_List_EW'], x['Pcts_List_NS'], x['Pcts_List_EW'], x['Score_Freq_List']
+        for score_ns, score_ew, freq in zip(
+            x['Scores_List_NS'], x['Scores_List_EW'], x['Score_Freq_List']
         ):
-            if '%' in score_ns or '%' in score_ew:
+            if '%' in (score_ns or '') or '%' in (score_ew or ''):
                 value = None
             else:
-                value = _lancelot_signed_ns_score(score_ns, score_ew, pct_ns, pct_ew)
+                value = _lancelot_signed_ns_score(score_ns, score_ew)
             expanded.extend([value] * freq)
         return expanded
 
     df = df.with_columns(
-        pl.struct(['Scores_List_NS', 'Scores_List_EW', 'Pcts_List_NS', 'Pcts_List_EW', 'Score_Freq_List'])
+        pl.struct(['Scores_List_NS', 'Scores_List_EW', 'Score_Freq_List'])
             .map_elements(_expand_scores, return_dtype=pl.List(pl.Int16))
             .alias('Expanded_Scores_List')
     )
