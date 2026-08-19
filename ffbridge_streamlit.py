@@ -2844,7 +2844,13 @@ class FFBridgeApp(PostmortemBase):
         """Initialize FFBridge-specific session state."""
         # First initialize common session state
         self.initialize_common_session_state()
-        
+
+        # Persist augmented dataframes to cache/df-{session_id}-{player_id}.parquet
+        # (PostmortemBase defaults do_not_cache_df to True). Besides speeding up
+        # revisits, the parquet cache is the data source for
+        # ffbridge_postmortem_mcp_server.py.
+        st.session_state.do_not_cache_df = False
+
         # Default before URL params are applied; URL ?player_id=... will override below.
         st.session_state.player_id = None
 
