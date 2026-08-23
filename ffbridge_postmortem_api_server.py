@@ -70,7 +70,15 @@ def dataset_info() -> dict:
 
 
 @app.get("/players/resolve")
-def resolve_player(player_id: str = Query(..., description="Lancelot id or FFBridge license")) -> dict:
+def resolve_player(
+    player_id: str = Query(
+        ...,
+        description=(
+            "Lancelot, Classic/migration, or FFBridge license id; optional "
+            "lancelot:, classic:, or license: prefix"
+        ),
+    ),
+) -> dict:
     resolved = create.resolve_player(player_id)
     return {
         "requested_id": resolved.requested_id,

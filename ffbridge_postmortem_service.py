@@ -115,7 +115,10 @@ def dataset_info() -> Dict[str, Any]:
             "list_source_sessions_tool": "ffbridge_postmortem_list_source_sessions",
             "status_tool": "ffbridge_postmortem_generate_status",
             "writer_health_tool": "ffbridge_postmortem_writer_health",
-            "player_id": "Lancelot person id or FFBridge license number (e.g. 246273 or 9500754)",
+            "player_id": (
+                "Lancelot person id, Classic/migration id, or FFBridge license. "
+                "Optional explicit prefixes: lancelot:, classic:, license:."
+            ),
         },
         "note": (
             "Postmortems are produced on demand by ffbridge_postmortem_generate "

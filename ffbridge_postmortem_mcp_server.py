@@ -145,9 +145,10 @@ def ffbridge_postmortem_list_source_sessions(
 ) -> Dict[str, Any]:
     """List playable Lancelot sessions for a player without generating.
 
-    player_id: Lancelot person id or FFBridge license number. date_from /
-    date_to are optional YYYY-MM-DD filters. Each row has session_id, date,
-    club, and already_cached.
+    player_id: Lancelot person id, Classic/migration id, or FFBridge license
+    number. Prefix with lancelot:, classic:, or license: to disambiguate.
+    date_from / date_to are optional YYYY-MM-DD filters. Each row has
+    session_id, date, club, and already_cached.
     """
     return _writer_tool(api.list_source_sessions, player_id, date_from, date_to)
 
@@ -164,7 +165,8 @@ def ffbridge_postmortem_generate(
     """Generate postmortem parquet(s) via the FFBridge postmortem API
     (same Lancelot + augment path as Streamlit).
 
-    player_id: Lancelot person id or FFBridge license number.
+    player_id: Lancelot person id, Classic/migration id, or FFBridge license
+    number; optional prefixes are lancelot:, classic:, and license:.
     session_id: omit (or 'latest') for the most recent game; set with
     date_from / date_to (YYYY-MM-DD) to generate a range.
     force rebuilds even if a cache file exists.

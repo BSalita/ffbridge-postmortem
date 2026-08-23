@@ -96,25 +96,36 @@ class GenerateJobTests(unittest.TestCase):
 
 
 class OtherPlayerSessionTests(unittest.TestCase):
-    def test_elo_index_lists_only_target_player_in_date_window(self):
+    def test_shared_index_lists_only_target_player_in_date_window(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = pathlib.Path(tmp) / "lancelot.results.parquet"
-            pl.DataFrame(
+            index_dir = pathlib.Path(tmp) / "player_session_index"
+            results = pl.DataFrame(
                 {
                     "tournament_id": ["300001", "300002", "300003"],
                     "tournament_name": ["One", "Two", "Three"],
                     "date": ["2025-02-01", "2024-12-31", "2025-03-01"],
-                    "player1_id": ["136662", "136662", "999"],
-                    "player2_id": ["111", "222", "136662"],
+                    "series_id": [1, 2, 3],
+                    "team_id": ["11", "22", "33"],
                     "club_id": ["A", "B", "C"],
                     "club_name": ["Club A", "Club B", "Club C"],
-                    "series_id": [1, 2, 3],
+                    "player1_name": ["Guy", "Guy", "Other"],
+                    "player2_name": ["One", "Two", "Guy"],
+                    "player1_lancelot_id": ["136662", "136662", "999"],
+                    "player2_lancelot_id": ["111", "222", "136662"],
+                    "player1_classic_person_id": ["322582", "322582", "888"],
+                    "player2_classic_person_id": ["101", "202", "322582"],
+                    "player1_license_number": ["4958370", "4958370", "999999"],
+                    "player2_license_number": ["111111", "222222", "4958370"],
                 }
-            ).write_parquet(path)
+            )
+            create.mlBridgeFFIndexLib.build_and_write_index(
+                results,
+                index_dir=index_dir,
+            )
 
             with patch.dict(
                 create.os.environ,
-                {"FFBRIDGE_ELO_RESULTS_PARQUET": str(path)},
+                {"FFBRIDGE_PLAYER_SESSION_INDEX_DIR": str(index_dir)},
             ):
                 sessions = create.fetch_other_player_source_sessions(
                     "136662",
@@ -123,10 +134,13 @@ class OtherPlayerSessionTests(unittest.TestCase):
                 )
 
         self.assertEqual([row["session_id"] for row in sessions], ["300003", "300001"])
-        self.assertEqual(sessions[0]["listing_source"], "persisted Lancelot Elo index")
+        self.assertEqual(
+            sessions[0]["listing_source"],
+            "shared Lancelot player-session index",
+        )
         self.assertEqual(sessions[1]["club"], "Club A")
 
-    def test_list_source_uses_elo_index_for_non_logged_in_player(self):
+    def test_list_source_uses_shared_index_for_non_logged_in_player(self):
         auth = create.LancelotAuth("token", "246273", "9500754")
         resolved = create.ResolvedPlayer("136662", "4958370", "4958370", "322582")
         indexed = [
@@ -159,11 +173,60 @@ class OtherPlayerSessionTests(unittest.TestCase):
         self.assertEqual(result["count"], 1)
         self.assertFalse(result["sessions"][0]["already_cached"])
         indexed_source.assert_called_once_with(
-            "322582",
+            "136662",
             date_from="2025-01-01",
             date_to="2025-12-31",
         )
         logged_in.assert_not_called()
+
+    def test_list_source_accepts_all_indexed_identifier_namespaces(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            index_dir = pathlib.Path(tmp) / "player_session_index"
+            create.mlBridgeFFIndexLib.build_and_write_index(
+                pl.DataFrame(
+                    {
+                        "tournament_id": ["300001"],
+                        "tournament_name": ["One"],
+                        "date": ["2025-02-01"],
+                        "series_id": [1],
+                        "team_id": ["11"],
+                        "club_id": ["A"],
+                        "club_name": ["Club A"],
+                        "player1_name": ["Guy"],
+                        "player2_name": ["Partner"],
+                        "player1_lancelot_id": ["136662"],
+                        "player2_lancelot_id": ["111"],
+                        "player1_classic_person_id": ["322582"],
+                        "player2_classic_person_id": ["101"],
+                        "player1_license_number": ["4958370"],
+                        "player2_license_number": ["111111"],
+                    }
+                ),
+                index_dir=index_dir,
+            )
+            auth = create.LancelotAuth("token", "246273", "9500754")
+            identifiers = [
+                "lancelot:136662",
+                "classic:322582",
+                "license:4958370",
+            ]
+            with (
+                patch.dict(
+                    create.os.environ,
+                    {"FFBRIDGE_PLAYER_SESSION_INDEX_DIR": str(index_dir)},
+                ),
+                patch.object(create, "ensure_lancelot_auth", return_value=auth),
+            ):
+                results = [
+                    create.list_source_sessions(
+                        identifier,
+                        cache_dir=pathlib.Path(tmp) / "cache",
+                    )
+                    for identifier in identifiers
+                ]
+
+        self.assertEqual({result["player_id"] for result in results}, {"136662"})
+        self.assertEqual({result["count"] for result in results}, {1})
 
 
 if __name__ == "__main__":

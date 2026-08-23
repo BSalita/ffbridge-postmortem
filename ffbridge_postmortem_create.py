@@ -52,6 +52,7 @@ _ensure_mlbridge_on_path()
 import polars as pl
 
 import mlBridge.mlBridgeFFLib as mlBridgeFFLib
+import mlBridge.mlBridgeFFIndexLib as mlBridgeFFIndexLib
 from mlBridge.mlBridgeAugmentLib import AllAugmentations
 
 DEFAULT_CACHE_DIR = pathlib.Path(
@@ -213,14 +214,23 @@ def ensure_lancelot_auth(*, force: bool = False) -> LancelotAuth:
 
 
 def resolve_player(player_id: str, *, token: Optional[str] = None) -> ResolvedPlayer:
-    """Map a Lancelot person id or FFBridge license number to one player.
+    """Map a Lancelot, Classic/migration, or license id to one player.
 
     ``9500754`` (license) and ``246273`` (Lancelot id) resolve to the same
-    person when they belong to the same Lancelot record.
+    person when they belong to the same Lancelot record. Explicit ``license:``,
+    ``classic:``, and ``lancelot:`` prefixes disambiguate numeric collisions.
     """
     requested = str(player_id).strip()
     if not requested:
         raise ValueError("player_id is required")
+
+    try:
+        indexed = _resolve_player_from_index(requested)
+    except FileNotFoundError:
+        indexed = None
+    if indexed is not None:
+        return indexed
+
     cached = _resolve_cache.get(requested)
     if cached is not None:
         return cached
@@ -346,84 +356,79 @@ def fetch_logged_in_source_sessions(token: str) -> List[Dict[str, Any]]:
     return sessions
 
 
-def _find_lancelot_elo_results_parquet() -> pathlib.Path:
-    configured = os.environ.get("FFBRIDGE_ELO_RESULTS_PARQUET", "").strip()
+def _find_player_session_index_dir() -> pathlib.Path:
+    configured = os.environ.get("FFBRIDGE_PLAYER_SESSION_INDEX_DIR", "").strip()
     if configured:
-        path = pathlib.Path(configured)
-        if not path.is_file():
-            raise FileNotFoundError(f"FFBRIDGE_ELO_RESULTS_PARQUET not found: {path}")
-        return path
+        directory = pathlib.Path(configured)
+        required = mlBridgeFFIndexLib.index_paths(directory)
+        missing = [str(path) for path in required if not path.is_file()]
+        if missing:
+            raise FileNotFoundError(
+                "FFBRIDGE_PLAYER_SESSION_INDEX_DIR is incomplete; missing: "
+                + ", ".join(missing)
+            )
+        return directory
 
-    cache_dirs = [
-        pathlib.Path(os.environ.get("FFBRIDGE_ELO_CACHE_DIR", "/data/ffbridge/elo_cache")),
-        _APP_DIR.parent.parent / "Elo_Ratings" / "data" / "ffbridge" / "elo_cache",
+    candidates = [
+        mlBridgeFFIndexLib.default_index_dir(),
+        _APP_DIR.parent.parent
+        / "Elo_Ratings"
+        / "data"
+        / "ffbridge"
+        / "player_session_index",
     ]
-    matches: List[pathlib.Path] = []
-    for directory in cache_dirs:
-        if directory.is_dir():
-            matches.extend(directory.glob("*FFBridge_Lancelot_API*.results.parquet"))
-    if not matches:
-        raise FileNotFoundError(
-            "No persisted Lancelot Elo results parquet found. Set "
-            "FFBRIDGE_ELO_RESULTS_PARQUET or mount the Elo cache at "
-            "/data/ffbridge/elo_cache."
-        )
-    return max(matches, key=lambda path: path.stat().st_mtime)
+    for directory in candidates:
+        if all(path.is_file() for path in mlBridgeFFIndexLib.index_paths(directory)):
+            return directory
+    raise FileNotFoundError(
+        "No shared Lancelot player-session index found. Set "
+        "FFBRIDGE_PLAYER_SESSION_INDEX_DIR or build the index under "
+        "/data/ffbridge/player_session_index."
+    )
+
+
+def _resolve_player_from_index(player_id: str) -> Optional[ResolvedPlayer]:
+    index_dir = _find_player_session_index_dir()
+    persons = mlBridgeFFIndexLib.load_persons(index_dir)
+    person = mlBridgeFFIndexLib.lookup_person(persons, player_id)
+    if person is None:
+        return None
+    return ResolvedPlayer(
+        lancelot_id=str(person["lancelot_person_id"]),
+        license_number=(
+            str(person["license_number"])
+            if person.get("license_number") is not None
+            else None
+        ),
+        requested_id=str(player_id),
+        classic_person_id=(
+            str(person["classic_person_id"])
+            if person.get("classic_person_id") is not None
+            else None
+        ),
+    )
 
 
 def fetch_other_player_source_sessions(
-    index_player_id: str,
+    lancelot_person_id: str,
     *,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Session index for another player from the persisted public Lancelot Elo data."""
-    path = _find_lancelot_elo_results_parquet()
-    required = {
-        "tournament_id",
-        "tournament_name",
-        "date",
-        "player1_id",
-        "player2_id",
-    }
-    schema_names = set(pl.scan_parquet(path).collect_schema().names())
-    missing = sorted(required - schema_names)
-    if missing:
-        raise ValueError(f"Lancelot Elo results parquet lacks columns: {missing}")
-
-    optional = [
-        column
-        for column in ("club_id", "club_name", "series_id")
-        if column in schema_names
-    ]
-    pid = str(index_player_id)
-    query = pl.scan_parquet(path).filter(
-        (pl.col("player1_id").cast(pl.String) == pid)
-        | (pl.col("player2_id").cast(pl.String) == pid)
-    )
-    day = pl.col("date").cast(pl.String).str.slice(0, 10)
-    if date_from:
-        query = query.filter(day >= date_from)
-    if date_to:
-        query = query.filter(day <= date_to)
-    rows = (
-        query.select(
-            "tournament_id",
-            "tournament_name",
-            "date",
-            *optional,
-        )
-        .unique(subset=["tournament_id"], keep="first")
-        .sort("date", descending=True)
-        .collect()
-        .to_dicts()
-    )
+    """Sessions for another player from the shared public-ranking index."""
+    index_dir = _find_player_session_index_dir()
+    rows = mlBridgeFFIndexLib.query_index_sessions(
+        lancelot_person_id,
+        date_from=date_from,
+        date_to=date_to,
+        index_dir=index_dir,
+    ).to_dicts()
 
     sessions: List[Dict[str, Any]] = []
     for row in rows:
-        sid = str(row["tournament_id"])
-        date_str = _parse_session_date(row.get("date"))
-        label = str(row.get("tournament_name") or "")
+        sid = str(row["session_id"])
+        date_str = _parse_session_date(row.get("session_date"))
+        label = str(row.get("session_label") or "")
         club = str(row.get("club_name") or "")
         sessions.append(
             {
@@ -436,9 +441,10 @@ def fetch_other_player_source_sessions(
                 "competition_label": label,
                 "session_label": label,
                 "description": " ".join(part for part in (date_str, label, club) if part),
-                "raw_date": row.get("date"),
+                "raw_date": row.get("raw_date"),
                 "series_id": row.get("series_id"),
-                "listing_source": "persisted Lancelot Elo index",
+                "team_id": row.get("team_id"),
+                "listing_source": "shared Lancelot player-session index",
             }
         )
     return sessions
@@ -460,11 +466,8 @@ def list_source_sessions(
     if resolved.lancelot_id == auth.lancelot_id:
         source_sessions = fetch_logged_in_source_sessions(token)
     else:
-        # Elo normalizes Lancelot ranking players to migrationId (the Classic
-        # person id), not the Lancelot id used by board-score lineups.
-        index_player_id = resolved.classic_person_id or resolved.lancelot_id
         source_sessions = fetch_other_player_source_sessions(
-            index_player_id,
+            resolved.lancelot_id,
             date_from=date_from,
             date_to=date_to,
         )
