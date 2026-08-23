@@ -16,7 +16,7 @@ import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from dotenv import load_dotenv
@@ -843,22 +843,147 @@ class GenerateJob:
     results: List[Dict[str, Any]] = field(default_factory=list)
     failed_session_ids: List[str] = field(default_factory=list)
     progress: Dict[str, Any] = field(default_factory=dict)
+    owner_id: Optional[str] = None
+    heartbeat_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    recovery_count: int = 0
+    session_attempts: Dict[str, int] = field(default_factory=dict)
 
     def as_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
 
-_jobs_lock = threading.Lock()
+_PROCESS_INSTANCE_ID = f"{os.getpid()}-{uuid.uuid4().hex[:12]}"
+_ACTIVE_JOB_STATUSES = {"started", "queued", "running", "recovering"}
+_RUNNING_JOB_STATUSES = {"started", "running", "recovering"}
+_JOB_LEASE_SECONDS = float(os.environ.get("FFBRIDGE_JOB_LEASE_SECONDS", "20"))
+_JOB_HEARTBEAT_SECONDS = float(os.environ.get("FFBRIDGE_JOB_HEARTBEAT_SECONDS", "5"))
+_MAX_SESSION_PROCESS_ATTEMPTS = int(
+    os.environ.get("FFBRIDGE_MAX_SESSION_PROCESS_ATTEMPTS", "3")
+)
+_MAX_CONCURRENT_GENERATE_JOBS = int(
+    os.environ.get("FFBRIDGE_MAX_CONCURRENT_GENERATE_JOBS", "1")
+)
+_JOB_STORE_DIRNAME = "generate_jobs"
+if _JOB_HEARTBEAT_SECONDS <= 0 or _JOB_LEASE_SECONDS <= _JOB_HEARTBEAT_SECONDS:
+    raise ValueError(
+        "FFBRIDGE_JOB_LEASE_SECONDS must be greater than the positive "
+        "FFBRIDGE_JOB_HEARTBEAT_SECONDS."
+    )
+if _MAX_SESSION_PROCESS_ATTEMPTS < 1 or _MAX_CONCURRENT_GENERATE_JOBS < 1:
+    raise ValueError(
+        "FFBRIDGE_MAX_SESSION_PROCESS_ATTEMPTS and "
+        "FFBRIDGE_MAX_CONCURRENT_GENERATE_JOBS must be positive."
+    )
+
+_jobs_lock = threading.RLock()
 _jobs: Dict[str, GenerateJob] = {}
+_job_threads: Dict[str, threading.Thread] = {}
+_job_store_dirs: Dict[str, pathlib.Path] = {}
+_recovery_dirs: set[pathlib.Path] = set()
+_recovery_monitor: Optional[threading.Thread] = None
+_recovery_stop = threading.Event()
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_now_iso() -> str:
+    return _utc_now().isoformat(timespec="seconds")
+
+
+def _job_store_dir(cache_dir: Optional[pathlib.Path] = None) -> pathlib.Path:
+    directory = pathlib.Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
+    return directory / _JOB_STORE_DIRNAME
+
+
+def _valid_job_id(job_id: str) -> bool:
+    return bool(job_id) and all(character.isalnum() or character in "-_" for character in job_id)
+
+
+def _job_file(job_id: str, cache_dir: Optional[pathlib.Path] = None) -> pathlib.Path:
+    if not _valid_job_id(job_id):
+        raise KeyError(f"Unknown generate job_id {job_id}")
+    return _job_store_dir(cache_dir) / f"{job_id}.json"
+
+
+def _persist_job(job: GenerateJob, cache_dir: pathlib.Path) -> None:
+    now = _utc_now_iso()
+    with _jobs_lock:
+        job.updated_at = now
+        if job.status in _RUNNING_JOB_STATUSES and job.owner_id == _PROCESS_INSTANCE_ID:
+            job.heartbeat_at = now
+        payload = job.as_dict()
+        store_dir = _job_store_dir(cache_dir)
+        store_dir.mkdir(parents=True, exist_ok=True)
+        path = store_dir / f"{job.job_id}.json"
+        temporary = store_dir / (
+            f".{job.job_id}.{_PROCESS_INSTANCE_ID}.{threading.get_ident()}.tmp"
+        )
+        temporary.write_text(
+            json.dumps(payload, indent=2, default=str),
+            encoding="utf-8",
+        )
+        os.replace(temporary, path)
+        _jobs[job.job_id] = job
+        _job_store_dirs[job.job_id] = pathlib.Path(cache_dir)
+
+
+def _load_job_file(path: pathlib.Path) -> GenerateJob:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return GenerateJob(**payload)
+
+
+def _heartbeat_age_seconds(job: GenerateJob) -> float:
+    if not job.heartbeat_at:
+        return float("inf")
+    try:
+        heartbeat = datetime.fromisoformat(job.heartbeat_at)
+    except ValueError:
+        return float("inf")
+    if heartbeat.tzinfo is None:
+        heartbeat = heartbeat.replace(tzinfo=timezone.utc)
+    return max(0.0, (_utc_now() - heartbeat).total_seconds())
+
+
+def _remaining_session_ids(job: GenerateJob) -> List[str]:
+    completed = {
+        str(result.get("session_id"))
+        for result in job.results
+        if result.get("session_id") is not None
+    }
+    return [session_id for session_id in job.session_ids if session_id not in completed]
+
+
+def _thread_active(thread: Optional[threading.Thread]) -> bool:
+    return thread is not None and (thread.is_alive() or thread.ident is None)
 
 
 def generate_status(job_id: str) -> Dict[str, Any]:
-    with _jobs_lock:
-        job = _jobs.get(job_id)
-    if job is None:
+    if not _valid_job_id(job_id):
         raise KeyError(f"Unknown generate job_id {job_id}")
-    return job.as_dict()
+    with _jobs_lock:
+        memory_job = _jobs.get(job_id)
+        cache_dir = _job_store_dirs.get(job_id, DEFAULT_CACHE_DIR)
+        local_thread = _job_threads.get(job_id)
+    if (
+        memory_job is not None
+        and memory_job.owner_id == _PROCESS_INSTANCE_ID
+        and _thread_active(local_thread)
+    ):
+        return memory_job.as_dict()
 
+    path = _job_file(job_id, cache_dir)
+    if not path.is_file() and pathlib.Path(cache_dir) != DEFAULT_CACHE_DIR:
+        path = _job_file(job_id, DEFAULT_CACHE_DIR)
+    if not path.is_file():
+        raise KeyError(f"Unknown generate job_id {job_id}")
+    job = _load_job_file(path)
+    with _jobs_lock:
+        _jobs[job.job_id] = job
+        _job_store_dirs[job.job_id] = path.parent.parent
+    return job.as_dict()
 
 def _select_sessions_to_generate(
     resolved: ResolvedPlayer,
@@ -920,14 +1045,47 @@ def _session_result_row(
     }
 
 
-def _run_generate_job(job: GenerateJob, auth: LancelotAuth, cache_dir: pathlib.Path, force: bool) -> None:
-    job.status = "running"
-    already_done = len(job.results)
-    job.progress = {
-        "done": already_done,
-        "total": already_done + len(job.session_ids),
-        "current_session_id": None,
-    }
+def _job_heartbeat_loop(
+    job: GenerateJob,
+    cache_dir: pathlib.Path,
+    stop: threading.Event,
+) -> None:
+    while not stop.wait(_JOB_HEARTBEAT_SECONDS):
+        with _jobs_lock:
+            if job.status not in _RUNNING_JOB_STATUSES:
+                return
+        try:
+            _persist_job(job, cache_dir)
+        except Exception as exc:
+            _log(f"generate job {job.job_id} heartbeat failed: {exc}")
+
+
+def _run_generate_job(
+    job: GenerateJob,
+    auth: LancelotAuth,
+    cache_dir: pathlib.Path,
+    force: bool,
+) -> None:
+    heartbeat_stop = threading.Event()
+    heartbeat_thread = threading.Thread(
+        target=_job_heartbeat_loop,
+        args=(job, cache_dir, heartbeat_stop),
+        name=f"ffbridge-heartbeat-{job.job_id[:8]}",
+        daemon=True,
+    )
+    with _jobs_lock:
+        job.owner_id = _PROCESS_INSTANCE_ID
+        job.status = "running"
+        job.finished_at = None
+        job.error = None
+        total = job.progress.get("total") or (len(job.results) + len(job.session_ids))
+        job.progress = {
+            "done": len(job.results),
+            "total": total,
+            "current_session_id": job.progress.get("current_session_id"),
+        }
+    _persist_job(job, cache_dir)
+    heartbeat_thread.start()
     aborted = False
     try:
         listed = list_source_sessions(
@@ -936,8 +1094,36 @@ def _run_generate_job(job: GenerateJob, auth: LancelotAuth, cache_dir: pathlib.P
             cache_dir=cache_dir,
         )
         by_id = {s["session_id"]: s for s in listed["sessions"]}
-        for sid in tqdm(job.session_ids, desc="Generating postmortems"):
-            job.progress["current_session_id"] = sid
+        remaining = _remaining_session_ids(job)
+        for sid in tqdm(remaining, desc="Generating postmortems"):
+            with _jobs_lock:
+                prior_attempts = job.session_attempts.get(sid, 0)
+                job.progress["current_session_id"] = sid
+                if prior_attempts >= _MAX_SESSION_PROCESS_ATTEMPTS:
+                    err = (
+                        f"Session {sid} abandoned after {prior_attempts} interrupted "
+                        "process attempts."
+                    )
+                    if sid not in job.failed_session_ids:
+                        job.failed_session_ids.append(sid)
+                    job.results.append(
+                        _session_result_row(
+                            session_id=sid,
+                            player_id=job.player_id,
+                            status="error",
+                            error=err,
+                        )
+                    )
+                    job.progress["done"] = len(job.results)
+                    _persist_job(job, cache_dir)
+                    if not job.continue_on_error:
+                        job.status = "error"
+                        job.error = err
+                        aborted = True
+                        break
+                    continue
+                job.session_attempts[sid] = prior_attempts + 1
+            _persist_job(job, cache_dir)
             try:
                 try:
                     entry = by_id.get(sid)
@@ -952,34 +1138,39 @@ def _run_generate_job(job: GenerateJob, auth: LancelotAuth, cache_dir: pathlib.P
                         force=force,
                         skip_build_if_cached=True,
                     )
-                    job.results.append(
-                        _session_result_row(
-                            session_id=result["session_id"],
-                            player_id=result["player_id"],
-                            status=result["status"],
-                            cache_file=result["cache_file"],
-                            meta=result.get("meta"),
+                    with _jobs_lock:
+                        job.results.append(
+                            _session_result_row(
+                                session_id=result["session_id"],
+                                player_id=result["player_id"],
+                                status=result["status"],
+                                cache_file=result["cache_file"],
+                                meta=result.get("meta"),
+                            )
                         )
-                    )
                 except Exception as e:
                     err = str(e)
                     _log(f"generate job {job.job_id} session {sid} failed: {err}")
-                    job.failed_session_ids.append(sid)
-                    job.results.append(
-                        _session_result_row(
-                            session_id=sid,
-                            player_id=job.player_id,
-                            status="error",
-                            error=err,
+                    with _jobs_lock:
+                        if sid not in job.failed_session_ids:
+                            job.failed_session_ids.append(sid)
+                        job.results.append(
+                            _session_result_row(
+                                session_id=sid,
+                                player_id=job.player_id,
+                                status="error",
+                                error=err,
+                            )
                         )
-                    )
-                    if not job.continue_on_error:
-                        job.status = "error"
-                        job.error = err
-                        aborted = True
-                        break
+                        if not job.continue_on_error:
+                            job.status = "error"
+                            job.error = err
+                            aborted = True
+                            break
             finally:
-                job.progress["done"] = len(job.results)
+                with _jobs_lock:
+                    job.progress["done"] = len(job.results)
+                _persist_job(job, cache_dir)
         if not aborted:
             any_ok = any(r.get("status") in ("ok", "cached") for r in job.results)
             if job.failed_session_ids and any_ok:
@@ -994,8 +1185,224 @@ def _run_generate_job(job: GenerateJob, auth: LancelotAuth, cache_dir: pathlib.P
         job.error = str(e)
         _log(f"generate job {job.job_id} failed: {e}")
     finally:
-        job.finished_at = datetime.now().isoformat(timespec="seconds")
-        job.progress["current_session_id"] = None
+        heartbeat_stop.set()
+        with _jobs_lock:
+            job.finished_at = _utc_now_iso()
+            job.progress["current_session_id"] = None
+        _persist_job(job, cache_dir)
+
+
+def _start_job_thread(
+    job: GenerateJob,
+    auth: LancelotAuth,
+    cache_dir: pathlib.Path,
+) -> Optional[threading.Thread]:
+    thread = threading.Thread(
+        target=_run_generate_job,
+        args=(job, auth, cache_dir, job.force),
+        name=f"ffbridge-generate-{job.job_id[:8]}",
+        daemon=True,
+    )
+    with _jobs_lock:
+        running_threads = [
+            existing_thread
+            for job_id, existing_thread in _job_threads.items()
+            if job_id != job.job_id
+            and _thread_active(existing_thread)
+        ]
+        if len(running_threads) >= _MAX_CONCURRENT_GENERATE_JOBS:
+            job.status = "queued"
+            job.owner_id = None
+            job.heartbeat_at = None
+            _persist_job(job, cache_dir)
+            return None
+        _jobs[job.job_id] = job
+        _job_threads[job.job_id] = thread
+        _job_store_dirs[job.job_id] = pathlib.Path(cache_dir)
+    thread.start()
+    return thread
+
+
+def _load_jobs_from_store(cache_dir: pathlib.Path) -> List[GenerateJob]:
+    store_dir = _job_store_dir(cache_dir)
+    if not store_dir.is_dir():
+        return []
+    jobs: List[GenerateJob] = []
+    for path in store_dir.glob("*.json"):
+        try:
+            job = _load_job_file(path)
+        except Exception as exc:
+            _log(f"ignoring unreadable generate job {path.name}: {exc}")
+            continue
+        with _jobs_lock:
+            local_thread = _job_threads.get(job.job_id)
+            memory_job = _jobs.get(job.job_id)
+            if _thread_active(local_thread) and memory_job is not None:
+                job = memory_job
+            else:
+                _jobs[job.job_id] = job
+            _job_store_dirs[job.job_id] = pathlib.Path(cache_dir)
+        jobs.append(job)
+    return jobs
+
+
+def _recover_jobs_once(cache_dir: pathlib.Path) -> None:
+    jobs = _load_jobs_from_store(cache_dir)
+    foreign_live_job = any(
+        job.status in _RUNNING_JOB_STATUSES
+        and job.owner_id not in (None, _PROCESS_INSTANCE_ID)
+        and _heartbeat_age_seconds(job) < _JOB_LEASE_SECONDS
+        for job in jobs
+    )
+    if foreign_live_job:
+        return
+    for job in jobs:
+        if job.status not in _ACTIVE_JOB_STATUSES:
+            continue
+        with _jobs_lock:
+            local_thread = _job_threads.get(job.job_id)
+            running_threads = [
+                thread for thread in _job_threads.values() if _thread_active(thread)
+            ]
+        if _thread_active(local_thread):
+            continue
+        if len(running_threads) >= _MAX_CONCURRENT_GENERATE_JOBS:
+            return
+        if (
+            job.owner_id != _PROCESS_INSTANCE_ID
+            and _heartbeat_age_seconds(job) < _JOB_LEASE_SECONDS
+        ):
+            continue
+        try:
+            auth = ensure_lancelot_auth()
+            with _jobs_lock:
+                job.owner_id = _PROCESS_INSTANCE_ID
+                if job.status == "queued":
+                    job.status = "started"
+                else:
+                    job.status = "recovering"
+                    job.recovery_count += 1
+            _persist_job(job, cache_dir)
+            _log(
+                f"recovering generate job {job.job_id} "
+                f"remaining={len(_remaining_session_ids(job))}"
+            )
+            _start_job_thread(job, auth, cache_dir)
+        except Exception as exc:
+            with _jobs_lock:
+                job.error = f"Recovery deferred: {exc}"
+            try:
+                _persist_job(job, cache_dir)
+            except Exception as persist_exc:
+                _log(
+                    f"could not persist recovery error for job {job.job_id}: "
+                    f"{persist_exc}"
+                )
+            _log(f"could not recover generate job {job.job_id}: {exc}")
+
+
+def _recovery_monitor_loop() -> None:
+    while not _recovery_stop.wait(_JOB_HEARTBEAT_SECONDS):
+        with _jobs_lock:
+            directories = list(_recovery_dirs)
+        for directory in directories:
+            _recover_jobs_once(directory)
+
+
+def initialize_generate_jobs(
+    cache_dir: Optional[pathlib.Path] = None,
+) -> None:
+    global _recovery_monitor
+    directory = pathlib.Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
+    _job_store_dir(directory).mkdir(parents=True, exist_ok=True)
+    with _jobs_lock:
+        _recovery_dirs.add(directory)
+    _load_jobs_from_store(directory)
+    with _jobs_lock:
+        if _recovery_monitor is None or not _recovery_monitor.is_alive():
+            _recovery_stop.clear()
+            _recovery_monitor = threading.Thread(
+                target=_recovery_monitor_loop,
+                name="ffbridge-job-recovery",
+                daemon=True,
+            )
+            _recovery_monitor.start()
+
+
+def shutdown_generate_jobs() -> None:
+    _recovery_stop.set()
+
+
+def _active_job_for_player(
+    player_id: str,
+    cache_dir: pathlib.Path,
+) -> Optional[GenerateJob]:
+    active = [
+        job
+        for job in _load_jobs_from_store(cache_dir)
+        if job.player_id == player_id and job.status in _ACTIVE_JOB_STATUSES
+    ]
+    if not active:
+        return None
+    return max(active, key=lambda job: job.updated_at or job.started_at)
+
+
+def generate_health(cache_dir: Optional[pathlib.Path] = None) -> Dict[str, Any]:
+    directory = pathlib.Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
+    jobs = _load_jobs_from_store(directory)
+    active = [job for job in jobs if job.status in _ACTIVE_JOB_STATUSES]
+    running = [job for job in active if job.status in _RUNNING_JOB_STATUSES]
+    queued = [job for job in active if job.status == "queued"]
+    latest = max(jobs, key=lambda job: job.updated_at or job.started_at) if jobs else None
+    errors = [
+        job
+        for job in jobs
+        if job.error or any(result.get("error") for result in job.results)
+    ]
+    latest_error = (
+        max(errors, key=lambda job: job.updated_at or job.started_at)
+        if errors
+        else None
+    )
+    latest_error_detail = latest_error.error if latest_error else None
+    if latest_error is not None and latest_error_detail is None:
+        result_errors = [
+            result.get("error")
+            for result in latest_error.results
+            if result.get("error")
+        ]
+        latest_error_detail = result_errors[-1] if result_errors else None
+    parquet_files = list(directory.glob("df-*.parquet")) if directory.is_dir() else []
+    latest_parquet = (
+        max(parquet_files, key=lambda path: path.stat().st_mtime)
+        if parquet_files
+        else None
+    )
+    return {
+        "process_id": _PROCESS_INSTANCE_ID,
+        "jobs_running": len(running),
+        "jobs_queued": len(queued),
+        "jobs_local_running": sum(
+            1 for job in running if job.owner_id == _PROCESS_INSTANCE_ID
+        ),
+        "jobs_recovery_pending": sum(
+            1
+            for job in active
+            if job.owner_id != _PROCESS_INSTANCE_ID
+            and _heartbeat_age_seconds(job) < _JOB_LEASE_SECONDS
+        ),
+        "last_job_id": latest.job_id if latest else None,
+        "last_job_status": latest.status if latest else None,
+        "last_error": latest_error_detail,
+        "last_error_job_id": latest_error.job_id if latest_error else None,
+        "last_parquet_write_at": (
+            datetime.fromtimestamp(latest_parquet.stat().st_mtime, tz=timezone.utc).isoformat(
+                timespec="seconds"
+            )
+            if latest_parquet
+            else None
+        ),
+    }
 
 
 def generate_postmortems(
@@ -1016,8 +1423,31 @@ def generate_postmortems(
     started = datetime.now()
     _log(f"start generate player={player_id} session={session_id} at {started.isoformat(timespec='seconds')}")
     directory = pathlib.Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
+    initialize_generate_jobs(directory)
     auth = ensure_lancelot_auth()
     resolved = resolve_player(player_id, token=auth.token)
+    active_job = _active_job_for_player(resolved.lancelot_id, directory)
+    if active_job is not None:
+        pending = _remaining_session_ids(active_job)
+        _log(
+            f"reuse generate job {active_job.job_id} player={resolved.lancelot_id} "
+            f"pending={len(pending)}"
+        )
+        return {
+            "player_id": active_job.player_id,
+            "player_license_number": active_job.player_license_number,
+            "requested_id": resolved.requested_id,
+            "status": active_job.status,
+            "job_id": active_job.job_id,
+            "session_id": pending[0] if len(pending) == 1 else None,
+            "cache_file": None,
+            "sessions": list(active_job.results),
+            "pending_session_ids": pending,
+            "count": active_job.progress.get(
+                "total", len(active_job.results) + len(pending)
+            ),
+            "reused_job": True,
+        }
     if continue_on_error is None:
         continue_on_error = date_from is not None or date_to is not None
     sessions = _select_sessions_to_generate(
@@ -1064,27 +1494,20 @@ def generate_postmortems(
         requested_id=resolved.requested_id,
         session_ids=[s["session_id"] for s in to_build],
         force=force,
-        started_at=started.isoformat(timespec="seconds"),
+        started_at=_utc_now_iso(),
         continue_on_error=bool(continue_on_error),
         results=list(cached_results),
         progress={"done": len(cached_results), "total": len(cached_results) + len(to_build)},
+        owner_id=_PROCESS_INSTANCE_ID,
     )
-    with _jobs_lock:
-        _jobs[job_id] = job
-
-    thread = threading.Thread(
-        target=_run_generate_job,
-        args=(job, auth, directory, force),
-        name=f"ffbridge-generate-{job_id[:8]}",
-        daemon=True,
-    )
-    thread.start()
+    _persist_job(job, directory)
+    _start_job_thread(job, auth, directory)
     _log(f"started generate job {job_id} sessions={job.session_ids}")
     return {
         "player_id": resolved.lancelot_id,
         "player_license_number": resolved.license_number,
         "requested_id": resolved.requested_id,
-        "status": "started",
+        "status": job.status,
         "job_id": job_id,
         "session_id": job.session_ids[0] if len(job.session_ids) == 1 else None,
         "cache_file": None,

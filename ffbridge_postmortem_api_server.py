@@ -9,6 +9,7 @@ The MCP server and Streamlit app are HTTP clients of this API.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 import os
 from typing import Optional
 
@@ -21,6 +22,14 @@ import ffbridge_postmortem_service as svc
 
 FFBRIDGE_POSTMORTEM_API_PORT = int(os.environ.get("FFBRIDGE_POSTMORTEM_API_PORT", "8517"))
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    create.initialize_generate_jobs(svc.CACHE_DIR)
+    yield
+    create.shutdown_generate_jobs()
+
+
 app = FastAPI(
     title="FFBridge Postmortem API",
     description=(
@@ -28,6 +37,7 @@ app = FastAPI(
         "(same path Streamlit used to run in-process)."
     ),
     version="1.0.0",
+    lifespan=lifespan,
 )
 app.add_middleware(
     CORSMiddleware,
@@ -54,14 +64,16 @@ async def value_error_handler(request, exc: ValueError) -> JSONResponse:
 
 @app.get("/health")
 def health() -> dict:
-    """Cheap readiness probe: no cache scan, authentication, or Lancelot call."""
-    return {
+    """Readiness and persisted job diagnostics without authentication or Lancelot calls."""
+    payload = {
         "ok": True,
         "sidecar_up": True,
         "status": "ok",
         "service": "ffbridge-postmortem-api",
         "detail": "ready",
     }
+    payload.update(create.generate_health(svc.CACHE_DIR))
+    return payload
 
 
 @app.get("/info")

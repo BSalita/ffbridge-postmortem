@@ -12,7 +12,12 @@ class WriterHealthTests(unittest.TestCase):
     @patch.object(api.requests, "request")
     def test_ready_writer_returns_structured_health(self, request):
         response = Mock(ok=True, status_code=200)
-        response.json.return_value = {"detail": "ready"}
+        response.json.return_value = {
+            "detail": "ready",
+            "jobs_running": 1,
+            "last_job_id": "job-123",
+            "last_parquet_write_at": "2026-08-23T18:15:00+00:00",
+        }
         request.return_value = response
 
         result = api.writer_health()
@@ -21,6 +26,12 @@ class WriterHealthTests(unittest.TestCase):
         self.assertTrue(result["sidecar_up"])
         self.assertEqual(result["http_status"], 200)
         self.assertEqual(result["detail"], "ready")
+        self.assertEqual(result["jobs_running"], 1)
+        self.assertEqual(result["last_job_id"], "job-123")
+        self.assertEqual(
+            result["last_parquet_write_at"],
+            "2026-08-23T18:15:00+00:00",
+        )
         self.assertLess(result["latency_ms"], 2000)
         request.assert_called_once_with(
             "GET",
@@ -67,13 +78,31 @@ class WriterHealthTests(unittest.TestCase):
         self.assertEqual(result["reason"], "sidecar_down")
         self.assertEqual(result["detail"], "connection refused")
 
+    @patch.object(
+        api_server.create,
+        "generate_health",
+        return_value={
+            "jobs_running": 1,
+            "last_job_id": "job-123",
+            "last_error": None,
+            "last_parquet_write_at": "2026-08-23T18:15:00+00:00",
+        },
+    )
     @patch.object(api_server.svc, "dataset_info")
-    def test_api_health_has_no_cache_or_lancelot_work(self, dataset_info):
+    def test_api_health_has_job_diagnostics_without_lancelot_work(
+        self,
+        dataset_info,
+        generate_health,
+    ):
         result = api_server.health()
 
         self.assertTrue(result["ok"])
         self.assertTrue(result["sidecar_up"])
         self.assertEqual(result["detail"], "ready")
+        self.assertEqual(result["jobs_running"], 1)
+        self.assertEqual(result["last_job_id"], "job-123")
+        self.assertIsNone(result["last_error"])
+        generate_health.assert_called_once_with(api_server.svc.CACHE_DIR)
         dataset_info.assert_not_called()
 
 

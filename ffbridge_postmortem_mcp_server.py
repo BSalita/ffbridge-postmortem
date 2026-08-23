@@ -75,8 +75,8 @@ def ffbridge_postmortem_dataset_info() -> Dict[str, Any]:
 @mcp.tool()
 def ffbridge_postmortem_writer_health() -> Dict[str, Any]:
     """Cheap read-only writer readiness probe. Requires no player_id and does
-    not authenticate, call Lancelot, scan the cache, or start generation.
-    Safe to poll; returns ok, sidecar_up, http_status, latency_ms, and detail."""
+    not authenticate, call Lancelot, or start generation. Safe to poll; also
+    reports running jobs, the last job/error, and last parquet write time."""
     return api.writer_health()
 
 
@@ -172,7 +172,7 @@ def ffbridge_postmortem_generate(
     force rebuilds even if a cache file exists.
     continue_on_error defaults to true for date-range jobs: a bad session
     is recorded as status=error and the job continues.
-    Slow work returns status=started and a job_id; poll
+    Slow work returns status=started or queued and a durable job_id; poll
     ffbridge_postmortem_generate_status (includes failed_session_ids).
     """
     return _writer_tool(

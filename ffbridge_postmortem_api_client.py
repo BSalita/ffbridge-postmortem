@@ -100,13 +100,15 @@ def writer_health(timeout_s: float = _HEALTH_TIMEOUT_S) -> Dict[str, Any]:
             payload = response.json()
         except ValueError:
             payload = {}
-        return {
+        result = dict(payload)
+        result.update({
             "ok": True,
             "sidecar_up": True,
             "http_status": response.status_code,
             "latency_ms": round((time.perf_counter() - started) * 1000, 1),
             "detail": payload.get("detail", "ready"),
-        }
+        })
+        return result
     except FfbridgeApiClientError as exc:
         return {
             "ok": False,
@@ -190,7 +192,7 @@ def generate_and_wait(
         continue_on_error=continue_on_error,
     )
     job_id = payload.get("job_id")
-    if payload.get("status") == "started" and job_id:
+    if payload.get("status") in ("started", "queued", "running", "recovering") and job_id:
         return wait_for_generate(job_id)
     return payload
 

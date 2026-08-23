@@ -1,7 +1,7 @@
 import pathlib
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import polars as pl
 
@@ -9,6 +9,13 @@ import ffbridge_postmortem_create as create
 
 
 class GenerateJobTests(unittest.TestCase):
+    def tearDown(self):
+        with create._jobs_lock:
+            for job_id in ("test-job", "other-job"):
+                create._jobs.pop(job_id, None)
+                create._job_threads.pop(job_id, None)
+                create._job_store_dirs.pop(job_id, None)
+
     def _job(self, *, continue_on_error: bool = True) -> create.GenerateJob:
         return create.GenerateJob(
             job_id="test-job",
@@ -42,6 +49,7 @@ class GenerateJobTests(unittest.TestCase):
             patch.object(create, "list_source_sessions", return_value=sessions),
             patch.object(create, "create_lancelot_postmortem", side_effect=self._create_result),
             patch.object(create, "tqdm", side_effect=lambda values, **_kwargs: values),
+            patch.object(create, "_persist_job"),
         ):
             create._run_generate_job(
                 job,
@@ -65,6 +73,7 @@ class GenerateJobTests(unittest.TestCase):
             patch.object(create, "list_source_sessions", return_value=sessions),
             patch.object(create, "create_lancelot_postmortem", side_effect=self._create_result),
             patch.object(create, "tqdm", side_effect=lambda values, **_kwargs: values),
+            patch.object(create, "_persist_job"),
         ):
             create._run_generate_job(
                 job,
@@ -81,7 +90,10 @@ class GenerateJobTests(unittest.TestCase):
     def test_session_list_failure_finishes_job_as_error(self):
         job = self._job()
 
-        with patch.object(create, "list_source_sessions", side_effect=RuntimeError("API unavailable")):
+        with (
+            patch.object(create, "list_source_sessions", side_effect=RuntimeError("API unavailable")),
+            patch.object(create, "_persist_job"),
+        ):
             create._run_generate_job(
                 job,
                 create.LancelotAuth("token", "246273", "9500754"),
@@ -93,6 +105,135 @@ class GenerateJobTests(unittest.TestCase):
         self.assertEqual(job.error, "API unavailable")
         self.assertIsNotNone(job.finished_at)
         self.assertIsNone(job.progress["current_session_id"])
+
+    def test_generate_status_loads_job_after_memory_store_is_cleared(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = pathlib.Path(tmp)
+            job = self._job()
+            job.status = "running"
+            job.owner_id = "previous-process"
+            create._persist_job(job, cache_dir)
+            with create._jobs_lock:
+                create._jobs.pop(job.job_id, None)
+                create._job_store_dirs.pop(job.job_id, None)
+
+            with patch.object(create, "DEFAULT_CACHE_DIR", cache_dir):
+                result = create.generate_status(job.job_id)
+
+            self.assertEqual(result["job_id"], job.job_id)
+            self.assertEqual(result["status"], "running")
+            self.assertEqual(result["owner_id"], "previous-process")
+
+    def test_stale_job_is_claimed_for_recovery(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = pathlib.Path(tmp)
+            job = self._job()
+            job.status = "running"
+            job.owner_id = "dead-process"
+            job.heartbeat_at = "2020-01-01T00:00:00+00:00"
+            create._persist_job(job, cache_dir)
+            with create._jobs_lock:
+                create._jobs.pop(job.job_id, None)
+                create._job_threads.pop(job.job_id, None)
+
+            auth = create.LancelotAuth("token", "246273", "9500754")
+            with (
+                patch.object(create, "ensure_lancelot_auth", return_value=auth),
+                patch.object(create, "_start_job_thread") as start_job,
+            ):
+                create._recover_jobs_once(cache_dir)
+
+            recovered = create._load_job_file(
+                cache_dir / create._JOB_STORE_DIRNAME / f"{job.job_id}.json"
+            )
+            self.assertEqual(recovered.status, "recovering")
+            self.assertEqual(recovered.owner_id, create._PROCESS_INSTANCE_ID)
+            self.assertEqual(recovered.recovery_count, 1)
+            start_job.assert_called_once()
+
+    def test_repeatedly_interrupted_session_is_skipped_and_range_continues(self):
+        job = self._job()
+        job.session_attempts["bad"] = create._MAX_SESSION_PROCESS_ATTEMPTS
+        sessions = {"sessions": [{"session_id": "bad"}, {"session_id": "good"}]}
+
+        with (
+            patch.object(create, "list_source_sessions", return_value=sessions),
+            patch.object(
+                create,
+                "create_lancelot_postmortem",
+                side_effect=self._create_result,
+            ) as build,
+            patch.object(create, "tqdm", side_effect=lambda values, **_kwargs: values),
+            patch.object(create, "_persist_job"),
+        ):
+            create._run_generate_job(
+                job,
+                create.LancelotAuth("token", "246273", "9500754"),
+                pathlib.Path("cache"),
+                False,
+            )
+
+        self.assertEqual(job.status, "completed")
+        self.assertEqual(job.failed_session_ids, ["bad"])
+        self.assertEqual([result["status"] for result in job.results], ["error", "ok"])
+        build.assert_called_once()
+        self.assertEqual(build.call_args.args[1], "good")
+
+    def test_second_range_job_is_durably_queued(self):
+        job = self._job()
+        job.job_id = "other-job"
+        running_thread = Mock()
+        running_thread.is_alive.return_value = True
+        with create._jobs_lock:
+            create._job_threads["test-job"] = running_thread
+
+        with patch.object(create, "_persist_job") as persist:
+            thread = create._start_job_thread(
+                job,
+                create.LancelotAuth("token", "246273", "9500754"),
+                pathlib.Path("cache"),
+            )
+
+        self.assertIsNone(thread)
+        self.assertEqual(job.status, "queued")
+        self.assertIsNone(job.owner_id)
+        persist.assert_called_once_with(job, pathlib.Path("cache"))
+
+    def test_generate_aliases_reuse_same_canonical_player_job(self):
+        job = self._job()
+        job.player_id = "136662"
+        job.player_license_number = "4958370"
+        job.session_ids = ["300001"]
+        job.progress = {"done": 0, "total": 1}
+        resolved = create.ResolvedPlayer("136662", "4958370", "", "322582")
+        identifiers = [
+            "lancelot:136662",
+            "classic:322582",
+            "license:4958370",
+        ]
+
+        with (
+            patch.object(create, "initialize_generate_jobs"),
+            patch.object(
+                create,
+                "ensure_lancelot_auth",
+                return_value=create.LancelotAuth("token", "246273", "9500754"),
+            ),
+            patch.object(create, "resolve_player", return_value=resolved),
+            patch.object(create, "_active_job_for_player", return_value=job),
+        ):
+            results = [
+                create.generate_postmortems(
+                    identifier,
+                    date_from="2025-01-01",
+                    date_to="2026-12-31",
+                )
+                for identifier in identifiers
+            ]
+
+        self.assertEqual({result["player_id"] for result in results}, {"136662"})
+        self.assertEqual({result["job_id"] for result in results}, {"test-job"})
+        self.assertTrue(all(result["reused_job"] for result in results))
 
 
 class OtherPlayerSessionTests(unittest.TestCase):
