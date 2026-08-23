@@ -54,8 +54,14 @@ async def value_error_handler(request, exc: ValueError) -> JSONResponse:
 
 @app.get("/health")
 def health() -> dict:
-    info = svc.dataset_info()
-    return {"status": "ok", "service": "ffbridge-postmortem-api", **info}
+    """Cheap readiness probe: no cache scan, authentication, or Lancelot call."""
+    return {
+        "ok": True,
+        "sidecar_up": True,
+        "status": "ok",
+        "service": "ffbridge-postmortem-api",
+        "detail": "ready",
+    }
 
 
 @app.get("/info")

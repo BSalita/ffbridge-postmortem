@@ -114,13 +114,15 @@ def dataset_info() -> Dict[str, Any]:
             "tool": "ffbridge_postmortem_generate",
             "list_source_sessions_tool": "ffbridge_postmortem_list_source_sessions",
             "status_tool": "ffbridge_postmortem_generate_status",
+            "writer_health_tool": "ffbridge_postmortem_writer_health",
             "player_id": "Lancelot person id or FFBridge license number (e.g. 246273 or 9500754)",
         },
         "note": (
             "Postmortems are produced on demand by ffbridge_postmortem_generate "
             "(same Lancelot + augment path as Streamlit) and written to this "
             "cache. List playable sessions with "
-            "ffbridge_postmortem_list_source_sessions. Streamlit "
+            "ffbridge_postmortem_list_source_sessions. Check writer readiness "
+            "without generating with ffbridge_postmortem_writer_health. Streamlit "
             "(https://ffbridge.postmortem.chat) reads and writes the same cache."
         ),
     }

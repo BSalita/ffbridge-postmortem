@@ -18,22 +18,31 @@ FFBRIDGE_POSTMORTEM_API_BASE_URL = os.environ.get(
     "FFBRIDGE_POSTMORTEM_API_BASE_URL", "http://127.0.0.1:8517"
 ).rstrip("/")
 _TIMEOUT_S = 300
+_HEALTH_TIMEOUT_S = 1.5
 _JOB_POLL_S = 2.0
 
 
 class FfbridgeApiClientError(RuntimeError):
-    def __init__(self, detail: str, hint: Optional[str] = None, status_code: Optional[int] = None):
+    def __init__(
+        self,
+        detail: str,
+        hint: Optional[str] = None,
+        status_code: Optional[int] = None,
+        reason: str = "api_error",
+    ):
         message = detail if not hint else f"{detail} ({hint})"
         super().__init__(message)
         self.detail = detail
         self.hint = hint
         self.status_code = status_code
+        self.reason = reason
 
 
 def _request(
     method: str,
     path: str,
     params: Optional[Dict[str, Any]] = None,
+    timeout_s: float = _TIMEOUT_S,
 ) -> requests.Response:
     url = f"{FFBRIDGE_POSTMORTEM_API_BASE_URL}{path}"
     try:
@@ -41,22 +50,31 @@ def _request(
             method,
             url,
             params={k: v for k, v in (params or {}).items() if v is not None},
-            timeout=_TIMEOUT_S,
+            timeout=timeout_s,
         )
+    except requests.Timeout as exc:
+        raise FfbridgeApiClientError(
+            f"FFBridge writer timed out at {FFBRIDGE_POSTMORTEM_API_BASE_URL}",
+            hint="Check the writer process on port 8517.",
+            reason="timeout",
+        ) from exc
     except requests.RequestException as exc:
         raise FfbridgeApiClientError(
-            f"FFBridge postmortem API unreachable at {FFBRIDGE_POSTMORTEM_API_BASE_URL}: {exc}",
-            hint="Start it with: python ffbridge_postmortem_api_server.py",
+            f"FFBridge writer unreachable at {FFBRIDGE_POSTMORTEM_API_BASE_URL}: {exc}",
+            hint="Start or restart the supervised writer process on port 8517.",
+            reason="sidecar_down",
         ) from exc
     if not resp.ok:
         try:
             body = resp.json()
         except ValueError:
             body = {}
+        reason = "sidecar_error" if resp.status_code >= 500 else "api_error"
         raise FfbridgeApiClientError(
             body.get("detail") or f"{resp.status_code} from {url}",
             hint=body.get("hint"),
             status_code=resp.status_code,
+            reason=reason,
         )
     return resp
 
@@ -71,6 +89,34 @@ def _post_json(path: str, params: Optional[Dict[str, Any]] = None) -> Any:
 
 def dataset_info() -> Dict[str, Any]:
     return _get_json("/info")
+
+
+def writer_health(timeout_s: float = _HEALTH_TIMEOUT_S) -> Dict[str, Any]:
+    """Probe the writer without authentication, Lancelot calls, or generation."""
+    started = time.perf_counter()
+    try:
+        response = _request("GET", "/health", timeout_s=timeout_s)
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = {}
+        return {
+            "ok": True,
+            "sidecar_up": True,
+            "http_status": response.status_code,
+            "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+            "detail": payload.get("detail", "ready"),
+        }
+    except FfbridgeApiClientError as exc:
+        return {
+            "ok": False,
+            "sidecar_up": False,
+            "http_status": exc.status_code,
+            "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+            "detail": exc.reason,
+            "error": exc.detail,
+            "hint": exc.hint,
+        }
 
 
 def resolve_player(player_id: str) -> Dict[str, Any]:

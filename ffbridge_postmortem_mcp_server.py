@@ -25,31 +25,43 @@ FFBRIDGE_POSTMORTEM_MCP_PORT = int(os.environ.get("FFBRIDGE_POSTMORTEM_MCP_PORT"
 mcp = MCPServer("ffbridge-postmortem")
 
 
+def _client_error_payload(exc: api.FfbridgeApiClientError) -> Dict[str, Any]:
+    return {
+        "error": exc.detail,
+        "hint": exc.hint,
+        "status_code": exc.status_code,
+        "reason": exc.reason,
+    }
+
+
 def _tool(fn, *args, **kwargs) -> Dict[str, Any]:
     try:
         return fn(*args, **kwargs)
     except api.FfbridgeApiClientError as exc:
-        return {
-            "error": exc.detail,
-            "hint": exc.hint,
-            "status_code": exc.status_code,
-        }
+        return _client_error_payload(exc)
+
+
+def _writer_tool(fn, *args, **kwargs) -> Dict[str, Any]:
+    """Return a distinct, actionable error when the writer cannot serve."""
+    try:
+        return fn(*args, **kwargs)
+    except api.FfbridgeApiClientError as exc:
+        if exc.reason in ("sidecar_down", "sidecar_error", "timeout"):
+            return {
+                "ok": False,
+                "error": "writer_unavailable",
+                "reason": exc.reason,
+                "detail": exc.detail,
+                "hint": exc.hint,
+                "http_status": exc.status_code,
+            }
+        return _client_error_payload(exc)
 
 
 @mcp.custom_route("/health", methods=["GET"])
 async def health(request: Request) -> JSONResponse:
-    try:
-        payload = api.dataset_info()
-        status = "ok"
-    except api.FfbridgeApiClientError as exc:
-        payload = {"error": exc.detail, "hint": exc.hint}
-        status = "error"
     return JSONResponse(
-        {
-            "status": status,
-            "service": "ffbridge-postmortem-mcp",
-            "api": payload,
-        }
+        {"service": "ffbridge-postmortem-mcp", **api.writer_health()}
     )
 
 
@@ -58,6 +70,14 @@ def ffbridge_postmortem_dataset_info() -> Dict[str, Any]:
     """Summary of the FFBridge postmortem cache and how to generate new
     postmortems with ffbridge_postmortem_generate (same path as Streamlit)."""
     return _tool(api.dataset_info)
+
+
+@mcp.tool()
+def ffbridge_postmortem_writer_health() -> Dict[str, Any]:
+    """Cheap read-only writer readiness probe. Requires no player_id and does
+    not authenticate, call Lancelot, scan the cache, or start generation.
+    Safe to poll; returns ok, sidecar_up, http_status, latency_ms, and detail."""
+    return api.writer_health()
 
 
 @mcp.tool()
@@ -129,7 +149,7 @@ def ffbridge_postmortem_list_source_sessions(
     date_to are optional YYYY-MM-DD filters. Each row has session_id, date,
     club, and already_cached.
     """
-    return _tool(api.list_source_sessions, player_id, date_from, date_to)
+    return _writer_tool(api.list_source_sessions, player_id, date_from, date_to)
 
 
 @mcp.tool()
@@ -153,7 +173,7 @@ def ffbridge_postmortem_generate(
     Slow work returns status=started and a job_id; poll
     ffbridge_postmortem_generate_status (includes failed_session_ids).
     """
-    return _tool(
+    return _writer_tool(
         api.generate,
         player_id,
         session_id,
@@ -169,7 +189,7 @@ def ffbridge_postmortem_generate_status(job_id: str) -> Dict[str, Any]:
     """Poll a ffbridge_postmortem_generate job: status, progress,
     failed_session_ids, and per-session
     {session_id, player_id, status, cache_file, error} results."""
-    return _tool(api.generate_status, job_id)
+    return _writer_tool(api.generate_status, job_id)
 
 
 if __name__ == "__main__":
