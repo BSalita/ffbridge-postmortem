@@ -139,6 +139,7 @@ def ffbridge_postmortem_generate(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     force: bool = False,
+    continue_on_error: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Generate postmortem parquet(s) via the FFBridge postmortem API
     (same Lancelot + augment path as Streamlit).
@@ -147,16 +148,27 @@ def ffbridge_postmortem_generate(
     session_id: omit (or 'latest') for the most recent game; set with
     date_from / date_to (YYYY-MM-DD) to generate a range.
     force rebuilds even if a cache file exists.
+    continue_on_error defaults to true for date-range jobs: a bad session
+    is recorded as status=error and the job continues.
     Slow work returns status=started and a job_id; poll
-    ffbridge_postmortem_generate_status.
+    ffbridge_postmortem_generate_status (includes failed_session_ids).
     """
-    return _tool(api.generate, player_id, session_id, date_from, date_to, force)
+    return _tool(
+        api.generate,
+        player_id,
+        session_id,
+        date_from,
+        date_to,
+        force,
+        continue_on_error,
+    )
 
 
 @mcp.tool()
 def ffbridge_postmortem_generate_status(job_id: str) -> Dict[str, Any]:
-    """Poll a ffbridge_postmortem_generate job: status, progress, and
-    per-session {session_id, player_id, status, cache_file} results."""
+    """Poll a ffbridge_postmortem_generate job: status, progress,
+    failed_session_ids, and per-session
+    {session_id, player_id, status, cache_file, error} results."""
     return _tool(api.generate_status, job_id)
 
 

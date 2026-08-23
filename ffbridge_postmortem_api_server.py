@@ -100,6 +100,10 @@ def generate(
     date_from: Optional[str] = Query(None, description="YYYY-MM-DD"),
     date_to: Optional[str] = Query(None, description="YYYY-MM-DD"),
     force: bool = Query(False),
+    continue_on_error: Optional[bool] = Query(
+        None,
+        description="Default true for date-range jobs; one bad session does not abort the job.",
+    ),
 ) -> dict:
     return svc.generate_postmortems(
         player_id,
@@ -107,6 +111,7 @@ def generate(
         date_from=date_from,
         date_to=date_to,
         force=force,
+        continue_on_error=continue_on_error,
     )
 
 

@@ -738,12 +738,13 @@ class GenerateJob:
     started_at: str
     finished_at: Optional[str] = None
     error: Optional[str] = None
+    continue_on_error: bool = True
     results: List[Dict[str, Any]] = field(default_factory=list)
+    failed_session_ids: List[str] = field(default_factory=list)
     progress: Dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> Dict[str, Any]:
-        payload = asdict(self)
-        return payload
+        return asdict(self)
 
 
 _jobs_lock = threading.Lock()
@@ -799,42 +800,94 @@ def _select_sessions_to_generate(
     return sessions
 
 
+def _session_result_row(
+    *,
+    session_id: str,
+    player_id: str,
+    status: str,
+    cache_file: Optional[str] = None,
+    error: Optional[str] = None,
+    meta: Any = None,
+) -> Dict[str, Any]:
+    return {
+        "session_id": session_id,
+        "player_id": player_id,
+        "status": status,
+        "cache_file": cache_file,
+        "error": error,
+        "meta": asdict(meta) if meta is not None and not isinstance(meta, dict) else meta,
+    }
+
+
 def _run_generate_job(job: GenerateJob, auth: LancelotAuth, cache_dir: pathlib.Path, force: bool) -> None:
     job.status = "running"
-    job.progress = {"done": 0, "total": len(job.session_ids), "current_session_id": None}
-    listed = list_source_sessions(
-        job.player_id,
-        token=auth.token,
-        cache_dir=cache_dir,
-    )
-    by_id = {s["session_id"]: s for s in listed["sessions"]}
+    already_done = len(job.results)
+    job.progress = {
+        "done": already_done,
+        "total": already_done + len(job.session_ids),
+        "current_session_id": None,
+    }
+    aborted = False
     try:
+        listed = list_source_sessions(
+            job.player_id,
+            token=auth.token,
+            cache_dir=cache_dir,
+        )
+        by_id = {s["session_id"]: s for s in listed["sessions"]}
         for sid in tqdm(job.session_ids, desc="Generating postmortems"):
             job.progress["current_session_id"] = sid
-            entry = by_id.get(sid)
-            if entry is None:
-                raise ValueError(f"Session {sid} disappeared from the Lancelot game list.")
-            result = create_lancelot_postmortem(
-                job.player_id,
-                sid,
-                entry,
-                token=auth.token,
-                cache_dir=cache_dir,
-                force=force,
-                skip_build_if_cached=True,
-            )
-            meta = result.get("meta")
-            job.results.append(
-                {
-                    "session_id": result["session_id"],
-                    "player_id": result["player_id"],
-                    "status": result["status"],
-                    "cache_file": result["cache_file"],
-                    "meta": asdict(meta) if meta is not None else None,
-                }
-            )
-            job.progress["done"] = len(job.results)
-        job.status = "ok"
+            try:
+                try:
+                    entry = by_id.get(sid)
+                    if entry is None:
+                        raise ValueError(f"Session {sid} disappeared from the Lancelot game list.")
+                    result = create_lancelot_postmortem(
+                        job.player_id,
+                        sid,
+                        entry,
+                        token=auth.token,
+                        cache_dir=cache_dir,
+                        force=force,
+                        skip_build_if_cached=True,
+                    )
+                    job.results.append(
+                        _session_result_row(
+                            session_id=result["session_id"],
+                            player_id=result["player_id"],
+                            status=result["status"],
+                            cache_file=result["cache_file"],
+                            meta=result.get("meta"),
+                        )
+                    )
+                except Exception as e:
+                    err = str(e)
+                    _log(f"generate job {job.job_id} session {sid} failed: {err}")
+                    job.failed_session_ids.append(sid)
+                    job.results.append(
+                        _session_result_row(
+                            session_id=sid,
+                            player_id=job.player_id,
+                            status="error",
+                            error=err,
+                        )
+                    )
+                    if not job.continue_on_error:
+                        job.status = "error"
+                        job.error = err
+                        aborted = True
+                        break
+            finally:
+                job.progress["done"] = len(job.results)
+        if not aborted:
+            any_ok = any(r.get("status") in ("ok", "cached") for r in job.results)
+            if job.failed_session_ids and any_ok:
+                job.status = "completed"
+            elif any_ok:
+                job.status = "ok"
+            else:
+                job.status = "error"
+                job.error = job.error or "All sessions failed."
     except Exception as e:
         job.status = "error"
         job.error = str(e)
@@ -850,16 +903,23 @@ def generate_postmortems(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     force: bool = False,
+    continue_on_error: Optional[bool] = None,
     *,
     cache_dir: Optional[pathlib.Path] = None,
 ) -> Dict[str, Any]:
-    """Create postmortem parquet(s). Returns immediately with a job_id when work is needed."""
+    """Create postmortem parquet(s). Returns immediately with a job_id when work is needed.
+
+    continue_on_error defaults to True for date-range jobs and False for a
+    single session_id so one bad club result does not abort a 2025–2026 run.
+    """
     started = datetime.now()
     _log(f"start generate player={player_id} session={session_id} at {started.isoformat(timespec='seconds')}")
     directory = pathlib.Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
     auth = ensure_lancelot_auth()
     resolved = resolve_player(player_id, token=auth.token)
     _require_logged_in_player(resolved, auth)
+    if continue_on_error is None:
+        continue_on_error = date_from is not None or date_to is not None
     sessions = _select_sessions_to_generate(
         resolved, auth, session_id, date_from, date_to, directory
     )
@@ -905,6 +965,7 @@ def generate_postmortems(
         session_ids=[s["session_id"] for s in to_build],
         force=force,
         started_at=started.isoformat(timespec="seconds"),
+        continue_on_error=bool(continue_on_error),
         results=list(cached_results),
         progress={"done": len(cached_results), "total": len(cached_results) + len(to_build)},
     )

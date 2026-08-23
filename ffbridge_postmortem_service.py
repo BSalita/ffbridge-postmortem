@@ -333,6 +333,7 @@ def generate_postmortems(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     force: bool = False,
+    continue_on_error: Optional[bool] = None,
 ) -> Dict[str, Any]:
     return create.generate_postmortems(
         player_id,
@@ -340,6 +341,7 @@ def generate_postmortems(
         date_from=date_from,
         date_to=date_to,
         force=force,
+        continue_on_error=continue_on_error,
         cache_dir=CACHE_DIR,
     )
 

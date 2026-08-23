@@ -98,6 +98,7 @@ def generate(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     force: bool = False,
+    continue_on_error: Optional[bool] = None,
 ) -> Dict[str, Any]:
     return _post_json(
         "/generate",
@@ -107,6 +108,7 @@ def generate(
             "date_from": date_from,
             "date_to": date_to,
             "force": force,
+            "continue_on_error": continue_on_error,
         },
     )
 
@@ -120,7 +122,7 @@ def wait_for_generate(job_id: str, poll_s: float = _JOB_POLL_S) -> Dict[str, Any
     while True:
         payload = generate_status(job_id)
         status = payload.get("status")
-        if status in ("ok", "error", "cached"):
+        if status in ("ok", "error", "cached", "completed"):
             return payload
         time.sleep(poll_s)
 
@@ -131,6 +133,7 @@ def generate_and_wait(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     force: bool = False,
+    continue_on_error: Optional[bool] = None,
 ) -> Dict[str, Any]:
     payload = generate(
         player_id,
@@ -138,6 +141,7 @@ def generate_and_wait(
         date_from=date_from,
         date_to=date_to,
         force=force,
+        continue_on_error=continue_on_error,
     )
     job_id = payload.get("job_id")
     if payload.get("status") == "started" and job_id:
