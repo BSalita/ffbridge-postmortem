@@ -1,12 +1,12 @@
 """Headless access to cached FFBridge postmortem dataframes.
 
-The Streamlit app (ffbridge_streamlit.py) persists each fully augmented
-board-results dataframe to cache/df-{session_id}-{player_id}.parquet in
-_finalize_mldf_for_report. This module is the shared, Streamlit-free core used
-by ffbridge_postmortem_mcp_server.py: it enumerates those parquets, re-derives
-the player personalization columns (Boards_I_Played etc. -- same logic as
-filter_dataframe in ffbridge_streamlit.py), and runs DuckDB SQL against the
-dataframe registered as 'self', mirroring how the app's SQL favorites work.
+Postmortem parquets (cache/df-{session_id}-{player_id}.parquet) are written by
+ffbridge_postmortem_create -- the same Lancelot + augment path Streamlit uses.
+This module enumerates those parquets, re-derives the player personalization
+columns (Boards_I_Played etc. -- same logic as filter_dataframe in
+ffbridge_streamlit.py), and runs DuckDB SQL against the dataframe registered
+as 'self'. Generation (list source sessions / write cache) lives in
+ffbridge_postmortem_create.py.
 
 Env:
   FFBRIDGE_POSTMORTEM_CACHE_DIR  cache directory (default ./cache next to this file)
@@ -20,6 +20,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import duckdb
 import polars as pl
+
+import ffbridge_postmortem_create as create
 
 _APP_DIR = pathlib.Path(__file__).resolve().parent
 CACHE_DIR = pathlib.Path(os.environ.get("FFBRIDGE_POSTMORTEM_CACHE_DIR", str(_APP_DIR / "cache")))
@@ -60,16 +62,33 @@ def _parse_cache_filename(name: str) -> Optional[Dict[str, str]]:
     return {"session_id": m.group("session_id"), "player_id": m.group("player_id")}
 
 
+def _player_id_aliases(player_id: str) -> List[str]:
+    """Lancelot id and license number for the same person, when resolvable."""
+    pid = str(player_id)
+    aliases = {pid}
+    try:
+        resolved = create.resolve_player(pid)
+        aliases.update(resolved.aliases())
+    except Exception:
+        pass
+    return list(aliases)
+
+
 def list_cached_postmortems(player_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Cached postmortems (newest file first), optionally for one player."""
+    """Cached postmortems (newest file first), optionally for one player.
+
+    player_id may be a Lancelot person id or an FFBridge license number; both
+    resolve to the same cache files when they name the same person.
+    """
     out: List[Dict[str, Any]] = []
+    wanted = None if player_id is None else set(_player_id_aliases(str(player_id)))
     if not CACHE_DIR.is_dir():
         return out
     for f in CACHE_DIR.glob("df-*.parquet"):
         parsed = _parse_cache_filename(f.name)
         if parsed is None:
             continue
-        if player_id is not None and parsed["player_id"] != str(player_id):
+        if wanted is not None and parsed["player_id"] not in wanted:
             continue
         stat = f.stat()
         out.append(
@@ -91,21 +110,33 @@ def dataset_info() -> Dict[str, Any]:
         "cache_dir": str(CACHE_DIR),
         "cached_postmortems": len(cached),
         "players": sorted({c["player_id"] for c in cached}),
+        "generate": {
+            "tool": "ffbridge_postmortem_generate",
+            "list_source_sessions_tool": "ffbridge_postmortem_list_source_sessions",
+            "status_tool": "ffbridge_postmortem_generate_status",
+            "player_id": "Lancelot person id or FFBridge license number (e.g. 246273 or 9500754)",
+        },
         "note": (
-            "Postmortems are produced on demand by the Streamlit app "
-            "(https://ffbridge.postmortem.chat/?player_id=<FFBridge id>); this "
-            "service reads its parquet cache."
+            "Postmortems are produced on demand by ffbridge_postmortem_generate "
+            "(same Lancelot + augment path as Streamlit) and written to this "
+            "cache. List playable sessions with "
+            "ffbridge_postmortem_list_source_sessions. Streamlit "
+            "(https://ffbridge.postmortem.chat) reads and writes the same cache."
         ),
     }
+
+
+def resolve_cache_file(player_id: str, session_id: Optional[str] = None) -> pathlib.Path:
+    return _resolve_cache_file(player_id, session_id)
 
 
 def _resolve_cache_file(player_id: str, session_id: Optional[str] = None) -> pathlib.Path:
     cached = list_cached_postmortems(player_id)
     if not cached:
         raise FileNotFoundError(
-            f"No cached postmortem for player {player_id}. Generate one first by "
-            f"loading https://ffbridge.postmortem.chat/?player_id={player_id} (add "
-            f"&session_id=... for a specific game)."
+            f"No cached postmortem for player {player_id}. Generate one with "
+            f"ffbridge_postmortem_generate(player_id={player_id!r}) "
+            f"(optional session_id / date_from / date_to)."
         )
     if session_id is None:
         return CACHE_DIR / cached[0]["file"]  # newest cache file
@@ -114,7 +145,9 @@ def _resolve_cache_file(player_id: str, session_id: Optional[str] = None) -> pat
             return CACHE_DIR / c["file"]
     raise FileNotFoundError(
         f"No cached postmortem for player {player_id} session {session_id}. "
-        f"Cached sessions: {[c['session_id'] for c in cached]}"
+        f"Cached sessions: {[c['session_id'] for c in cached]}. "
+        f"Generate with ffbridge_postmortem_generate(player_id={player_id!r}, "
+        f"session_id={session_id!r})."
     )
 
 
@@ -184,9 +217,12 @@ def load_postmortem(player_id: str, session_id: Optional[str] = None) -> Tuple[p
     path = _resolve_cache_file(str(player_id), session_id)
     parsed = _parse_cache_filename(path.name)
     df = _read_parquet_cached(path)
-    df, meta = personalize(df, str(player_id))
+    # Cache files are named with the Lancelot person id; a license number
+    # (e.g. 9500754) must personalize as that id (e.g. 246273).
+    df, meta = personalize(df, parsed["player_id"])
     meta["session_id"] = parsed["session_id"]
     meta["cache_file"] = path.name
+    meta["requested_id"] = str(player_id)
     return df, meta
 
 
@@ -276,3 +312,37 @@ def schema_columns(df: pl.DataFrame, pattern: Optional[str] = None, limit: Optio
         "truncated": truncated,
         "columns": {c: dtypes[c] for c in names},
     }
+
+
+def list_source_sessions(
+    player_id: str,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> Dict[str, Any]:
+    return create.list_source_sessions(
+        player_id,
+        date_from=date_from,
+        date_to=date_to,
+        cache_dir=CACHE_DIR,
+    )
+
+
+def generate_postmortems(
+    player_id: str,
+    session_id: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    force: bool = False,
+) -> Dict[str, Any]:
+    return create.generate_postmortems(
+        player_id,
+        session_id=session_id,
+        date_from=date_from,
+        date_to=date_to,
+        force=force,
+        cache_dir=CACHE_DIR,
+    )
+
+
+def generate_status(job_id: str) -> Dict[str, Any]:
+    return create.generate_status(job_id)

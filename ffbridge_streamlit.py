@@ -166,6 +166,8 @@ from mlBridge.mlBridgeAugmentLib import (
 )
 from mlBridge.mlBridgePostmortemLib import PostmortemBase
 #import mlBridgeEndplayLib
+import ffbridge_postmortem_create as pm_create
+import ffbridge_postmortem_api_client as pm_api
 
 # Type definitions for better type checking
 class ApiUrlConfig(TypedDict):
@@ -1183,139 +1185,73 @@ def get_df_from_api_name_licencie(k: str, url: str) -> pl.DataFrame:
 
 
 # todo: clean up this function. use get_ffbridge_date_using_url_licencie() as a template (match statement, cache handling).
-def _fetch_lancelot_json_cached(path: str, cache_path: str, use_auth: bool = False) -> Any:
-    """GET a Lancelot API path with a JSON file cache under st.session_state.cache_dir."""
-    file_path = pathlib.Path(st.session_state.cache_dir).joinpath(cache_path).with_suffix('.json')
-    if file_path.exists():
-        print(f"Loading Lancelot data from cache: {file_path}")
-        return json.loads(file_path.read_text(encoding='utf-8'))
-    data = make_lancelot_request(path, use_auth=use_auth)
-    save_json(data, file_path)
-    return data
+def _apply_lancelot_session_meta(meta: Any) -> None:
+    """Copy Lancelot session metadata (dataclass or API dict) into session_state."""
+    if not isinstance(meta, dict):
+        meta = {
+            "session_id": meta.session_id,
+            "group_id": meta.group_id,
+            "org_id": meta.org_id,
+            "tournament_date": meta.tournament_date,
+            "organization_name": meta.organization_name,
+            "game_description": meta.game_description,
+            "route_url": meta.route_url,
+            "team_id": meta.team_id,
+            "pair_direction": meta.pair_direction,
+            "opponent_pair_direction": meta.opponent_pair_direction,
+            "player_direction": meta.player_direction,
+            "partner_direction": meta.partner_direction,
+            "player_id": meta.player_id,
+            "partner_id": meta.partner_id,
+            "player_license_number": meta.player_license_number,
+            "partner_license_number": meta.partner_license_number,
+            "player_name": meta.player_name,
+            "partner_name": meta.partner_name,
+            "section_name": meta.section_name,
+            "team_number": meta.team_number,
+            "game_url": meta.game_url,
+        }
+    session_id = meta.get("session_id")
+    if session_id is not None:
+        st.session_state.session_id = int(session_id)
+        st.session_state.simultane_id = int(session_id)
+    st.session_state.group_id = meta.get("group_id")
+    st.session_state.org_id = meta.get("org_id")
+    st.session_state.tournament_date = meta.get("tournament_date") or meta.get("game_date")
+    st.session_state.organization_name = meta.get("organization_name")
+    st.session_state.game_description = meta.get("game_description")
+    st.session_state.route_url = meta.get("route_url")
+    st.session_state.team_id = meta.get("team_id")
+    st.session_state.pair_direction = meta.get("pair_direction")
+    st.session_state.opponent_pair_direction = meta.get("opponent_pair_direction")
+    st.session_state.player_direction = meta.get("player_direction")
+    st.session_state.partner_direction = meta.get("partner_direction")
+    st.session_state.player_id = meta.get("player_id")
+    st.session_state.partner_id = meta.get("partner_id")
+    st.session_state.player_license_number = meta.get("player_license_number")
+    st.session_state.partner_license_number = meta.get("partner_license_number")
+    st.session_state.player_name = meta.get("player_name")
+    st.session_state.partner_name = meta.get("partner_name")
+    st.session_state.section_name = meta.get("section_name")
+    st.session_state.team_number = meta.get("team_number")
+    st.session_state.game_url = meta.get("game_url")
 
 
 def get_lancelot_session_mldf(player_id: str, session_id: int, game_entry: Dict[str, Any]) -> pl.DataFrame:
-    """Build the report mldf for a Lancelot session.
-
-    Workflow (all public endpoints):
-      1. /results/sessions/{session_id}/ranking -> find the player's team (by Lancelot person id)
-         and the club (simultaneousId) it played at.
-      2. /results/teams/{team_id}/session/{session_id}/scores for every team at that club ->
-         board-level data with PBN deals and score frequencies.
-      3. mlBridgeFFLib.convert_ffdf_lancelot_to_mldf -> mldf schema used by the report.
-    """
-    st.session_state.session_id = session_id
-    st.session_state.simultane_id = session_id  # used for the report cache filename
-    st.session_state.group_id = game_entry.get('group_id')
-    st.session_state.org_id = game_entry.get('organization_id')
-    st.session_state.tournament_date = (game_entry.get('date') or '')[:10]
-    st.session_state.organization_name = game_entry.get('organization_name')
-    st.session_state.game_description = game_entry.get('competition_label')
-    st.session_state.route_url = None
-
-    # 1. Ranking: find the player's team.
-    ranking_json = _fetch_lancelot_json_cached(
-        f"results/sessions/{session_id}/ranking", f"rankings/{session_id}"
+    """Build the report mldf for a Lancelot session (shared create path)."""
+    built = pm_create.build_lancelot_session_mldf(
+        player_id,
+        session_id,
+        game_entry,
+        token=get_lancelot_token(),
+        cache_dir=pathlib.Path(st.session_state.cache_dir),
+        team_progress=lambda ids: stqdm(ids, desc='Downloading team scores...'),
     )
-    teams_df = _df_from_json_normalize(ranking_json, sep='_')
-    print(f"ranking teams_df shape: {teams_df.shape}")
+    _apply_lancelot_session_meta(built.meta)
     if st.session_state.get('debug_mode', False):
-        debug_capture_df("lancelot_ranking", teams_df, source=f"results/sessions/{session_id}/ranking")
-
-    def _as_int_str(value: Any) -> Optional[str]:
-        # ffbId/id values arrive as floats after pandas normalization when the column has nulls.
-        return None if value is None else str(int(value))
-
-    pid = int(player_id)
-    match_df = teams_df.filter(
-        pl.col('team_player1_id').cast(pl.Int64, strict=False).eq(pid) |
-        pl.col('team_player2_id').cast(pl.Int64, strict=False).eq(pid)
-    )
-    if len(match_df) == 0:
-        raise ValueError(f"Player {player_id} not found in ranking of session {session_id}.")
-    team_d = match_df.to_dicts()[0]
-    is_player1 = int(team_d['team_player1_id']) == pid
-
-    # Update session state describing the player's pair. player1 sits N (of NS) or E (of EW),
-    # player2 sits S or W (verified against lineup data).
-    st.session_state.team_id = team_d['team_id']
-    st.session_state.pair_direction = team_d['orientation']
-    st.session_state.opponent_pair_direction = 'EW' if st.session_state.pair_direction == 'NS' else 'NS'
-    st.session_state.player_direction = st.session_state.pair_direction[0 if is_player1 else 1]
-    st.session_state.partner_direction = st.session_state.pair_direction[1 if is_player1 else 0]
-    me, partner = ('team_player1', 'team_player2') if is_player1 else ('team_player2', 'team_player1')
-    st.session_state.player_id = _as_int_str(team_d[f'{me}_id'])
-    st.session_state.partner_id = _as_int_str(team_d[f'{partner}_id'])
-    st.session_state.player_license_number = _as_int_str(team_d[f'{me}_ffbId'])
-    st.session_state.partner_license_number = _as_int_str(team_d[f'{partner}_ffbId'])
-    st.session_state.player_name = f"{team_d[f'{me}_firstName']} {team_d[f'{me}_lastName']}"
-    st.session_state.partner_name = f"{team_d[f'{partner}_firstName']} {team_d[f'{partner}_lastName']}"
-    st.session_state.section_name = team_d.get('section')
-    st.session_state.team_number = team_d.get('tableNumber')
-    st.session_state.game_url = (
-        f"https://www.ffbridge.fr/competitions/results/groups/{st.session_state.group_id}"
-        f"/sessions/{session_id}/pairs/{st.session_state.team_id}"
-    )
-
-    # Scope to the player's club for simultaneous sessions (simultaneousId is the club code);
-    # club competitions have a null simultaneousId and the ranking is already club-scoped.
-    club_code = team_d.get('simultaneousId')
-    if club_code is not None and 'simultaneousId' in teams_df.columns:
-        club_teams_df = teams_df.filter(pl.col('simultaneousId').eq(club_code))
-    else:
-        club_teams_df = teams_df
-    print(f"Teams to fetch scores for: {len(club_teams_df)} (club_code={club_code})")
-
-    # 2. Scores for every team at the club.
-    teams_jsons = []
-    for team_id in stqdm(club_teams_df['team_id'].to_list(), desc='Downloading team scores...'):
-        scores_json = _fetch_lancelot_json_cached(
-            f"results/teams/{team_id}/session/{session_id}/scores",
-            f"scores/{team_id}_{session_id}",
-        )
-        if all(board['contract'] == '' for board in scores_json):
-            if team_id == st.session_state.team_id:
-                raise ValueError(
-                    f"Board contract data is missing for the selected team in session {session_id}. "
-                    "This tournament's detailed results may not be available through the Lancelot API "
-                    "(e.g. some Roy René events); try the Classic API source if it is available."
-                )
-            print(f"Skipping team {team_id}: missing contract data.")
-            continue
-        teams_jsons.extend(scores_json)
-
-    if not teams_jsons:
-        raise ValueError(f"No board score data available for session {session_id}.")
-
-    ffdf = _df_from_json_normalize(teams_jsons, sep='_')
-    ffdf = ffdf.with_columns(
-        pl.lit(st.session_state.group_id).alias('group_id'),
-        pl.lit(session_id).alias('session_id'),
-    )
-    ffdf = ffdf.unique(subset=['board_id', 'id'], keep='first')
-    if st.session_state.get('debug_mode', False):
-        debug_capture_df("lancelot_scores", ffdf, source=f"results/teams/*/session/{session_id}/scores")
-
-    # 3. Convert to the mldf schema and add the report columns the converter doesn't emit.
-    df = mlBridgeFFLib.convert_ffdf_lancelot_to_mldf(ffdf)
-    df = df.with_columns(
-        pl.lit(st.session_state.tournament_date).alias('Date'),
-        pl.col('section_name').alias('Section_Name'),
-        pl.lit(st.session_state.pair_direction).alias('Pair_Direction'),
-    )
-
-    # The scores endpoint returns null startTableNumber, so the converter's Pair_Number_NS/EW
-    # come out null. Derive them from the ranking's per-team tableNumber instead.
-    table_number_by_team = dict(zip(teams_df['team_id'].to_list(), teams_df['tableNumber'].to_list()))
-    df = df.with_columns(
-        pl.when(pl.col('Pair_Direction_Home').eq('NS')).then(pl.col('team_id_home')).otherwise(pl.col('team_id_away'))
-            .replace_strict(table_number_by_team, default=None).cast(pl.Int64, strict=False)
-            .alias('Pair_Number_NS'),
-        pl.when(pl.col('Pair_Direction_Home').eq('EW')).then(pl.col('team_id_home')).otherwise(pl.col('team_id_away'))
-            .replace_strict(table_number_by_team, default=None).cast(pl.Int64, strict=False)
-            .alias('Pair_Number_EW'),
-    )
-    return df
+        debug_capture_df("lancelot_ranking", built.ranking_df, source=f"results/sessions/{session_id}/ranking")
+        debug_capture_df("lancelot_scores", built.scores_df, source=f"results/teams/*/session/{session_id}/scores")
+    return built.df
 
 
 def get_ffbridge_licencie_get_urls(api_urls_d: Dict[str, Tuple[str, bool]]) -> Tuple[Dict[str, pl.DataFrame], Dict[str, Tuple[str, bool]]]:
@@ -1370,6 +1306,19 @@ def resolve_url_player_id_param(value: str) -> str:
     if not v or not v.isdigit():
         return value  # non-numeric -- definitely not a license number
 
+    if is_lancelot_mode():
+        try:
+            resolved = pm_api.resolve_player(v)
+            lancelot_id = str(resolved['player_id'])
+            if lancelot_id != v:
+                print(f"resolve_url_player_id_param: {v!r} resolved to "
+                      f"person_id={lancelot_id}.")
+            return lancelot_id
+        except Exception as e:
+            print(f"resolve_url_player_id_param({v!r}): Lancelot resolve failed, "
+                  f"falling through to direct lookup: {e}")
+            return value
+
     try:
         search_df = search_members(v)
     except Exception as e:
@@ -1410,50 +1359,30 @@ def _populate_game_urls_for_player_lancelot(player_id: str) -> bool:
             "Lancelot game lists require login. Set FFBRIDGE_EMAIL/FFBRIDGE_PASSWORD in .env and restart."
         )
         return False
-    if str(player_id) != str(st.session_state.get('logged_in_lancelot_id')):
-        st.session_state.player_search_error = (
-            "The Lancelot API only provides game lists for the logged-in user "
-            f"(license {st.session_state.get('logged_in_license_number')}). "
-            "Enter your own license number, or switch to the Classic API source for other players."
-        )
+    try:
+        listed = pm_api.list_source_sessions(player_id)
+    except pm_api.FfbridgeApiClientError as e:
+        st.session_state.player_search_error = str(e)
         return False
 
-    items: List[Dict[str, Any]] = []
-    page = 1
-    while True:
-        response = make_lancelot_request(f"results/search/me?currentPage={page}")
-        items.extend(response.get('items', []))
-        pagination = response.get('pagination', {})
-        if not pagination.get('has_next_page') or page >= 20:
-            break
-        page += 1
-
     game_urls: Dict[int, Dict[str, Any]] = {}
-    for item in items:
-        session = item.get('session') or {}
-        session_id = session.get('id')
-        if session_id is None or not session.get('hasResult') or session_id in game_urls:
-            continue
-        group = item.get('group') or {}
-        stade = (group.get('phase') or {}).get('stade') or {}
-        organization = stade.get('organization') or {}
-        competition = (stade.get('competitionDivision') or {}).get('label') or ''
-        date_str = (item.get('date') or '')[:10]
-        session_label = session.get('label') or group.get('label') or competition
-        organization_name = organization.get('name') or organization.get('label') or ''
-        description = ' '.join(part for part in [date_str, session_label, organization_name] if part)
+    for entry in listed['sessions']:
+        session_id = int(entry['session_id'])
         game_urls[session_id] = {
-            'description': description,
-            'date': item.get('date'),
+            'description': entry.get('description'),
+            'date': entry.get('date'),
             'session_id': session_id,
-            'group_id': group.get('id'),
-            'organization_id': organization.get('ffbCode'),
-            'organization_name': organization_name,
-            'competition_label': competition or session_label,
-            'session_label': session_label,
+            'group_id': entry.get('group_id'),
+            'organization_id': entry.get('organization_id'),
+            'organization_name': entry.get('organization_name') or entry.get('club'),
+            'competition_label': entry.get('competition_label'),
+            'session_label': entry.get('session_label'),
         }
 
-    st.session_state.game_urls_d[player_id] = game_urls
+    canonical_id = listed['player_id']
+    st.session_state.game_urls_d[canonical_id] = game_urls
+    if player_id != canonical_id:
+        st.session_state.game_urls_d[player_id] = game_urls
     st.session_state.person_organization_id = None
     return len(game_urls) > 0
 
@@ -1520,40 +1449,23 @@ def _finalize_mldf_for_report(df: pl.DataFrame) -> bool:
         st.error("No Contract data available. Unable to proceed.")
         return True
 
-    # Only use columns that are required by augmentation. Drop all other columns.
-    df = df[
-        'Date','Section_Name',
-        'Board','PBN','Pair_Direction','Dealer','Vul','Declarer','Contract','Result',
-        'Score_EW','Score_NS',
-        'Pct_NS','Pct_EW',
-        'MP_NS','MP_EW', 'MP_Top',
-        'Pair_Number_NS','Pair_Number_EW',
-        'Player_ID_N','Player_ID_E','Player_ID_S','Player_ID_W',
-        'Player_Name_N','Player_Name_E','Player_Name_S','Player_Name_W',
-    ]
     st.session_state.session_id = st.session_state.simultane_id
 
     if not st.session_state.use_historical_data: # historical data is already fully augmented so skip past augmentations
-        if st.session_state.do_not_cache_df:
-            with st.spinner('Creating ffbridge data to dataframe...'):
-                df = augment_df(df)
-        else:
-            ffbridge_session_player_cache_df_filename = f'{st.session_state.cache_dir}/df-{st.session_state.session_id}-{st.session_state.player_id}.parquet'
-            ffbridge_session_player_cache_df_file = pathlib.Path(ffbridge_session_player_cache_df_filename)
-            if ffbridge_session_player_cache_df_file.exists():
-                df = _cached_read_parquet(str(ffbridge_session_player_cache_df_file))
-                print(f"Loaded {ffbridge_session_player_cache_df_filename}: shape:{df.shape} size:{ffbridge_session_player_cache_df_file.stat().st_size}")
-            else:
-                with st.spinner('Creating ffbridge data to dataframe...'):
-                    df = augment_df(df)
-                if df is not None:
-                    st.session_state.df_ready = True  # main loop can notice and proceed
-                ffbridge_session_player_cache_dir = pathlib.Path(st.session_state.cache_dir)
-                ffbridge_session_player_cache_dir.mkdir(exist_ok=True)  # Creates directory if it doesn't exist
-                ffbridge_session_player_cache_df_filename = f'{st.session_state.cache_dir}/df-{st.session_state.session_id}-{st.session_state.player_id}.parquet'
-                ffbridge_session_player_cache_df_file = pathlib.Path(ffbridge_session_player_cache_df_filename)
-                df.write_parquet(ffbridge_session_player_cache_df_file)
-                print(f"Saved {ffbridge_session_player_cache_df_filename}: shape:{df.shape} size:{ffbridge_session_player_cache_df_file.stat().st_size}")
+        with st.spinner('Creating ffbridge data to dataframe...'):
+            df = pm_create.augment_and_cache_mldf(
+                df,
+                st.session_state.session_id,
+                st.session_state.player_id,
+                cache_dir=pathlib.Path(st.session_state.cache_dir),
+                force=False,
+                sd_productions=st.session_state.single_dummy_sample_count,
+                progress=st.progress(0),
+                lock_func=perform_hand_augmentations_queue,
+                write_cache=not st.session_state.do_not_cache_df,
+            )
+        if df is not None:
+            st.session_state.df_ready = True
         with st.spinner('Writing column names to file...'):
             with open('df_columns.txt','w') as f:
                 for col in sorted(df.columns):
@@ -1594,9 +1506,28 @@ def _change_game_state_lancelot(player_id: str, session_id: Optional[int]) -> bo
         st.session_state.player_id = player_id
 
     with st.spinner('Preparing Bridge Game Postmortem Report...'):
-        df = get_lancelot_session_mldf(player_id, session_id, game_urls[session_id])
-        if _finalize_mldf_for_report(df):
+        try:
+            gen = pm_api.generate_and_wait(str(player_id), session_id=str(session_id))
+        except pm_api.FfbridgeApiClientError as e:
+            st.error(str(e))
             return True
+        if gen.get("status") == "error":
+            st.error(gen.get("error") or "Postmortem generate failed.")
+            return True
+        sid = str(gen.get("session_id") or session_id)
+        results = gen.get("results") or gen.get("sessions") or []
+        row = next((r for r in results if str(r.get("session_id")) == sid), results[0] if results else gen)
+        meta = row.get("meta") if isinstance(row, dict) else None
+        if not meta:
+            meta = pm_api.postmortem_meta(str(player_id), sid)
+        _apply_lancelot_session_meta(meta)
+        df = pm_api.postmortem_dataframe(str(player_id), sid)
+        if st.session_state.debug_mode:
+            debug_capture_df("Final Dataframe", df, source="ffbridge_postmortem_api")
+        st.session_state.df = filter_dataframe(df)
+        st.session_state.df_ready = True
+        con = get_session_duckdb_connection()
+        con.register("self", st.session_state.df)
 
     print(f"=== change_game_state END: SUCCESS - player_id={st.session_state.player_id}, session_id={st.session_state.session_id} ===")
     return False
