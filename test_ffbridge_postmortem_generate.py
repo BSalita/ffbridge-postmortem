@@ -128,7 +128,7 @@ class OtherPlayerSessionTests(unittest.TestCase):
 
     def test_list_source_uses_elo_index_for_non_logged_in_player(self):
         auth = create.LancelotAuth("token", "246273", "9500754")
-        resolved = create.ResolvedPlayer("136662", "4958370", "4958370")
+        resolved = create.ResolvedPlayer("136662", "4958370", "4958370", "322582")
         indexed = [
             {
                 "session_id": "300001",
@@ -141,7 +141,11 @@ class OtherPlayerSessionTests(unittest.TestCase):
             tempfile.TemporaryDirectory() as tmp,
             patch.object(create, "ensure_lancelot_auth", return_value=auth),
             patch.object(create, "resolve_player", return_value=resolved),
-            patch.object(create, "fetch_other_player_source_sessions", return_value=indexed),
+            patch.object(
+                create,
+                "fetch_other_player_source_sessions",
+                return_value=indexed,
+            ) as indexed_source,
             patch.object(create, "fetch_logged_in_source_sessions") as logged_in,
         ):
             result = create.list_source_sessions(
@@ -154,6 +158,11 @@ class OtherPlayerSessionTests(unittest.TestCase):
         self.assertEqual(result["player_id"], "136662")
         self.assertEqual(result["count"], 1)
         self.assertFalse(result["sessions"][0]["already_cached"])
+        indexed_source.assert_called_once_with(
+            "322582",
+            date_from="2025-01-01",
+            date_to="2025-12-31",
+        )
         logged_in.assert_not_called()
 
 

@@ -372,7 +372,7 @@ def _find_lancelot_elo_results_parquet() -> pathlib.Path:
 
 
 def fetch_other_player_source_sessions(
-    player_id: str,
+    index_player_id: str,
     *,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
@@ -396,7 +396,7 @@ def fetch_other_player_source_sessions(
         for column in ("club_id", "club_name", "series_id")
         if column in schema_names
     ]
-    pid = str(player_id)
+    pid = str(index_player_id)
     query = pl.scan_parquet(path).filter(
         (pl.col("player1_id").cast(pl.String) == pid)
         | (pl.col("player2_id").cast(pl.String) == pid)
@@ -460,8 +460,11 @@ def list_source_sessions(
     if resolved.lancelot_id == auth.lancelot_id:
         source_sessions = fetch_logged_in_source_sessions(token)
     else:
+        # Elo normalizes Lancelot ranking players to migrationId (the Classic
+        # person id), not the Lancelot id used by board-score lineups.
+        index_player_id = resolved.classic_person_id or resolved.lancelot_id
         source_sessions = fetch_other_player_source_sessions(
-            resolved.lancelot_id,
+            index_player_id,
             date_from=date_from,
             date_to=date_to,
         )
