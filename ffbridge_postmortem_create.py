@@ -275,16 +275,6 @@ def resolve_player(player_id: str, *, token: Optional[str] = None) -> ResolvedPl
     return resolved
 
 
-def _require_logged_in_player(resolved: ResolvedPlayer, auth: LancelotAuth) -> None:
-    if resolved.lancelot_id != auth.lancelot_id:
-        raise ValueError(
-            "The Lancelot API only provides game lists for the logged-in user "
-            f"(lancelot_id={auth.lancelot_id}, license {auth.license_number}). "
-            f"Requested player {resolved.requested_id} resolved to "
-            f"{resolved.lancelot_id}."
-        )
-
-
 # ---------------------------------------------------------------------------
 # Source session list
 # ---------------------------------------------------------------------------
@@ -356,6 +346,104 @@ def fetch_logged_in_source_sessions(token: str) -> List[Dict[str, Any]]:
     return sessions
 
 
+def _find_lancelot_elo_results_parquet() -> pathlib.Path:
+    configured = os.environ.get("FFBRIDGE_ELO_RESULTS_PARQUET", "").strip()
+    if configured:
+        path = pathlib.Path(configured)
+        if not path.is_file():
+            raise FileNotFoundError(f"FFBRIDGE_ELO_RESULTS_PARQUET not found: {path}")
+        return path
+
+    cache_dirs = [
+        pathlib.Path(os.environ.get("FFBRIDGE_ELO_CACHE_DIR", "/data/ffbridge/elo_cache")),
+        _APP_DIR.parent.parent / "Elo_Ratings" / "data" / "ffbridge" / "elo_cache",
+    ]
+    matches: List[pathlib.Path] = []
+    for directory in cache_dirs:
+        if directory.is_dir():
+            matches.extend(directory.glob("*FFBridge_Lancelot_API*.results.parquet"))
+    if not matches:
+        raise FileNotFoundError(
+            "No persisted Lancelot Elo results parquet found. Set "
+            "FFBRIDGE_ELO_RESULTS_PARQUET or mount the Elo cache at "
+            "/data/ffbridge/elo_cache."
+        )
+    return max(matches, key=lambda path: path.stat().st_mtime)
+
+
+def fetch_other_player_source_sessions(
+    player_id: str,
+    *,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Session index for another player from the persisted public Lancelot Elo data."""
+    path = _find_lancelot_elo_results_parquet()
+    required = {
+        "tournament_id",
+        "tournament_name",
+        "date",
+        "player1_id",
+        "player2_id",
+    }
+    schema_names = set(pl.scan_parquet(path).collect_schema().names())
+    missing = sorted(required - schema_names)
+    if missing:
+        raise ValueError(f"Lancelot Elo results parquet lacks columns: {missing}")
+
+    optional = [
+        column
+        for column in ("club_id", "club_name", "series_id")
+        if column in schema_names
+    ]
+    pid = str(player_id)
+    query = pl.scan_parquet(path).filter(
+        (pl.col("player1_id").cast(pl.String) == pid)
+        | (pl.col("player2_id").cast(pl.String) == pid)
+    )
+    day = pl.col("date").cast(pl.String).str.slice(0, 10)
+    if date_from:
+        query = query.filter(day >= date_from)
+    if date_to:
+        query = query.filter(day <= date_to)
+    rows = (
+        query.select(
+            "tournament_id",
+            "tournament_name",
+            "date",
+            *optional,
+        )
+        .unique(subset=["tournament_id"], keep="first")
+        .sort("date", descending=True)
+        .collect()
+        .to_dicts()
+    )
+
+    sessions: List[Dict[str, Any]] = []
+    for row in rows:
+        sid = str(row["tournament_id"])
+        date_str = _parse_session_date(row.get("date"))
+        label = str(row.get("tournament_name") or "")
+        club = str(row.get("club_name") or "")
+        sessions.append(
+            {
+                "session_id": sid,
+                "date": date_str,
+                "club": club,
+                "organization_id": row.get("club_id"),
+                "organization_name": club,
+                "group_id": None,
+                "competition_label": label,
+                "session_label": label,
+                "description": " ".join(part for part in (date_str, label, club) if part),
+                "raw_date": row.get("date"),
+                "series_id": row.get("series_id"),
+                "listing_source": "persisted Lancelot Elo index",
+            }
+        )
+    return sessions
+
+
 def list_source_sessions(
     player_id: str,
     *,
@@ -368,10 +456,17 @@ def list_source_sessions(
     auth = ensure_lancelot_auth()
     token = token or auth.token
     resolved = resolve_player(player_id, token=token)
-    _require_logged_in_player(resolved, auth)
     directory = pathlib.Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
+    if resolved.lancelot_id == auth.lancelot_id:
+        source_sessions = fetch_logged_in_source_sessions(token)
+    else:
+        source_sessions = fetch_other_player_source_sessions(
+            resolved.lancelot_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
     sessions = []
-    for entry in fetch_logged_in_source_sessions(token):
+    for entry in source_sessions:
         if not _in_date_window(entry.get("date"), date_from, date_to):
             continue
         cache_file = cache_parquet_path(entry["session_id"], resolved.lancelot_id, directory)
@@ -917,7 +1012,6 @@ def generate_postmortems(
     directory = pathlib.Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
     auth = ensure_lancelot_auth()
     resolved = resolve_player(player_id, token=auth.token)
-    _require_logged_in_player(resolved, auth)
     if continue_on_error is None:
         continue_on_error = date_from is not None or date_to is not None
     sessions = _select_sessions_to_generate(
