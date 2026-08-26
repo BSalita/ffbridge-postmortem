@@ -609,6 +609,43 @@ def clear_cache() -> None:
         st.info("Cache directory does not exist")
 
 
+def _id_list(*values: Any) -> List[str]:
+    seen: List[str] = []
+    for raw in values:
+        if raw is None:
+            continue
+        text = str(raw).strip()
+        if text and text not in seen:
+            seen.append(text)
+    return seen
+
+
+def _player_match_ids() -> List[str]:
+    """License, Lancelot, and Classic ids that all name the selected player."""
+    ids = _id_list(
+        st.session_state.get("player_id"),
+        st.session_state.get("lancelot_player_id"),
+        st.session_state.get("classic_player_id"),
+    )
+    license_number = st.session_state.get("player_license_number")
+    # reset_game_data defaults player_license_number to 9500754 as a
+    # placeholder. Only treat it as this player when it is the requested
+    # id or resolve/generate has bound a Lancelot id.
+    if license_number and (
+        str(license_number) == str(st.session_state.get("player_id") or "")
+        or st.session_state.get("lancelot_player_id")
+    ):
+        ids = _id_list(*ids, license_number)
+    return ids
+
+
+def _partner_match_ids() -> List[str]:
+    return _id_list(
+        st.session_state.get("partner_id"),
+        st.session_state.get("partner_license_number"),
+    )
+
+
 def filter_dataframe(df: pl.DataFrame) -> pl.DataFrame:
     """Filter DataFrame to show boards played by specific player and partner
     
@@ -619,23 +656,26 @@ def filter_dataframe(df: pl.DataFrame) -> pl.DataFrame:
         Filtered DataFrame with additional boolean columns for board filtering
     """
 
-    # Columns used for filtering to a specific player_id and partner_id. Needs multiple with_columns() to unnest overlapping columns.
+    # Player_ID_* / lineup_* / Declarer_ID may store a license, Lancelot id,
+    # or Classic id depending on cache vintage. Match every known alias.
+    player_ids = _player_match_ids()
+    partner_ids = _partner_match_ids()
     full_directions_d = {'N':'north', 'E':'east', 'S':'south', 'W':'west'}
     if f"lineup_{full_directions_d[st.session_state.player_direction]}Player_id" in df.columns:
-        # Lancelot mldf: lineup_*Player_id / Player_ID_* (hence Declarer_ID) are Lancelot person ids.
+        lineup_col = f'lineup_{full_directions_d[st.session_state.player_direction]}Player_id'
         df = df.with_columns(
-        pl.col(f'lineup_{full_directions_d[st.session_state.player_direction]}Player_id').eq(pl.lit(str(st.session_state.player_id))).alias('Boards_I_Played'), # player_id could be numeric
-        pl.col('Declarer_ID').eq(pl.lit(str(st.session_state.player_id))).alias('Boards_I_Declared'), # player_id could be numeric
-        pl.col('Declarer_ID').eq(pl.lit(str(st.session_state.partner_id))).alias('Boards_Partner_Declared'), # partner_id could be numeric
+        pl.col(lineup_col).cast(pl.Utf8).is_in(player_ids).alias('Boards_I_Played'),
+        pl.col('Declarer_ID').cast(pl.Utf8).is_in(player_ids).alias('Boards_I_Declared'),
+        pl.col('Declarer_ID').cast(pl.Utf8).is_in(partner_ids).alias('Boards_Partner_Declared'),
     )
     elif "Pair_Direction" in df.columns:
         # todo: better way to determine Boards_I_Played than above?
         df = df.with_columns(
-            pl.col(f'Player_ID_{st.session_state.player_direction}').eq(pl.lit(str(st.session_state.player_id))).alias('Boards_I_Played'), # player_id could be numeric
+            pl.col(f'Player_ID_{st.session_state.player_direction}').cast(pl.Utf8).is_in(player_ids).alias('Boards_I_Played'),
         )
         df = df.with_columns(
-            pl.col('Boards_I_Played').and_(pl.col('Declarer_Direction').eq(st.session_state.player_direction)).alias('Boards_I_Declared'), # player_id could be numeric
-            pl.col('Boards_I_Played').and_(pl.col('Declarer_Direction').eq(st.session_state.partner_direction)).alias('Boards_Partner_Declared'), # partner_id could be numeric
+            pl.col('Boards_I_Played').and_(pl.col('Declarer_Direction').eq(st.session_state.player_direction)).alias('Boards_I_Declared'),
+            pl.col('Boards_I_Played').and_(pl.col('Declarer_Direction').eq(st.session_state.partner_direction)).alias('Boards_Partner_Declared'),
         )
     else:
         st.error(f"Unable to match pair to boards.")
@@ -1226,10 +1266,30 @@ def _apply_lancelot_session_meta(meta: Any) -> None:
     st.session_state.opponent_pair_direction = meta.get("opponent_pair_direction")
     st.session_state.player_direction = meta.get("player_direction")
     st.session_state.partner_direction = meta.get("partner_direction")
-    st.session_state.player_id = meta.get("player_id")
+    incoming_player_id = meta.get("player_id")
+    incoming_license = meta.get("player_license_number")
+    incoming_lancelot = (
+        meta.get("cache_player_id")
+        or meta.get("matched_player_id")
+        or (
+            incoming_player_id
+            if incoming_player_id and str(incoming_player_id) != str(incoming_license or "")
+            else None
+        )
+    )
+    if incoming_lancelot and not st.session_state.get("lancelot_player_id"):
+        st.session_state.lancelot_player_id = str(incoming_lancelot)
+    if incoming_license:
+        st.session_state.player_license_number = str(incoming_license)
+    # Keep the URL/sidebar player_id as the originally requested value
+    # (usually a license). Overwriting it with the Lancelot person id
+    # rewrites ?player_id=9500754 to 246273 and then filter_dataframe
+    # looks up 246273 as a license.
+    if not st.session_state.get("player_id"):
+        st.session_state.player_id = incoming_license or incoming_player_id
     st.session_state.partner_id = meta.get("partner_id")
-    st.session_state.player_license_number = meta.get("player_license_number")
-    st.session_state.partner_license_number = meta.get("partner_license_number")
+    if meta.get("partner_license_number"):
+        st.session_state.partner_license_number = meta.get("partner_license_number")
     st.session_state.player_name = meta.get("player_name")
     st.session_state.partner_name = meta.get("partner_name")
     st.session_state.section_name = meta.get("section_name")
@@ -1279,28 +1339,31 @@ def get_ffbridge_licencie_get_urls(api_urls_d: Dict[str, Tuple[str, bool]]) -> T
     return dfs, api_urls_d
 
 
+def _remember_resolved_player_ids(resolved: Dict[str, Any]) -> None:
+    """Store every identifier namespace without changing the public player_id."""
+    lancelot_id = resolved.get("player_id") or resolved.get("lancelot_id")
+    license_number = resolved.get("player_license_number") or resolved.get("license_number")
+    classic_id = resolved.get("classic_person_id")
+    if lancelot_id:
+        st.session_state.lancelot_player_id = str(lancelot_id)
+    if license_number:
+        st.session_state.player_license_number = str(license_number)
+    if classic_id:
+        st.session_state.classic_player_id = str(classic_id)
+
+
 def resolve_url_player_id_param(value: str) -> str:
-    """Map a URL ?player_id= value to a canonical FFBridge ``person_id``.
+    """Keep the public ``?player_id=`` value and remember internal aliases.
 
-    The sidebar Go-button accepts a license number (e.g. ``9500754``) and
-    transparently converts it to a person_id via ``search-members``. The URL
-    auto-load path historically required a person_id directly, which is
-    confusing because the user-visible "license number" in the sidebar is
-    what naturally ends up in URLs they share.
+    The sidebar and shared URLs use the FFBridge license number (e.g.
+    ``9500754``). Lancelot APIs and cache files use the person id
+    (``246273``). Classic APIs use the migration/person id. Rewriting the
+    URL from license to Lancelot id made filter_dataframe look up 246273 as
+    a license and produced an empty/wrong report.
 
-    This helper makes the URL path forgiving:
-
-      * Try ``search-members?search={value}``.
-      * If exactly one result comes back AND its ``person_license_number``
-        equals ``value`` (after a defensive strip-leading-zeros normalize),
-        the value was a license number -- return the resolved ``person_id``.
-      * Otherwise return ``value`` unchanged so the existing
-        ``populate_game_urls_for_player`` / ``change_game_state`` flow treats
-        it as a person_id (the legacy behavior).
-
-    Failures inside the search call are silently ignored -- if the API is
-    down or the token expired, we fall through and the downstream call will
-    surface the real error via the existing st.error() handling.
+    Lancelot mode returns ``value`` unchanged after stashing aliases.
+    Classic mode still remaps a license to Classic person_id because those
+    endpoints require it.
     """
     v = (value or "").strip()
     if not v or not v.isdigit():
@@ -1309,15 +1372,16 @@ def resolve_url_player_id_param(value: str) -> str:
     if is_lancelot_mode():
         try:
             resolved = pm_api.resolve_player(v)
-            lancelot_id = str(resolved['player_id'])
-            if lancelot_id != v:
-                print(f"resolve_url_player_id_param: {v!r} resolved to "
-                      f"person_id={lancelot_id}.")
-            return lancelot_id
+            _remember_resolved_player_ids(resolved)
+            print(
+                f"resolve_url_player_id_param: keeping URL player_id={v!r}; "
+                f"lancelot={resolved.get('player_id')!r} "
+                f"license={resolved.get('player_license_number')!r}."
+            )
         except Exception as e:
             print(f"resolve_url_player_id_param({v!r}): Lancelot resolve failed, "
                   f"falling through to direct lookup: {e}")
-            return value
+        return value
 
     try:
         search_df = search_members(v)
@@ -1343,6 +1407,9 @@ def resolve_url_player_id_param(value: str) -> str:
         if person_id is not None:
             print(f"resolve_url_player_id_param: {v!r} matched license number; "
                   f"resolved to person_id={person_id}.")
+            if license_from_api:
+                st.session_state.player_license_number = str(license_from_api)
+            st.session_state.classic_player_id = str(person_id)
             return str(person_id)
     return value
 
@@ -1379,10 +1446,14 @@ def _populate_game_urls_for_player_lancelot(player_id: str) -> bool:
             'session_label': entry.get('session_label'),
         }
 
+    _remember_resolved_player_ids(listed)
     canonical_id = listed['player_id']
     st.session_state.game_urls_d[canonical_id] = game_urls
     if player_id != canonical_id:
         st.session_state.game_urls_d[player_id] = game_urls
+    license_number = listed.get('player_license_number')
+    if license_number and str(license_number) != player_id:
+        st.session_state.game_urls_d[str(license_number)] = game_urls
     st.session_state.person_organization_id = None
     return len(game_urls) > 0
 
@@ -1514,6 +1585,7 @@ def _change_game_state_lancelot(player_id: str, session_id: Optional[int]) -> bo
         if gen.get("status") == "error":
             st.error(gen.get("error") or "Postmortem generate failed.")
             return True
+        _remember_resolved_player_ids(gen)
         sid = str(gen.get("session_id") or session_id)
         results = gen.get("results") or gen.get("sessions") or []
         row = next((r for r in results if str(r.get("session_id")) == sid), results[0] if results else gen)
@@ -2402,7 +2474,18 @@ def player_search_input_on_change_with_query(query: str) -> None:
         # Try to populate games for this player. Clear any stale error first so the
         # no-games guard below can distinguish a fresh populate-supplied message.
         st.session_state.pop('player_search_error', None)
-        st.session_state.player_id = str(player_id)
+        if is_lancelot_mode():
+            st.session_state.lancelot_player_id = str(player_id)
+            if license_number:
+                st.session_state.player_license_number = str(license_number)
+                st.session_state.player_id = str(license_number)
+            else:
+                st.session_state.player_id = str(player_id)
+        else:
+            st.session_state.classic_player_id = str(player_id)
+            st.session_state.player_id = str(player_id)
+            if license_number:
+                st.session_state.player_license_number = str(license_number)
         try:
             has_games = populate_game_urls_for_player(st.session_state.player_id)
         except Exception as e:
@@ -2806,17 +2889,14 @@ class FFBridgeApp(PostmortemBase):
         # (e.g. ?player_id=...&session_id=...&debug_mode=1).
         apply_url_params_to_session_state()
 
-        # ?player_id= in shared URLs is often a license number (what the
-        # sidebar Go box accepts) rather than the FFBridge internal
-        # person_id. Resolve here -- BEFORE create_sidebar() runs and
-        # triggers its own implicit populate_game_urls_for_player() -- so
-        # license numbers Just Work and don't trip the API's 404-on-unknown-
-        # person_id path (which surfaces as a visible st.error and breaks
-        # the CLI's success/error race).
+        # ?player_id= in shared URLs is usually a license number. Resolve
+        # aliases here so generate/filter can use Lancelot/Classic ids, but
+        # keep the public player_id as the requested value so the URL is
+        # not rewritten from 9500754 to 246273.
         url_pid = st.session_state.get('player_id')
         if url_pid:
             resolved = resolve_url_player_id_param(str(url_pid))
-            if resolved != str(url_pid):
+            if resolved != str(url_pid) and not is_lancelot_mode():
                 st.session_state.player_id = resolved
         
     def reset_game_data(self):
@@ -2843,6 +2923,8 @@ class FFBridgeApp(PostmortemBase):
             'team_id': st.session_state.team_id_default,
             'player_license_number': st.session_state.player_license_number_default,
             'partner_license_number': st.session_state.partner_license_number_default,
+            'lancelot_player_id': None,
+            'classic_player_id': None,
             'route_url': st.session_state.route_url_default,
             'game_urls_d': {},
             'person_organization_id': None,
@@ -2931,9 +3013,8 @@ class FFBridgeApp(PostmortemBase):
                 and st.session_state.get('_url_loaded_session_key') != url_session_key):
             st.session_state._url_loaded_session_key = url_session_key
             try:
-                # ?player_id= license-number resolution happens upstream in
-                # initialize_session_state, so url_session_key[0] is already
-                # the canonical person_id by the time we get here.
+                # url_session_key[0] is the public id from the URL (license
+                # or Lancelot). Aliases were stashed in initialize_session_state.
                 populate_game_urls_for_player(url_session_key[0])
                 change_game_state(url_session_key[0], url_session_key[1])
                 st.rerun()
@@ -3047,12 +3128,27 @@ class FFBridgeApp(PostmortemBase):
                     if len(dfs['search']) == 0:
                         st.error(f"License number '{input_value}' not found.")
                     elif len(dfs['search']) == 1:
-                        # Exactly one player found - get their player ID
+                        # Exactly one player found. Keep the license as the
+                        # public player_id so the URL stays shareable.
                         row = list(dfs['search'].iter_rows(named=True))[0]
-                        player_id = row['person_id']  # This is the actual player ID
+                        lancelot_or_classic_id = row['person_id']
+                        license_number = (
+                            row.get('person_license_number')
+                            or row.get('license_number')
+                            or input_value
+                        )
+                        if is_lancelot_mode():
+                            st.session_state.lancelot_player_id = str(lancelot_or_classic_id)
+                            st.session_state.player_id = str(license_number or lancelot_or_classic_id)
+                            if license_number:
+                                st.session_state.player_license_number = str(license_number)
+                        else:
+                            st.session_state.classic_player_id = str(lancelot_or_classic_id)
+                            st.session_state.player_id = str(lancelot_or_classic_id)
+                            if license_number:
+                                st.session_state.player_license_number = str(license_number)
                         
                         # Populate sidebar first, then defer report start until after sidebar refresh
-                        st.session_state.player_id = str(player_id)
                         has_games = populate_game_urls_for_player(st.session_state.player_id)
                         
                         if not has_games:

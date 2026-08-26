@@ -74,6 +74,29 @@ def _player_id_aliases(player_id: str) -> List[str]:
     return list(aliases)
 
 
+def player_match_ids(*ids: Optional[Any]) -> List[str]:
+    """Deduped identifier strings that all name the same player.
+
+    Accepts a license number, Lancelot person id, Classic/migration id, or a
+    mix. Resolution failures keep the raw values so matching still works when
+    the dataframe already uses that namespace.
+    """
+    seen: List[str] = []
+    for raw in ids:
+        if raw is None:
+            continue
+        text = str(raw).strip()
+        if not text or text in seen:
+            continue
+        seen.append(text)
+    expanded: List[str] = []
+    for text in seen:
+        for alias in _player_id_aliases(text):
+            if alias not in expanded:
+                expanded.append(alias)
+    return expanded
+
+
 def list_cached_postmortems(player_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """Cached postmortems (newest file first), optionally for one player.
 
@@ -176,18 +199,29 @@ def _read_parquet_cached(path: pathlib.Path) -> pl.DataFrame:
     return df
 
 
-def personalize(df: pl.DataFrame, player_id: str) -> Tuple[pl.DataFrame, Dict[str, Any]]:
+def personalize(
+    df: pl.DataFrame,
+    player_id: str,
+    extra_ids: Optional[List[Any]] = None,
+) -> Tuple[pl.DataFrame, Dict[str, Any]]:
     """Add the player-centric flag columns exactly as filter_dataframe does
     (the Pair_Direction branch: cached mldfs are reduced to the core column
-    set before augmentation, so the lineup_* Lancelot columns are absent)."""
+    set before augmentation, so the lineup_* Lancelot columns are absent).
+
+    ``player_id`` may be a license, Lancelot id, or Classic id. Matching uses
+    every resolved alias plus any extra ids (e.g. the cache-filename id).
+    """
     pid = str(player_id)
+    match_ids = player_match_ids(pid, *(extra_ids or []))
     for player_direction, pair_direction, partner_direction, opponent_pair_direction in _SEAT_TUPLES:
-        rows = df.filter(pl.col(f"Player_ID_{player_direction}").cast(pl.Utf8) == pid)
+        id_col = pl.col(f"Player_ID_{player_direction}").cast(pl.Utf8)
+        rows = df.filter(id_col.is_in(match_ids))
         if rows.height == 0:
             continue
         partner_id = rows[f"Player_ID_{partner_direction}"][0]
+        matched_player_id = str(rows[f"Player_ID_{player_direction}"][0])
         df = df.with_columns(
-            pl.col(f"Player_ID_{player_direction}").cast(pl.Utf8).eq(pl.lit(pid)).alias("Boards_I_Played"),
+            id_col.is_in(match_ids).alias("Boards_I_Played"),
         )
         df = df.with_columns(
             pl.col("Boards_I_Played").and_(pl.col("Declarer_Direction").eq(player_direction)).alias("Boards_I_Declared"),
@@ -203,6 +237,7 @@ def personalize(df: pl.DataFrame, player_id: str) -> Tuple[pl.DataFrame, Dict[st
         )
         meta = {
             "player_id": pid,
+            "matched_player_id": matched_player_id,
             "player_name": rows[f"Player_Name_{player_direction}"][0] if f"Player_Name_{player_direction}" in rows.columns else None,
             "player_direction": player_direction,
             "partner_id": str(partner_id),
@@ -222,12 +257,14 @@ def load_postmortem(player_id: str, session_id: Optional[str] = None) -> Tuple[p
     path = _resolve_cache_file(str(player_id), session_id)
     parsed = _parse_cache_filename(path.name)
     df = _read_parquet_cached(path)
-    # Cache files are named with the Lancelot person id; a license number
-    # (e.g. 9500754) must personalize as that id (e.g. 246273).
-    df, meta = personalize(df, parsed["player_id"])
+    # Cache files are named with the Lancelot person id. Personalize with the
+    # requested id plus the filename id so license 9500754 and Lancelot 246273
+    # both match whichever namespace Player_ID_* actually stores.
+    df, meta = personalize(df, str(player_id), extra_ids=[parsed["player_id"]])
     meta["session_id"] = parsed["session_id"]
     meta["cache_file"] = path.name
     meta["requested_id"] = str(player_id)
+    meta["cache_player_id"] = parsed["player_id"]
     return df, meta
 
 
