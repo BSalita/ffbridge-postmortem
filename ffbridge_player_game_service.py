@@ -232,16 +232,60 @@ def _simultaneous_sessions(
     return list(sessions.values())
 
 
-def _club_sessions(clubs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _http_status(exc: requests.RequestException) -> Optional[int]:
+    return exc.response.status_code if exc.response is not None else None
+
+
+def _club_sessions(
+    clubs: List[Dict[str, Any]],
+    errors: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
     sessions: Dict[str, Dict[str, Any]] = {}
     for club in clubs:
-        rows = create.mlBridgeFFLib.lancelot_get(
-            f"competitions/groups/{club['group_id']}/groupSessions",
-            params={"context[]": "result_status"},
-        )
+        path = f"competitions/groups/{club['group_id']}/groupSessions"
+        try:
+            rows = create.mlBridgeFFLib.lancelot_get(
+                path,
+                params={"context[]": "result_status"},
+            )
+        except requests.HTTPError as exc:
+            # Lancelot occasionally fails while expanding result_status for an
+            # otherwise valid group. The unexpanded endpoint still provides
+            # the session list; personal-ranking lookup filters unpublished
+            # sessions later.
+            if (_http_status(exc) or 0) < 500:
+                if errors is None:
+                    raise
+                errors.append(
+                    {
+                        "error": "upstream_group_sessions_error",
+                        "club_code": club.get("club_code"),
+                        "club_name": club.get("club_name"),
+                        "group_id": club.get("group_id"),
+                        "http_status": _http_status(exc),
+                        "detail": str(exc),
+                    }
+                )
+                continue
+            try:
+                rows = create.mlBridgeFFLib.lancelot_get(path)
+            except requests.RequestException as retry_exc:
+                if errors is None:
+                    raise
+                errors.append(
+                    {
+                        "error": "upstream_group_sessions_error",
+                        "club_code": club.get("club_code"),
+                        "club_name": club.get("club_name"),
+                        "group_id": club.get("group_id"),
+                        "http_status": _http_status(retry_exc),
+                        "detail": str(retry_exc),
+                    }
+                )
+                continue
         for row in rows:
             session = row.get("session") or {}
-            if not session.get("hasResult"):
+            if session.get("hasResult") is False:
                 continue
             session_id = session.get("id")
             session_date = _date(row.get("date"))
@@ -281,10 +325,13 @@ def _candidate_sessions(
     *,
     target_date: Optional[str],
     clubs: Optional[List[str]],
+    club_errors: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     today = date.today().isoformat()
     club_rows = resolve_clubs(clubs)
-    club_sessions = _club_sessions(club_rows) if club_rows else []
+    club_sessions = (
+        _club_sessions(club_rows, errors=club_errors) if club_rows else []
+    )
     if target_date is not None:
         date.fromisoformat(target_date)
         date_from = target_date
@@ -510,10 +557,12 @@ def _lookup(
     if not resolved.license_number:
         raise ValueError(f"Could not determine a license number for {query!r}")
     games: List[Dict[str, Any]] = []
+    club_errors: List[Dict[str, Any]] = []
     for candidate in _candidate_sessions(
         resolved,
         target_date=target_date,
         clubs=clubs,
+        club_errors=club_errors,
     ):
         ranking = _personal_ranking(
             candidate["session_id"],
@@ -538,7 +587,9 @@ def _lookup(
             if clubs
             else "configured simultaneous series"
         ),
+        "coverage_complete": not club_errors,
         "clubs": clubs or [],
+        "club_errors": club_errors,
     }
 
 

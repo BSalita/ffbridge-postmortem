@@ -1,5 +1,7 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+
+import requests
 
 import ffbridge_player_game_service as games
 import ffbridge_postmortem_create as create
@@ -11,6 +13,11 @@ def _ranking_row(team_id: int, score: float) -> dict:
         "simultaneousId": 5802079,
         "team": {"id": team_id},
     }
+
+
+def _http_error(status_code: int) -> requests.HTTPError:
+    response = Mock(status_code=status_code)
+    return requests.HTTPError(f"{status_code} upstream error", response=response)
 
 
 class PlayerGameSummaryTests(unittest.TestCase):
@@ -117,8 +124,104 @@ class PlayerGameSummaryTests(unittest.TestCase):
             result = games.played_today("Robert Salita")
 
         self.assertTrue(result["played"])
+        self.assertTrue(result["coverage_complete"])
+        self.assertEqual(result["club_errors"], [])
         self.assertEqual(result["summary"], "summary")
         self.assertEqual(result["games"], [game])
+
+    def test_group_sessions_retries_without_result_status_context(self):
+        club = {
+            "group_id": "14025",
+            "club_code": "5802079",
+            "club_name": "Bridge Club Levallois Perret",
+        }
+        rows = [
+            {
+                "date": "2026-08-29T14:00:00+02:00",
+                "session": {"id": 300900, "label": "Club game"},
+            }
+        ]
+        with patch.object(
+            games.create.mlBridgeFFLib,
+            "lancelot_get",
+            side_effect=[_http_error(500), rows],
+        ) as lancelot_get:
+            result = games._club_sessions([club], errors=[])
+
+        self.assertEqual([row["session_id"] for row in result], ["300900"])
+        self.assertEqual(lancelot_get.call_count, 2)
+        self.assertNotIn("params", lancelot_get.call_args.kwargs)
+
+    def test_one_failed_club_does_not_poison_other_clubs(self):
+        bad = {
+            "group_id": "14025",
+            "club_code": "5802079",
+            "club_name": "Bridge Club Levallois Perret",
+        }
+        good = {
+            "group_id": "21333",
+            "club_code": "5000001",
+            "club_name": "Other Club",
+        }
+        good_rows = [
+            {
+                "date": "2026-08-29T14:00:00+02:00",
+                "session": {
+                    "id": 300901,
+                    "label": "Other game",
+                    "hasResult": True,
+                },
+            }
+        ]
+
+        def fetch(path, params=None):
+            if "14025" in path:
+                raise _http_error(500)
+            return good_rows
+
+        errors = []
+        with patch.object(
+            games.create.mlBridgeFFLib, "lancelot_get", side_effect=fetch
+        ):
+            result = games._club_sessions([bad, good], errors=errors)
+
+        self.assertEqual([row["session_id"] for row in result], ["300901"])
+        self.assertEqual(errors[0]["error"], "upstream_group_sessions_error")
+        self.assertEqual(errors[0]["club_code"], "5802079")
+        self.assertEqual(errors[0]["group_id"], "14025")
+        self.assertEqual(errors[0]["http_status"], 500)
+
+    def test_played_today_reports_incomplete_club_coverage(self):
+        auth = create.LancelotAuth("token", "246273", "9500754", "597539")
+        resolved = create.ResolvedPlayer(
+            "246273", "9500754", "Robert Salita", "597539"
+        )
+
+        def candidates(*args, **kwargs):
+            kwargs["club_errors"].append(
+                {
+                    "error": "upstream_group_sessions_error",
+                    "club_code": "5802079",
+                    "group_id": "14025",
+                    "http_status": 500,
+                }
+            )
+            return []
+
+        with (
+            patch.object(games.create, "ensure_lancelot_auth", return_value=auth),
+            patch.object(
+                games.create,
+                "resolve_player_query",
+                return_value=(resolved, "Robert Salita"),
+            ),
+            patch.object(games, "_candidate_sessions", side_effect=candidates),
+        ):
+            result = games.played_today("597539", ["5802079"])
+
+        self.assertFalse(result["played"])
+        self.assertFalse(result["coverage_complete"])
+        self.assertEqual(result["club_errors"][0]["group_id"], "14025")
 
 
 if __name__ == "__main__":
