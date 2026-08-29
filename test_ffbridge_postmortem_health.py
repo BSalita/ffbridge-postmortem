@@ -8,6 +8,71 @@ import ffbridge_postmortem_api_server as api_server
 
 
 class WriterHealthTests(unittest.TestCase):
+    def test_successful_latest_job_marks_older_error_as_historical(self):
+        failed = api_server.create.GenerateJob(
+            job_id="old-error",
+            status="error",
+            player_id="1",
+            player_license_number=None,
+            requested_id="1",
+            session_ids=["100"],
+            force=False,
+            started_at="2026-08-26T10:00:00+00:00",
+            updated_at="2026-08-26T10:04:00+00:00",
+            error="strict cast failed",
+        )
+        succeeded = api_server.create.GenerateJob(
+            job_id="new-success",
+            status="ok",
+            player_id="1",
+            player_license_number=None,
+            requested_id="1",
+            session_ids=["101"],
+            force=False,
+            started_at="2026-08-29T10:00:00+00:00",
+            updated_at="2026-08-29T10:04:00+00:00",
+        )
+
+        with patch.object(
+            api_server.create,
+            "_load_jobs_from_store",
+            return_value=[failed, succeeded],
+        ):
+            result = api_server.create.generate_health()
+
+        self.assertIsNone(result["last_error"])
+        self.assertIsNone(result["last_error_job_id"])
+        self.assertEqual(result["most_recent_error"], "strict cast failed")
+        self.assertEqual(result["most_recent_error_job_id"], "old-error")
+        self.assertEqual(
+            result["most_recent_error_at"], "2026-08-26T10:04:00+00:00"
+        )
+
+    def test_failed_latest_job_is_the_active_last_error(self):
+        failed = api_server.create.GenerateJob(
+            job_id="current-error",
+            status="error",
+            player_id="1",
+            player_license_number=None,
+            requested_id="1",
+            session_ids=["100"],
+            force=False,
+            started_at="2026-08-29T10:00:00+00:00",
+            updated_at="2026-08-29T10:04:00+00:00",
+            error="current failure",
+        )
+
+        with patch.object(
+            api_server.create,
+            "_load_jobs_from_store",
+            return_value=[failed],
+        ):
+            result = api_server.create.generate_health()
+
+        self.assertEqual(result["last_error"], "current failure")
+        self.assertEqual(result["last_error_job_id"], "current-error")
+        self.assertEqual(result["most_recent_error"], "current failure")
+
     @patch.object(api.requests, "request")
     def test_ready_writer_returns_structured_health(self, request):
         response = Mock(ok=True, status_code=200)

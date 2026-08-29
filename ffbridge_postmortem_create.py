@@ -1422,6 +1422,11 @@ def _active_job_for_player(
 
 
 def generate_health(cache_dir: Optional[pathlib.Path] = None) -> Dict[str, Any]:
+    """Return current writer state plus separately labeled error history.
+
+    ``last_error`` is populated only when the latest job failed. Historical
+    failures remain available under ``most_recent_error`` with job and time.
+    """
     directory = pathlib.Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
     jobs = _load_jobs_from_store(directory)
     active = [job for job in jobs if job.status in _ACTIVE_JOB_STATUSES]
@@ -1446,6 +1451,20 @@ def generate_health(cache_dir: Optional[pathlib.Path] = None) -> Dict[str, Any]:
             if result.get("error")
         ]
         latest_error_detail = result_errors[-1] if result_errors else None
+    active_error = (
+        latest_error
+        if latest is not None
+        and latest_error is not None
+        and latest_error.job_id == latest.job_id
+        and latest.status == "error"
+        else None
+    )
+    active_error_detail = latest_error_detail if active_error else None
+    most_recent_error_at = (
+        (latest_error.updated_at or latest_error.started_at)
+        if latest_error
+        else None
+    )
     parquet_files = list(directory.glob("df-*.parquet")) if directory.is_dir() else []
     latest_parquet = (
         max(parquet_files, key=lambda path: path.stat().st_mtime)
@@ -1467,8 +1486,11 @@ def generate_health(cache_dir: Optional[pathlib.Path] = None) -> Dict[str, Any]:
         ),
         "last_job_id": latest.job_id if latest else None,
         "last_job_status": latest.status if latest else None,
-        "last_error": latest_error_detail,
-        "last_error_job_id": latest_error.job_id if latest_error else None,
+        "last_error": active_error_detail,
+        "last_error_job_id": active_error.job_id if active_error else None,
+        "most_recent_error": latest_error_detail,
+        "most_recent_error_job_id": latest_error.job_id if latest_error else None,
+        "most_recent_error_at": most_recent_error_at,
         "last_parquet_write_at": (
             datetime.fromtimestamp(latest_parquet.stat().st_mtime, tz=timezone.utc).isoformat(
                 timespec="seconds"
