@@ -106,5 +106,35 @@ class WriterHealthTests(unittest.TestCase):
         dataset_info.assert_not_called()
 
 
+class PlayedOnDateBoundaryTests(unittest.TestCase):
+    @patch.object(api, "_get_json")
+    def test_api_client_passes_required_player_and_clubs(self, get_json):
+        get_json.return_value = {"found": True}
+
+        result = api.last_game("Alice Smith", ["21333"])
+
+        self.assertEqual(result, {"found": True})
+        get_json.assert_called_once_with(
+            "/player-games/last",
+            {"player": "Alice Smith", "clubs": ["21333"]},
+        )
+
+    @patch.object(mcp_server.api, "played_today")
+    def test_mcp_requires_explicit_player(self, played):
+        played.return_value = {"played": True}
+
+        result = mcp_server.ffbridge_postmortem_played_today("Alice Smith")
+
+        self.assertEqual(result, {"played": True})
+        played.assert_called_once_with("Alice Smith", None)
+        with self.assertRaises(TypeError):
+            mcp_server.ffbridge_postmortem_played_today()
+
+    def test_api_registers_player_game_routes(self):
+        paths = {route.path for route in api_server.app.routes}
+        self.assertIn("/player-games/last", paths)
+        self.assertIn("/player-games/played-today", paths)
+
+
 if __name__ == "__main__":
     unittest.main()

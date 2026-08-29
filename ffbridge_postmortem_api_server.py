@@ -119,6 +119,38 @@ def source_sessions(
     return svc.list_source_sessions(player_id, date_from=date_from, date_to=date_to)
 
 
+@app.get("/player-games/last")
+def last_game(
+    player: str = Query(
+        ...,
+        description="Required player name or FFBridge/Lancelot/Classic number",
+    ),
+    clubs: Optional[list[str]] = Query(
+        None,
+        description=(
+            "Optional club names, codes, group IDs, or FFBridge group URLs. "
+            "Without clubs, only simultaneous games are searched."
+        ),
+    ),
+) -> dict:
+    return svc.last_game(player, clubs)
+
+
+@app.get("/player-games/played-today")
+def played_today(
+    player: str = Query(
+        ...,
+        description="Required player name or FFBridge/Lancelot/Classic number",
+    ),
+    clubs: Optional[list[str]] = Query(
+        None,
+        description=(
+            "Optional club names, codes, group IDs, or FFBridge group URLs. "
+            "Without clubs, only simultaneous games are searched."
+        ),
+    ),
+) -> dict:
+    return svc.played_today(player, clubs)
 @app.post("/generate")
 def generate(
     player_id: str,

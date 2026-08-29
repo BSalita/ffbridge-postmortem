@@ -22,6 +22,7 @@ import duckdb
 import polars as pl
 
 import ffbridge_postmortem_create as create
+import ffbridge_player_game_service as player_games
 
 _APP_DIR = pathlib.Path(__file__).resolve().parent
 CACHE_DIR = pathlib.Path(os.environ.get("FFBRIDGE_POSTMORTEM_CACHE_DIR", str(_APP_DIR / "cache")))
@@ -367,6 +368,20 @@ def list_source_sessions(
         date_to=date_to,
         cache_dir=CACHE_DIR,
     )
+
+
+def last_game(
+    player: str,
+    clubs: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    return player_games.last_game(player, clubs)
+
+
+def played_today(
+    player: str,
+    clubs: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    return player_games.played_today(player, clubs)
 
 
 def generate_postmortems(

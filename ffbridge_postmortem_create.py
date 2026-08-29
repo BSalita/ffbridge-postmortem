@@ -14,6 +14,7 @@ import pathlib
 import sys
 import threading
 import time
+import unicodedata
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -488,6 +489,79 @@ def list_source_sessions(
         "sessions": sessions,
         "count": len(sessions),
     }
+
+
+def _normalized_person_name(value: Any) -> str:
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    return " ".join(
+        "".join(character for character in text if not unicodedata.combining(character))
+        .casefold()
+        .split()
+    )
+
+
+def _person_display_name(person: Dict[str, Any]) -> str:
+    return " ".join(
+        part
+        for part in (
+            str(person.get("firstName") or "").strip(),
+            str(person.get("lastName") or "").strip(),
+        )
+        if part
+    )
+
+
+def resolve_player_query(
+    player: str,
+    *,
+    auth: Optional[LancelotAuth] = None,
+) -> Tuple[ResolvedPlayer, Optional[str]]:
+    """Resolve a required player name or number."""
+    current = auth or ensure_lancelot_auth()
+    query = str(player).strip()
+    if not query:
+        raise ValueError("player is required; provide a player name or number")
+    if query.isdigit() or ":" in query:
+        return resolve_player(query, token=current.token), None
+
+    people = mlBridgeFFLib.search_persons(query, current.token)
+    wanted = _normalized_person_name(query)
+    exact = [
+        person
+        for person in people
+        if wanted
+        in {
+            _normalized_person_name(_person_display_name(person)),
+            _normalized_person_name(
+                f"{person.get('lastName') or ''} {person.get('firstName') or ''}"
+            ),
+        }
+    ]
+    candidates = exact or people
+    if len(candidates) != 1:
+        summaries = [
+            {
+                "name": _person_display_name(person),
+                "license_number": person.get("ffbId"),
+            }
+            for person in candidates[:10]
+        ]
+        raise ValueError(
+            f"Player name {query!r} matched {len(candidates)} people; "
+            f"provide a license number. Candidates: {summaries}"
+        )
+    person = candidates[0]
+    if person.get("id") is None or person.get("ffbId") is None:
+        raise ValueError(f"Lancelot returned an incomplete person record for {query!r}")
+    resolved = ResolvedPlayer(
+        lancelot_id=str(person["id"]),
+        license_number=str(person["ffbId"]),
+        requested_id=query,
+        classic_person_id=(
+            str(person["migrationId"]) if person.get("migrationId") is not None else None
+        ),
+    )
+    return resolved, _person_display_name(person) or None
 
 
 # ---------------------------------------------------------------------------

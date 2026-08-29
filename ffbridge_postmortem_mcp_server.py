@@ -12,7 +12,7 @@ Lancelot or run augmentation; it GET/POST-s FFBRIDGE_POSTMORTEM_API_BASE_URL
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from mcp.server.mcpserver import MCPServer
 from starlette.requests import Request
@@ -151,6 +151,35 @@ def ffbridge_postmortem_list_source_sessions(
     session_id, date, club, and already_cached.
     """
     return _writer_tool(api.list_source_sessions, player_id, date_from, date_to)
+
+
+@mcp.tool()
+def ffbridge_postmortem_last_game(
+    player: str,
+    clubs: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Return a player's latest published FFBridge game and a concise summary.
+
+    player is required and may be a name, FFBridge license number, Lancelot
+    person id, or Classic/migration id. Without clubs, searches configured
+    simultaneous series. clubs optionally adds current-season ordinary games
+    at named clubs, club codes, group IDs, or FFBridge group URLs.
+    """
+    return _writer_tool(api.last_game, player, clubs)
+
+
+@mcp.tool()
+def ffbridge_postmortem_played_today(
+    player: str,
+    clubs: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Whether a required player has a published FFBridge result today.
+
+    Input and club coverage are the same as ffbridge_postmortem_last_game.
+    Returns structured game fields plus a human-readable summary for each
+    matching game.
+    """
+    return _writer_tool(api.played_today, player, clubs)
 
 
 @mcp.tool()

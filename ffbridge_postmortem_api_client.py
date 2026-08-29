@@ -140,6 +140,26 @@ def list_source_sessions(
     )
 
 
+def last_game(
+    player: str,
+    clubs: Optional[list[str]] = None,
+) -> Dict[str, Any]:
+    return _get_json(
+        "/player-games/last",
+        {"player": player, "clubs": clubs},
+    )
+
+
+def played_today(
+    player: str,
+    clubs: Optional[list[str]] = None,
+) -> Dict[str, Any]:
+    return _get_json(
+        "/player-games/played-today",
+        {"player": player, "clubs": clubs},
+    )
+
+
 def generate(
     player_id: str,
     session_id: Optional[str] = None,
