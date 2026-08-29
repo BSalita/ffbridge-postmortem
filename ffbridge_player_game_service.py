@@ -6,6 +6,7 @@ import threading
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
+from functools import lru_cache
 from typing import Any, Dict, Iterable, List, Optional
 
 import requests
@@ -121,6 +122,7 @@ def _club_catalog() -> List[Dict[str, Any]]:
         return rows
 
 
+@lru_cache(maxsize=4096)
 def _direct_group(token: str) -> Optional[Dict[str, Any]]:
     match = _GROUP_URL_RE.search(token)
     group_id = match.group(1) if match else token if token.isdigit() else None
@@ -134,12 +136,19 @@ def _direct_group(token: str) -> Optional[Dict[str, Any]]:
         if exc.response is not None and exc.response.status_code == 404:
             return None
         raise
-    organization = (
-        (((group.get("phase") or {}).get("stade") or {}).get("organization"))
+    stade = ((group.get("phase") or {}).get("stade") or {})
+    organization = stade.get("organization") or {}
+    season = (
+        (stade.get("competitionDivision") or {}).get("season")
+        or stade.get("season")
         or {}
     )
     return {
         "group_id": group_id,
+        "season_id": (
+            int(season["id"]) if season.get("id") is not None else None
+        ),
+        "season_label": season.get("label"),
         "club_id": (
             str(organization["id"]) if organization.get("id") is not None else None
         ),
@@ -180,6 +189,33 @@ def resolve_clubs(clubs: Optional[List[str]]) -> List[Dict[str, Any]]:
         ]
         if not matches:
             raise ValueError(f"Unknown current-season FFBridge club {token!r}")
+        # results/search omits season metadata and may return the club's groups
+        # from several seasons despite searchSeason=current. Resolve the small
+        # matched set to full group records before selecting the newest season.
+        with ThreadPoolExecutor(max_workers=min(8, len(matches))) as executor:
+            detailed_matches = list(
+                executor.map(
+                    lambda row: _direct_group(str(row["group_id"])),
+                    matches,
+                )
+            )
+        matches = [row for row in detailed_matches if row is not None]
+        if not matches:
+            raise ValueError(
+                f"No usable current-season FFBridge groups for club {token!r}"
+            )
+        season_ids = [
+            int(row["season_id"])
+            for row in matches
+            if row.get("season_id") is not None
+        ]
+        if season_ids:
+            latest_season_id = max(season_ids)
+            matches = [
+                row
+                for row in matches
+                if row.get("season_id") == latest_season_id
+            ]
         club_keys = {(row["club_code"], row["club_name"]) for row in matches}
         if len(club_keys) > 1:
             raise ValueError(

@@ -21,6 +21,44 @@ def _http_error(status_code: int) -> requests.HTTPError:
 
 
 class PlayerGameSummaryTests(unittest.TestCase):
+    def test_club_code_resolves_only_latest_season_groups(self):
+        common = {
+            "club_id": "1599",
+            "club_migration_id": "1634",
+            "club_code": "5802079",
+            "club_name": "Bridge Club Levallois Perret",
+        }
+        catalog = [
+            {**common, "group_id": "8199"},
+            {**common, "group_id": "14025"},
+            {**common, "group_id": "21333"},
+        ]
+        details = {
+            row["group_id"]: {
+                **row,
+                "season_id": season_id,
+                "season_label": season_label,
+            }
+            for row, season_id, season_label in (
+                (catalog[0], 36, "2024/2025"),
+                (catalog[1], 37, "2025/2026"),
+                (catalog[2], 38, "2026/2027"),
+            )
+        }
+
+        with (
+            patch.object(games, "_club_catalog", return_value=catalog),
+            patch.object(
+                games,
+                "_direct_group",
+                side_effect=lambda group_id: details[group_id],
+            ),
+        ):
+            result = games.resolve_clubs(["5802079"])
+
+        self.assertEqual([row["group_id"] for row in result], ["21333"])
+        self.assertEqual(result[0]["season_label"], "2026/2027")
+
     def test_formats_requested_rich_summary(self):
         candidate = {
             "session_id": "300900",
