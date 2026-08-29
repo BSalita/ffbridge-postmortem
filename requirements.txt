@@ -44,8 +44,6 @@ mypy
 types-requests
 types-urllib3
 
-# MCP server (ffbridge_postmortem_mcp_server.py, streamable HTTP transport)
-mcp
 
 # Postmortem HTTP API (ffbridge_postmortem_api_server.py)
 fastapi

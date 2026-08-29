@@ -5,7 +5,6 @@ import requests
 
 import ffbridge_postmortem_api_client as api
 import ffbridge_postmortem_api_server as api_server
-import ffbridge_postmortem_mcp_server as mcp_server
 
 
 class WriterHealthTests(unittest.TestCase):
@@ -65,19 +64,6 @@ class WriterHealthTests(unittest.TestCase):
         self.assertEqual(result["detail"], "sidecar_error")
         self.assertEqual(result["error"], "not ready")
 
-    def test_writer_tool_maps_sidecar_failure(self):
-        failure = api.FfbridgeApiClientError(
-            "connection refused",
-            hint="restart writer",
-            reason="sidecar_down",
-        )
-
-        result = mcp_server._writer_tool(Mock(side_effect=failure))
-
-        self.assertEqual(result["error"], "writer_unavailable")
-        self.assertEqual(result["reason"], "sidecar_down")
-        self.assertEqual(result["detail"], "connection refused")
-
     @patch.object(
         api_server.create,
         "generate_health",
@@ -118,17 +104,6 @@ class PlayedOnDateBoundaryTests(unittest.TestCase):
             "/player-games/last",
             {"player": "Alice Smith", "clubs": ["21333"]},
         )
-
-    @patch.object(mcp_server.api, "played_today")
-    def test_mcp_requires_explicit_player(self, played):
-        played.return_value = {"played": True}
-
-        result = mcp_server.ffbridge_postmortem_played_today("Alice Smith")
-
-        self.assertEqual(result, {"played": True})
-        played.assert_called_once_with("Alice Smith", None)
-        with self.assertRaises(TypeError):
-            mcp_server.ffbridge_postmortem_played_today()
 
     def test_api_registers_player_game_routes(self):
         paths = {route.path for route in api_server.app.routes}
