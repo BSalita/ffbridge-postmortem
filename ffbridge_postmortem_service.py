@@ -12,20 +12,25 @@ Env:
   FFBRIDGE_POSTMORTEM_CACHE_DIR  cache directory (default ./cache next to this file)
 """
 
+import json
 import os
 import pathlib
 import re
 import threading
+from datetime import date
 from typing import Any, Dict, List, Optional, Tuple
 
 import duckdb
 import polars as pl
 
+import ffbridge_postmortem_archive as archive
 import ffbridge_postmortem_create as create
+import ffbridge_postmortem_normalized as normalized
 import ffbridge_player_game_service as player_games
 
 _APP_DIR = pathlib.Path(__file__).resolve().parent
 CACHE_DIR = pathlib.Path(os.environ.get("FFBRIDGE_POSTMORTEM_CACHE_DIR", str(_APP_DIR / "cache")))
+HIERARCHICAL_DIR = normalized.resolve_hierarchical_dir(CACHE_DIR)
 
 CON_REGISTER_NAME = "self"
 DEFAULT_SQL_ROW_LIMIT = 500
@@ -124,7 +129,46 @@ def list_cached_postmortems(player_id: Optional[str] = None) -> List[Dict[str, A
                 "cached_at": stat.st_mtime,
             }
         )
-    out.sort(key=lambda d: d["cached_at"], reverse=True)
+    if player_id is None:
+        archived = archive.latest_manifest()
+    else:
+        archived = archive.archived_sessions_for_player(
+            player_match_ids(str(player_id))
+        )
+    existing = {(row["session_id"], row.get("player_id")) for row in out}
+    for row in archived.iter_rows(named=True):
+        archive_row = {
+            "player_id": str(player_id) if player_id is not None else None,
+            "session_id": row["session_id"],
+            "file": row["fragment_path"],
+            "size_bytes": row.get("size_bytes"),
+            "cached_at": row.get("archived_at"),
+            "source": "archive",
+            "revision": row.get("revision"),
+        }
+        key = (archive_row["session_id"], archive_row["player_id"])
+        if key not in existing:
+            out.append(archive_row)
+    if player_id is None and HIERARCHICAL_DIR is not None:
+        hierarchical = normalized.latest_hierarchical_manifest(HIERARCHICAL_DIR)
+        existing_sessions = {row["session_id"] for row in out}
+        for row in hierarchical.iter_rows(named=True):
+            session_id = str(row["session_id"])
+            if session_id in existing_sessions:
+                continue
+            out.append(
+                {
+                    "player_id": None,
+                    "session_id": session_id,
+                    "file": row.get("results_path"),
+                    "size_bytes": None,
+                    "cached_at": row.get("archived_at"),
+                    "source": "hierarchical_archive",
+                    "revision": row.get("revision"),
+                }
+            )
+            existing_sessions.add(session_id)
+    out.sort(key=lambda d: str(d["cached_at"]), reverse=True)
     return out
 
 
@@ -133,7 +177,11 @@ def dataset_info() -> Dict[str, Any]:
     return {
         "cache_dir": str(CACHE_DIR),
         "cached_postmortems": len(cached),
-        "players": sorted({c["player_id"] for c in cached}),
+        "players": sorted(
+            {c["player_id"] for c in cached if c["player_id"] is not None}
+        ),
+        "archive": archive.archive_info(),
+        "hierarchical_archive": normalized.hierarchical_info(HIERARCHICAL_DIR),
         "generate": {
             "tool": "ffbridge_postmortem_generate",
             "list_source_sessions_tool": "ffbridge_postmortem_list_source_sessions",
@@ -156,7 +204,32 @@ def dataset_info() -> Dict[str, Any]:
 
 
 def resolve_cache_file(player_id: str, session_id: Optional[str] = None) -> pathlib.Path:
-    return _resolve_cache_file(player_id, session_id)
+    path, _is_archive, _cache_player_id = _resolve_postmortem_file(
+        player_id, session_id
+    )
+    return path
+
+
+def _resolve_postmortem_file(
+    player_id: str,
+    session_id: Optional[str] = None,
+) -> Tuple[pathlib.Path, bool, Optional[str]]:
+    if session_id is not None:
+        try:
+            return archive.resolve_archived_session(session_id), True, None
+        except FileNotFoundError:
+            pass
+    else:
+        indexed = archive.archived_sessions_for_player(
+            player_match_ids(str(player_id))
+        )
+        if indexed.height:
+            path = archive.resolve_archive_dir() / indexed["fragment_path"][0]
+            if path.is_file():
+                return path, True, None
+    path = _resolve_cache_file(player_id, session_id)
+    parsed = _parse_cache_filename(path.name)
+    return path, False, parsed["player_id"] if parsed is not None else None
 
 
 def _resolve_cache_file(player_id: str, session_id: Optional[str] = None) -> pathlib.Path:
@@ -252,20 +325,97 @@ def personalize(
     raise ValueError(f"Player {pid} not found in any Player_ID_[NESW] column of the cached postmortem.")
 
 
+def _load_hierarchical_postmortem(
+    player_id: str, session_id: str
+) -> Tuple[pl.DataFrame, Dict[str, Any]]:
+    if HIERARCHICAL_DIR is None:
+        raise FileNotFoundError("Hierarchical postmortem archive is not configured")
+    if not (HIERARCHICAL_DIR / "metadata.json").is_file():
+        raise FileNotFoundError(
+            f"Hierarchical postmortem archive is unavailable: {HIERARCHICAL_DIR}"
+        )
+    if not normalized.hierarchical_has_session(HIERARCHICAL_DIR, session_id):
+        raise FileNotFoundError(
+            f"Hierarchical archive has no session {session_id}"
+        )
+    metadata = json.loads(
+        (HIERARCHICAL_DIR / "metadata.json").read_text(encoding="utf-8")
+    )
+    mapping = metadata.get("column_mapping")
+    if not isinstance(mapping, dict) or not mapping:
+        raise FileNotFoundError(
+            f"Hierarchical archive metadata lacks column_mapping: {HIERARCHICAL_DIR}"
+        )
+    columns = [
+        column
+        for column in mapping
+        if column not in {"session_id", "Board", "_result_row_id"}
+    ]
+    frame = normalized.normalized_player_report(
+        HIERARCHICAL_DIR,
+        session_id=str(session_id),
+        player_ids=player_match_ids(str(player_id)),
+        columns=columns,
+        only_player_rows=False,
+    )
+    if frame.is_empty():
+        raise FileNotFoundError(
+            f"Hierarchical archive has no rows for session {session_id}"
+        )
+    frame, meta = personalize(frame, str(player_id))
+    frame = archive.restore_pair_direction(frame, meta["pair_direction"])
+    meta.update(
+        {
+            "session_id": str(session_id),
+            "cache_file": None,
+            "data_source": "hierarchical_archive",
+            "archive_file": None,
+            "requested_id": str(player_id),
+            "cache_player_id": None,
+            "hierarchical_dir": str(HIERARCHICAL_DIR),
+        }
+    )
+    return frame, meta
+
+
 def load_postmortem(player_id: str, session_id: Optional[str] = None) -> Tuple[pl.DataFrame, Dict[str, Any]]:
     """Load a cached postmortem (latest session when session_id is None) and
     personalize it for the player. Returns (df, meta)."""
-    path = _resolve_cache_file(str(player_id), session_id)
-    parsed = _parse_cache_filename(path.name)
+    if session_id is not None:
+        try:
+            return _load_hierarchical_postmortem(str(player_id), str(session_id))
+        except FileNotFoundError:
+            pass
+    path, is_archive, cache_player_id = _resolve_postmortem_file(
+        str(player_id), session_id
+    )
     df = _read_parquet_cached(path)
     # Cache files are named with the Lancelot person id. Personalize with the
     # requested id plus the filename id so license 9500754 and Lancelot 246273
     # both match whichever namespace Player_ID_* actually stores.
-    df, meta = personalize(df, str(player_id), extra_ids=[parsed["player_id"]])
-    meta["session_id"] = parsed["session_id"]
+    df, meta = personalize(
+        df,
+        str(player_id),
+        extra_ids=[cache_player_id] if cache_player_id is not None else None,
+    )
+    if is_archive:
+        df = archive.restore_pair_direction(df, meta["pair_direction"])
+        resolved_session_id = str(session_id) if session_id is not None else str(
+            archive.archived_sessions_for_player(
+                player_match_ids(str(player_id))
+            )["session_id"][0]
+        )
+    else:
+        parsed = _parse_cache_filename(path.name)
+        if parsed is None:
+            raise ValueError(f"Invalid postmortem cache filename: {path.name}")
+        resolved_session_id = parsed["session_id"]
+    meta["session_id"] = resolved_session_id
     meta["cache_file"] = path.name
+    meta["data_source"] = "archive" if is_archive else "cache"
+    meta["archive_file"] = str(path) if is_archive else None
     meta["requested_id"] = str(player_id)
-    meta["cache_player_id"] = parsed["player_id"]
+    meta["cache_player_id"] = cache_player_id
     return df, meta
 
 
@@ -337,6 +487,61 @@ def board_results(
     }
 
 
+def hierarchical_board_results(
+    player_id: str,
+    session_id: str,
+    *,
+    only_my_boards: bool = True,
+    columns: Optional[List[str]] = None,
+    limit: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Produce a report from projected hierarchical board/result leaves."""
+    if HIERARCHICAL_DIR is None:
+        raise FileNotFoundError("Hierarchical postmortem archive is not configured")
+    if not (HIERARCHICAL_DIR / "metadata.json").is_file():
+        raise FileNotFoundError(
+            f"Hierarchical postmortem archive is unavailable: {HIERARCHICAL_DIR}"
+        )
+    if not normalized.hierarchical_has_session(HIERARCHICAL_DIR, session_id):
+        raise FileNotFoundError(
+            f"Hierarchical archive has no session {session_id}"
+        )
+    match_ids = player_match_ids(str(player_id))
+    wanted = columns or BOARD_SUMMARY_COLUMNS
+    context_columns = [
+        *[f"Player_ID_{seat}" for seat in "NESW"],
+        *[f"Player_Name_{seat}" for seat in "NESW"],
+        "Declarer_Direction",
+        "Contract",
+        "Date",
+    ]
+    selected = list(dict.fromkeys([*wanted, *context_columns]))
+    frame = normalized.normalized_player_report(
+        HIERARCHICAL_DIR,
+        session_id=str(session_id),
+        player_ids=match_ids,
+        columns=selected,
+        only_player_rows=only_my_boards,
+    )
+    frame, meta = personalize(frame, str(player_id))
+    frame = archive.restore_pair_direction(frame, meta["pair_direction"])
+    meta.update(
+        {
+            "session_id": str(session_id),
+            "data_source": "hierarchical_archive",
+            "requested_id": str(player_id),
+            "hierarchical_dir": str(HIERARCHICAL_DIR),
+        }
+    )
+    return board_results(
+        frame,
+        meta,
+        only_my_boards=only_my_boards,
+        columns=wanted,
+        limit=limit,
+    )
+
+
 def schema_columns(df: pl.DataFrame, pattern: Optional[str] = None, limit: Optional[int] = None) -> Dict[str, Any]:
     """Column names (with dtypes) of the augmented postmortem dataframe,
     optionally filtered by a case-insensitive regex. The frame has thousands
@@ -354,6 +559,74 @@ def schema_columns(df: pl.DataFrame, pattern: Optional[str] = None, limit: Optio
         "matched_columns": len(names),
         "truncated": truncated,
         "columns": {c: dtypes[c] for c in names},
+    }
+
+
+def archive_rows(
+    *,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    series_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    player_id: Optional[str] = None,
+    columns: Optional[List[str]] = None,
+    limit: int = DEFAULT_SQL_ROW_LIMIT,
+) -> Dict[str, Any]:
+    """Read bounded historical rows with filters pushed into Parquet scans."""
+    limit = max(1, min(limit, MAX_SQL_ROW_LIMIT))
+    files = archive.dataset_files()
+    if not files:
+        raise FileNotFoundError(
+            "The FFBridge postmortem analytics dataset has not been compacted"
+        )
+    requested = columns or BOARD_SUMMARY_COLUMNS
+    mandatory = ["Date", "session_id"]
+    if player_id is not None:
+        mandatory.extend(f"Player_ID_{seat}" for seat in "NESW")
+    wanted = list(dict.fromkeys([*requested, *mandatory]))
+    lazy_frames: list[pl.LazyFrame] = []
+    for path in files:
+        schema = pl.scan_parquet(path).collect_schema()
+        available = [column for column in wanted if column in schema]
+        lazy_frames.append(pl.scan_parquet(path).select(available))
+    query = pl.concat(lazy_frames, how="diagonal_relaxed")
+    if date_from is not None:
+        query = query.filter(pl.col("Date").cast(pl.Date) >= date.fromisoformat(date_from))
+    if date_to is not None:
+        query = query.filter(pl.col("Date").cast(pl.Date) <= date.fromisoformat(date_to))
+    if series_id is not None:
+        if "series_id" not in query.collect_schema():
+            raise ValueError("Archive dataset does not contain series_id")
+        query = query.filter(pl.col("series_id").cast(pl.String) == str(series_id))
+    if session_id is not None:
+        query = query.filter(pl.col("session_id").cast(pl.String) == str(session_id))
+    if player_id is not None:
+        match_ids = player_match_ids(player_id)
+        query = query.filter(
+            pl.any_horizontal(
+                *(
+                    pl.col(f"Player_ID_{seat}").cast(pl.String).is_in(match_ids)
+                    for seat in "NESW"
+                )
+            )
+        )
+    result = query.select(
+        [column for column in requested if column in query.collect_schema()]
+    ).limit(limit + 1).collect(engine="streaming")
+    truncated = result.height > limit
+    result = result.head(limit)
+    return {
+        "columns": result.columns,
+        "rows": result.to_dicts(),
+        "row_count": result.height,
+        "truncated": truncated,
+        "filters": {
+            "date_from": date_from,
+            "date_to": date_to,
+            "series_id": series_id,
+            "session_id": session_id,
+            "player_id": player_id,
+        },
     }
 
 

@@ -52,12 +52,17 @@ _ensure_mlbridge_on_path()
 
 import polars as pl
 
+import ffbridge_postmortem_archive as postmortem_archive
+import ffbridge_postmortem_normalized as postmortem_normalized
 import mlBridge.mlBridgeFFLib as mlBridgeFFLib
 import mlBridge.mlBridgeFFIndexLib as mlBridgeFFIndexLib
 from mlBridge.mlBridgeAugmentLib import AllAugmentations
 
 DEFAULT_CACHE_DIR = pathlib.Path(
     os.environ.get("FFBRIDGE_POSTMORTEM_CACHE_DIR", str(_APP_DIR / "cache"))
+)
+DEFAULT_HIERARCHICAL_DIR = postmortem_normalized.resolve_hierarchical_dir(
+    DEFAULT_CACHE_DIR
 )
 DEFAULT_SD_PRODUCTIONS = 10
 
@@ -112,6 +117,66 @@ def cache_parquet_path(
 ) -> pathlib.Path:
     directory = pathlib.Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
     return directory / f"df-{session_id}-{player_id}.parquet"
+
+
+def _archive_context(
+    meta: "LancelotSessionMeta",
+    game_entry: Dict[str, Any],
+) -> Dict[str, Any]:
+    return {
+        "series_id": (
+            game_entry.get("series_id")
+            or game_entry.get("migration_series_id")
+            or game_entry.get("competition_id")
+        ),
+        "group_id": meta.group_id,
+        "organization_id": meta.org_id,
+        "organization_name": meta.organization_name,
+        "source_updated_at": (
+            game_entry.get("updatedAt")
+            or game_entry.get("updated_at")
+            or game_entry.get("date")
+        ),
+    }
+
+
+def _entry_archive_context(game_entry: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "series_id": (
+            game_entry.get("series_id")
+            or game_entry.get("migration_series_id")
+            or game_entry.get("competition_id")
+        ),
+        "group_id": game_entry.get("group_id"),
+        "organization_id": game_entry.get("organization_id"),
+        "organization_name": (
+            game_entry.get("organization_name") or game_entry.get("club")
+        ),
+        "source_updated_at": (
+            game_entry.get("updatedAt")
+            or game_entry.get("updated_at")
+            or game_entry.get("date")
+        ),
+    }
+
+
+def _write_hierarchical_if_configured(
+    frame: pl.DataFrame,
+    session_id: str,
+    archive_result: Dict[str, Any],
+    *,
+    series_id: Any,
+) -> Optional[Dict[str, Any]]:
+    output_dir = postmortem_normalized.resolve_hierarchical_dir(DEFAULT_CACHE_DIR)
+    if output_dir is None or not (output_dir / "metadata.json").is_file():
+        return None
+    return postmortem_normalized.write_hierarchical_session(
+        frame,
+        session_id=str(session_id),
+        revision=str(archive_result["revision"]),
+        output_dir=output_dir,
+        series_id=str(series_id) if series_id is not None else None,
+    )
 
 
 def json_normalize_api(json_data: Any, separator: str = "_") -> pl.DataFrame:
@@ -849,6 +914,17 @@ def create_lancelot_postmortem(
         meta, _, _ = lancelot_session_meta(
             resolved.lancelot_id, session_id, game_entry, token=token, cache_dir=directory
         )
+        archive_result = postmortem_archive.archive_session(
+            pl.read_parquet(cache_file),
+            session_id,
+            context=_archive_context(meta, game_entry),
+        )
+        hierarchical_result = _write_hierarchical_if_configured(
+            pl.read_parquet(cache_file),
+            str(session_id),
+            archive_result,
+            series_id=_entry_archive_context(game_entry).get("series_id"),
+        )
         _log(f"end create session={session_id} status=cached")
         return {
             "session_id": str(session_id),
@@ -856,6 +932,9 @@ def create_lancelot_postmortem(
             "player_license_number": resolved.license_number,
             "status": "cached",
             "cache_file": cache_file.name,
+            "archive_file": archive_result["archive_file"],
+            "archive_revision": archive_result["revision"],
+            "hierarchical_archive": hierarchical_result,
             "meta": meta,
             "df": None,
         }
@@ -878,6 +957,17 @@ def create_lancelot_postmortem(
         progress=augment_progress,
         lock_func=lock_func,
     )
+    archive_result = postmortem_archive.archive_session(
+        df,
+        built.meta.session_id,
+        context=_archive_context(built.meta, game_entry),
+    )
+    hierarchical_result = _write_hierarchical_if_configured(
+        df,
+        built.meta.session_id,
+        archive_result,
+        series_id=_entry_archive_context(game_entry).get("series_id"),
+    )
     ended = datetime.now()
     _log(
         f"end create session={built.meta.session_id} status=ok "
@@ -889,6 +979,9 @@ def create_lancelot_postmortem(
         "player_license_number": built.meta.player_license_number,
         "status": "ok",
         "cache_file": cache_parquet_path(built.meta.session_id, built.meta.player_id, directory).name,
+        "archive_file": archive_result["archive_file"],
+        "archive_revision": archive_result["revision"],
+        "hierarchical_archive": hierarchical_result,
         "meta": built.meta,
         "df": df,
         "ranking_df": built.ranking_df,
@@ -1106,6 +1199,8 @@ def _session_result_row(
     player_id: str,
     status: str,
     cache_file: Optional[str] = None,
+    archive_file: Optional[str] = None,
+    archive_revision: Optional[str] = None,
     error: Optional[str] = None,
     meta: Any = None,
 ) -> Dict[str, Any]:
@@ -1114,6 +1209,8 @@ def _session_result_row(
         "player_id": player_id,
         "status": status,
         "cache_file": cache_file,
+        "archive_file": archive_file,
+        "archive_revision": archive_revision,
         "error": error,
         "meta": asdict(meta) if meta is not None and not isinstance(meta, dict) else meta,
     }
@@ -1219,6 +1316,8 @@ def _run_generate_job(
                                 player_id=result["player_id"],
                                 status=result["status"],
                                 cache_file=result["cache_file"],
+                                archive_file=result.get("archive_file"),
+                                archive_revision=result.get("archive_revision"),
                                 meta=result.get("meta"),
                             )
                         )
@@ -1555,12 +1654,27 @@ def generate_postmortems(
     for entry in sessions:
         path = cache_parquet_path(entry["session_id"], resolved.lancelot_id, directory)
         if path.is_file() and not force:
+            cached_frame = pl.read_parquet(path)
+            archive_result = postmortem_archive.archive_session(
+                cached_frame,
+                entry["session_id"],
+                context=_entry_archive_context(entry),
+            )
+            hierarchical_result = _write_hierarchical_if_configured(
+                cached_frame,
+                entry["session_id"],
+                archive_result,
+                series_id=_entry_archive_context(entry).get("series_id"),
+            )
             cached_results.append(
                 {
                     "session_id": entry["session_id"],
                     "player_id": resolved.lancelot_id,
                     "status": "cached",
                     "cache_file": path.name,
+                    "archive_file": archive_result["archive_file"],
+                    "archive_revision": archive_result["revision"],
+                    "hierarchical_archive": hierarchical_result,
                 }
             )
         else:
