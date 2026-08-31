@@ -580,5 +580,62 @@ class OtherPlayerSessionTests(unittest.TestCase):
         self.assertEqual({result["count"] for result in results}, {1})
 
 
+class ResultsPageUrlTests(unittest.TestCase):
+    def test_pair_url_requires_group_and_session(self):
+        self.assertEqual(
+            create.ffbridge_results_page_url(
+                session_id=300749,
+                group_id=21333,
+                team_id=15106224,
+            ),
+            "https://www.ffbridge.fr/competitions/results/groups/"
+            "21333/sessions/300749/pairs/15106224",
+        )
+        self.assertEqual(
+            create.ffbridge_results_page_url(session_id=300749, group_id=21333),
+            "https://www.ffbridge.fr/competitions/results/groups/"
+            "21333/sessions/300749/ranking",
+        )
+        self.assertIsNone(
+            create.ffbridge_results_page_url(
+                session_id=300749,
+                group_id=None,
+                team_id=15106224,
+            )
+        )
+
+    def test_resolves_group_id_from_session_payload(self):
+        payload = {
+            "groupSessions": [
+                {
+                    "group": {
+                        "id": 21333,
+                        "phase": {
+                            "stade": {
+                                "organization": {
+                                    "id": 5802079,
+                                    "ffbCode": "5802079",
+                                }
+                            }
+                        },
+                    }
+                }
+            ]
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(
+                create,
+                "_fetch_lancelot_json_cached",
+                return_value=payload,
+            ) as fetch:
+                group_id = create.resolve_session_group_id(
+                    300749,
+                    organization_id="5802079",
+                    cache_dir=pathlib.Path(tmp),
+                )
+        self.assertEqual(group_id, "21333")
+        fetch.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

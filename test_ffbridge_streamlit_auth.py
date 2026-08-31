@@ -155,6 +155,39 @@ class StreamlitLancelotRoutingTests(unittest.TestCase):
         rerun.assert_not_called()
         self.assertFalse(state["deferred_start_report"])
 
+    def test_results_url_is_rebuilt_from_session_group_when_meta_lacks_it(self):
+        state = SessionState(
+            session_id=300749,
+            org_id="5802079",
+            team_id=15106224,
+            game_url=None,
+            cache_dir="cache",
+            game_urls_d={},
+        )
+        with (
+            patch.object(app.st, "session_state", state),
+            patch.object(
+                app.pm_create,
+                "resolve_session_group_id",
+                return_value="21333",
+            ),
+        ):
+            url = app._ensure_game_results_url()
+        self.assertEqual(
+            url,
+            "https://www.ffbridge.fr/competitions/results/groups/"
+            "21333/sessions/300749/pairs/15106224",
+        )
+        self.assertEqual(state["game_url"], url)
+
+    def test_broken_none_group_url_is_rejected(self):
+        self.assertIsNone(
+            app._usable_results_url(
+                "https://www.ffbridge.fr/competitions/results/groups/"
+                "None/sessions/300749/pairs/1"
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

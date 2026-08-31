@@ -35,7 +35,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 from urllib.parse import urlparse
-from typing import Dict, Any, List, Optional, Union, Tuple, Callable
+from typing import Dict, Any, List, Mapping, Optional, Union, Tuple, Callable
 from typing_extensions import TypedDict
 
 import endplay # for __version__
@@ -1421,6 +1421,92 @@ def _apply_lancelot_session_meta(meta: Any) -> None:
     st.session_state.section_name = meta.get("section_name")
     st.session_state.team_number = meta.get("team_number")
     st.session_state.game_url = meta.get("game_url")
+    if not st.session_state.get("group_id"):
+        st.session_state.group_id = meta.get("group_id")
+    if not st.session_state.get("team_id"):
+        st.session_state.team_id = meta.get("team_id")
+
+
+def _usable_results_url(url: Any) -> Optional[str]:
+    text = str(url or "").strip()
+    if not text.startswith("http"):
+        return None
+    if "/groups/None/" in text or "/groups/none/" in text:
+        return None
+    return text
+
+
+def _session_results_url_from_entry(entry: Optional[Mapping[str, Any]]) -> Optional[str]:
+    if not entry:
+        return None
+    return _usable_results_url(entry.get("results_url") or entry.get("game_url")) or (
+        pm_create.ffbridge_results_page_url(
+            session_id=entry.get("session_id") or st.session_state.get("session_id"),
+            group_id=entry.get("group_id"),
+            team_id=entry.get("team_id"),
+        )
+    )
+
+
+def _ensure_game_results_url(df: Optional[pl.DataFrame] = None) -> Optional[str]:
+    """Resolve and store the public results page for the selected session."""
+    current = _usable_results_url(st.session_state.get("game_url"))
+    if current:
+        st.session_state.game_url = current
+        return current
+
+    session_id = st.session_state.get("session_id")
+    group_id = st.session_state.get("group_id")
+    team_id = st.session_state.get("team_id")
+    organization_id = st.session_state.get("org_id")
+    player_id = st.session_state.get("player_id")
+    game_urls = st.session_state.get("game_urls_d") or {}
+    entry = None
+    if player_id is not None and session_id is not None:
+        player_games = game_urls.get(str(player_id)) or game_urls.get(player_id) or {}
+        entry = player_games.get(int(session_id)) or player_games.get(session_id)
+    if entry:
+        from_entry = _session_results_url_from_entry(entry)
+        if from_entry:
+            st.session_state.game_url = from_entry
+            return from_entry
+        group_id = group_id or entry.get("group_id")
+        team_id = team_id or entry.get("team_id")
+        organization_id = organization_id or entry.get("organization_id")
+
+    frame = df if df is not None else st.session_state.get("df")
+    if isinstance(frame, pl.DataFrame):
+        if not group_id and "group_id" in frame.columns:
+            group_id = frame["group_id"].drop_nulls().first()
+        if not team_id and "team_id" in frame.columns:
+            team_id = frame["team_id"].drop_nulls().first()
+
+    url = pm_create.ffbridge_results_page_url(
+        session_id=session_id,
+        group_id=group_id,
+        team_id=team_id,
+    )
+    if url is None and session_id is not None and not group_id:
+        cache_dir = st.session_state.get("cache_dir")
+        group_id = pm_create.resolve_session_group_id(
+            session_id,
+            organization_id=organization_id,
+            cache_dir=pathlib.Path(cache_dir) if cache_dir else None,
+        )
+        if group_id:
+            st.session_state.group_id = group_id
+            url = pm_create.ffbridge_results_page_url(
+                session_id=session_id,
+                group_id=group_id,
+                team_id=team_id,
+            )
+    if url:
+        st.session_state.game_url = url
+        if group_id:
+            st.session_state.group_id = group_id
+        if team_id:
+            st.session_state.team_id = team_id
+    return url
 
 
 def get_lancelot_session_mldf(player_id: str, session_id: int, game_entry: Dict[str, Any]) -> pl.DataFrame:
@@ -1565,6 +1651,12 @@ def _populate_game_urls_for_player_lancelot(player_id: str) -> bool:
             'organization_name': entry.get('organization_name') or entry.get('club'),
             'competition_label': entry.get('competition_label'),
             'session_label': entry.get('session_label'),
+            'team_id': entry.get('team_id'),
+            'results_url': pm_create.ffbridge_results_page_url(
+                session_id=session_id,
+                group_id=entry.get('group_id'),
+                team_id=entry.get('team_id'),
+            ),
         }
 
     _remember_resolved_player_ids(listed)
@@ -1730,6 +1822,7 @@ def _change_game_state_lancelot(player_id: str, session_id: Optional[int]) -> bo
             debug_capture_df("Final Dataframe", df, source="ffbridge_postmortem_api")
         st.session_state.df = filter_dataframe(df)
         st.session_state.df_ready = True
+        _ensure_game_results_url(st.session_state.df)
         con = get_session_duckdb_connection()
         con.register("self", st.session_state.df)
 
@@ -3421,7 +3514,6 @@ class FFBridgeApp(PostmortemBase):
 
         self.read_configs()
 
-        is_report_running = bool(st.session_state.get('report_rendering'))
         player_id_key = str(st.session_state.player_id) if st.session_state.player_id is not None else None
         if player_id_key is not None and player_id_key in st.session_state.game_urls_d:
             st.sidebar.selectbox(
@@ -3434,11 +3526,11 @@ class FFBridgeApp(PostmortemBase):
             # Show a small verification of how many games are available
             st.sidebar.caption(f"Games found: {len(st.session_state.game_urls_d.get(player_id_key, {}))}")
 
-        # External links (after render pass completes, even on error)
-        if not is_report_running and st.session_state.get('game_url'):
-            st.sidebar.link_button('View ffbridge Webpage', url=st.session_state.get('game_url', ''))
-            if st.session_state.get('route_url') is not None:
-                st.sidebar.link_button('View Roy Rene Webpage', url=st.session_state.route_url)
+        results_url = _ensure_game_results_url()
+        if results_url:
+            st.sidebar.markdown(f"[FFBridge Result Page]({results_url})")
+        if st.session_state.get('route_url'):
+            st.sidebar.markdown(f"[Roy René Result Page]({st.session_state.route_url})")
         # Download Personalized Report PDF button placeholder (below the link button)
         st.session_state.pdf_link = st.sidebar.empty()
 

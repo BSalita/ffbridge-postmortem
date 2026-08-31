@@ -65,6 +65,89 @@ DEFAULT_HIERARCHICAL_DIR = postmortem_normalized.resolve_hierarchical_dir(
     DEFAULT_CACHE_DIR
 )
 DEFAULT_SD_PRODUCTIONS = 10
+FFBRIDGE_RESULTS_ORIGIN = "https://www.ffbridge.fr"
+
+
+def _public_id(value: Any) -> str:
+    text = str(value).strip() if value is not None else ""
+    if not text or text.lower() == "none":
+        return ""
+    return text
+
+
+def ffbridge_results_page_url(
+    *,
+    session_id: Any,
+    group_id: Any = None,
+    team_id: Any = None,
+) -> Optional[str]:
+    """Public FFBridge results page for a session, optionally a pair."""
+    sid = _public_id(session_id)
+    gid = _public_id(group_id)
+    if not sid or not gid:
+        return None
+    tid = _public_id(team_id)
+    if tid:
+        return (
+            f"{FFBRIDGE_RESULTS_ORIGIN}/competitions/results/groups/{gid}"
+            f"/sessions/{sid}/pairs/{tid}"
+        )
+    return (
+        f"{FFBRIDGE_RESULTS_ORIGIN}/competitions/results/groups/{gid}"
+        f"/sessions/{sid}/ranking"
+    )
+
+
+def resolve_session_group_id(
+    session_id: Any,
+    *,
+    organization_id: Any = None,
+    cache_dir: pathlib.Path | None = None,
+    token: Optional[str] = None,
+) -> Optional[str]:
+    """Return the public results group id for a Lancelot session.
+
+    ``competitions/sessions/{id}`` lists each club's group. When
+    ``organization_id`` is provided it must match that club; a single-group
+    session is used as-is.
+    """
+    sid = _public_id(session_id)
+    if not sid:
+        return None
+    directory = pathlib.Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
+    data = _fetch_lancelot_json_cached(
+        f"competitions/sessions/{sid}",
+        f"sessions/{sid}",
+        token,
+        directory,
+    )
+    if not isinstance(data, dict):
+        return None
+    wanted = _public_id(organization_id)
+    matches: list[tuple[str, set[str]]] = []
+    for group_session in data.get("groupSessions") or []:
+        group = group_session.get("group") or {}
+        group_id = _public_id(group.get("id"))
+        if not group_id:
+            continue
+        organization = (
+            ((group.get("phase") or {}).get("stade") or {}).get("organization")
+            or {}
+        )
+        codes = {
+            _public_id(organization.get("ffbCode")),
+            _public_id(organization.get("id")),
+            _public_id(organization.get("migrationId")),
+        }
+        codes.discard("")
+        matches.append((group_id, codes))
+    if wanted:
+        for group_id, codes in matches:
+            if wanted in codes:
+                return group_id
+    if len(matches) == 1:
+        return matches[0][0]
+    return None
 
 # Same column set _finalize_mldf_for_report keeps before AllAugmentations.
 CORE_MLDF_COLUMNS = [
@@ -735,7 +818,12 @@ def lancelot_session_meta(
     pair_direction = team_d["orientation"]
     me, partner = ("team_player1", "team_player2") if is_player1 else ("team_player2", "team_player1")
     team_id = team_d["team_id"]
-    group_id = game_entry.get("group_id")
+    group_id = _public_id(game_entry.get("group_id")) or resolve_session_group_id(
+        sid,
+        organization_id=game_entry.get("organization_id"),
+        cache_dir=directory,
+        token=token,
+    )
     meta = LancelotSessionMeta(
         player_id=_as_int_str(team_d[f"{me}_id"]) or resolved.lancelot_id,
         session_id=str(sid),
@@ -756,10 +844,12 @@ def lancelot_session_meta(
         partner_direction=pair_direction[1 if is_player1 else 0],
         section_name=team_d.get("section"),
         team_number=team_d.get("tableNumber"),
-        game_url=(
-            f"https://www.ffbridge.fr/competitions/results/groups/{group_id}"
-            f"/sessions/{sid}/pairs/{team_id}"
-        ),
+        game_url=ffbridge_results_page_url(
+            session_id=sid,
+            group_id=group_id,
+            team_id=team_id,
+        )
+        or "",
     )
     return meta, teams_df, team_d
 
