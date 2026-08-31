@@ -286,12 +286,12 @@ def probe_api_sources() -> Dict[str, Dict[str, Any]]:
 
 
 def auto_detect_api_source() -> str:
-    """Pick the default API source: Lancelot if it responds, else Classic."""
-    health = probe_api_sources()
-    if health[API_SOURCE_LANCELOT]['ok']:
-        return API_SOURCE_LANCELOT
-    if health[API_SOURCE_CLASSIC]['ok']:
-        return API_SOURCE_CLASSIC
+    """Use Lancelot unless the user explicitly selects Classic.
+
+    A transient public-version timeout must not switch identifier namespaces.
+    In particular, the Classic probe can return an auth-related 403 while the
+    server is reachable but unusable for member lookup.
+    """
     return API_SOURCE_LANCELOT
 
 
@@ -349,33 +349,6 @@ def make_lancelot_request(path: str, use_auth: bool = True) -> Any:
             token = _validated_lancelot_token(force=True)
             return mlBridgeFFLib.lancelot_get(path, token=token)
         raise
-
-
-def refresh_lancelot_token_via_firebase() -> Optional[str]:
-    """Sign in to FFBridge's Firebase auth with .env credentials and return a fresh Lancelot bearer token.
-
-    This is the same flow the www.ffbridge.fr SPA uses (identitytoolkit signInWithPassword).
-    Returns None if credentials are missing or sign-in fails.
-    """
-    load_dotenv()
-    email = os.getenv('FFBRIDGE_EMAIL')
-    password = os.getenv('FFBRIDGE_PASSWORD')
-    if not email or not password:
-        print("No FFBRIDGE_EMAIL/FFBRIDGE_PASSWORD in .env; cannot refresh Lancelot token.")
-        return None
-    try:
-        token = mlBridgeFFLib.firebase_sign_in(email, password)
-        print(f"🔑 Refreshed Lancelot bearer token via Firebase sign-in (first 20 chars): {token[:20]}...")
-        # Persist for future sessions.
-        try:
-            from dotenv import set_key
-            set_key('.env', 'FFBRIDGE_BEARER_TOKEN_LANCELOT', token)
-        except Exception as e:
-            print(f"Warning: could not persist refreshed token to .env: {e}")
-        return token
-    except Exception as e:
-        print(f"Firebase sign-in failed: {e}")
-        return None
 
 
 _LANCELOT_SEARCH_SCHEMA = {
@@ -1347,13 +1320,13 @@ def get_df_from_api_name_licencie(k: str, url: str) -> pl.DataFrame:
                                     )
                                 ).explode(exploded_col_name).unnest(exploded_col_name)
                             else:
-                                print(f"⚠️ Column '{exploded_col_name}' contains only null values, skipping struct processing")
+                                print(f"Column '{exploded_col_name}' contains only null values, skipping struct processing")
                         except Exception as e:
-                            print(f"⚠️ Error processing column '{exploded_col_name}': {e}. Skipping struct processing.")
+                            print(f"Error processing column '{exploded_col_name}': {e}. Skipping struct processing.")
                     else:
-                        print(f"⚠️ Column '{exploded_col_name}' is empty or all null, skipping struct processing")
+                        print(f"Column '{exploded_col_name}' is empty or all null, skipping struct processing")
                 else:
-                    print(f"⚠️ Column '{exploded_col_name}' not found in DataFrame, skipping")
+                    print(f"Column '{exploded_col_name}' not found in DataFrame, skipping")
         case _:
             json_data = make_api_request_licencie(url)
             if json_data is None:
@@ -3016,11 +2989,12 @@ class FFBridgeApp(PostmortemBase):
         # Default before URL params are applied; URL ?player_id=... will override below.
         st.session_state.player_id = None
 
-        # Pick the API backend by probing both (Lancelot preferred when up). URL ?api_source=
-        # overrides this below via apply_url_params_to_session_state().
+        # Lancelot is the default identifier namespace. Never switch to Classic
+        # because of a transient health-probe result; URL ?api_source= and the
+        # sidebar remain the explicit ways to select Classic.
         if 'api_source' not in st.session_state:
             st.session_state.api_source = auto_detect_api_source()
-            print(f"Auto-detected API source: {st.session_state.api_source} (health: {probe_api_sources()})")
+            print(f"Default API source: {st.session_state.api_source}")
 
         cache_dir = 'cache'
         pathlib.Path(cache_dir).mkdir(exist_ok=True, parents=True)
@@ -3340,8 +3314,6 @@ class FFBridgeApp(PostmortemBase):
             status = 'up' if api_health[source]['ok'] else f"unreachable ({api_health[source]['detail']})"
             health_parts.append(f"{source.capitalize()}: {status}")
         st.sidebar.caption(' | '.join(health_parts))
-        if st.session_state.get('lancelot_sign_in_note'):
-            st.sidebar.caption(st.session_state.lancelot_sign_in_note)
         if not api_health[get_api_source()]['ok']:
             st.sidebar.warning(f"The selected API source ({get_api_source()}) is currently unreachable.")
 
@@ -3502,11 +3474,11 @@ class FFBridgeApp(PostmortemBase):
             )
 
 def initialize_ffbridge_bearer_token() -> None:
-    """Initialize FFBridge tokens (Lancelot bearer + Classic EASI) and logged-in identity.
+    """Load configured tokens without making startup depend on FFBridge login.
 
-    Uses the shared create-path authenticator so an expired .env token is
-    refreshed via Firebase. Failures stay in index-only mode; they do not
-    block license lookup or indexed game lists.
+    Numeric player resolution and session listing use the shared index. Name
+    search authenticates lazily through ``_validated_lancelot_token``; missing
+    board downloads authenticate in the writer process.
     """
     if st.session_state.get('_lancelot_auth_initialized'):
         return
@@ -3515,118 +3487,11 @@ def initialize_ffbridge_bearer_token() -> None:
     st.session_state.logged_in_player_id = None
     st.session_state.logged_in_license_number = None
     st.session_state.logged_in_lancelot_id = None
-    st.session_state.lancelot_sign_in_note = None
-
-    health = probe_api_sources()
-    if health[API_SOURCE_LANCELOT]['ok']:
-        try:
-            version = make_lancelot_request('public/version', use_auth=False)['version']
-            print(f"🔍 Lancelot API version: {version}")
-        except Exception as e:
-            print(f"Warning: Lancelot version check failed: {e}")
 
     load_dotenv()
     st.session_state.ffbridge_bearer_token = os.getenv('FFBRIDGE_BEARER_TOKEN_LANCELOT')
     st.session_state.ffbridge_easi_token = os.getenv('FFBRIDGE_EASI_TOKEN')
 
-    auth = None
-    try:
-        auth = pm_create.ensure_lancelot_auth()
-        _sync_lancelot_session_token(auth.token)
-    except Exception as e:
-        print(f"Lancelot sign-in skipped: {e}")
-
-    if auth is not None:
-        st.session_state.logged_in_lancelot_id = auth.lancelot_id
-        st.session_state.logged_in_player_id = auth.classic_person_id
-        st.session_state.logged_in_license_number = auth.license_number or ''
-        print(f"Logged in: lancelot_id={st.session_state.logged_in_lancelot_id} "
-              f"classic_person_id={st.session_state.logged_in_player_id} "
-              f"license={st.session_state.logged_in_license_number}")
-
-        try:
-            easi_token = mlBridgeFFLib.get_easi_token(auth.token)
-            if easi_token:
-                st.session_state.ffbridge_easi_token = easi_token
-                try:
-                    from dotenv import set_key
-                    set_key('.env', 'FFBRIDGE_EASI_TOKEN', easi_token)
-                except Exception as e:
-                    print(f"Warning: could not persist EASI token to .env: {e}")
-                print(f"🔑 EASI token refreshed (first 20 chars): {str(easi_token)[:20]}...")
-        except Exception as e:
-            print(f"Warning: EASI token refresh failed: {e}")
-    else:
-        st.session_state.lancelot_sign_in_note = (
-            "Not signed in to FFBridge (Lancelot). License lookup and indexed "
-            "game lists still work. Name search and downloading uncached sessions "
-            "need FFBRIDGE_EMAIL/FFBRIDGE_PASSWORD or a fresh "
-            "FFBRIDGE_BEARER_TOKEN_LANCELOT."
-        )
-
-    if not st.session_state.ffbridge_easi_token and health[API_SOURCE_CLASSIC]['ok']:
-        st.sidebar.caption("No EASI token for the Classic API. Classic mode requests will fail.")
-
-        # # Try to import automation functions
-        # try:
-        #     from ffbridge_auth_playwright import get_bearer_token_from_env, get_bearer_token_playwright_sync
-            
-        #     # Try once more with explicit load_dotenv
-        #     token = get_bearer_token_from_env()
-        #     if token:
-        #         st.session_state.ffbridge_bearer_token = token
-        #         print(f"🔑 Bearer token loaded via automation module: {token[:20]}...")
-        #         return True
-            
-        # except ImportError:
-        #     print("⚠️ Browser automation module not available")
-        
-        #         # Test both domains and show status
-        # st.info("🔍 Testing API domains and tokens...")
-        
-        # # Test Lancelot domain
-        # lancelot_token = get_token_for_domain("api-lancelot.ffbridge.fr")
-        # if lancelot_token:
-        #     st.success(f"✅ Lancelot domain token ready: {lancelot_token[:20]}...")
-        # else:
-        #     st.error("❌ No token for api-lancelot.ffbridge.fr")
-        
-        # # Test API domain (via easi-token)
-        # api_token = get_token_for_domain("api.ffbridge.fr")
-        # if api_token:
-        #     st.success(f"✅ API domain easi-token ready: {api_token[:20]}...")
-        # else:
-        #     st.error("❌ No easi-token for api.ffbridge.fr")
-        
-        # if not lancelot_token and not api_token:
-        #     st.error("❌ No valid tokens found. Please refresh tokens.")
-        #     return {}
-
-    return False
-
-# def refresh_bearer_token():
-#     """Refresh Bearer token using browser automation"""
-#     try:
-#         from ffbridge_auth_playwright import get_bearer_token_playwright_sync
-        
-#         with st.spinner("🤖 Running browser automation to refresh Bearer token..."):
-#             token = get_bearer_token_playwright_sync()
-            
-#         if token:
-#             st.session_state.ffbridge_bearer_token = token
-#             st.success("✅ Bearer token refreshed successfully!")
-#             st.rerun()  # Refresh the page to update UI
-#             return True
-#         else:
-#             st.error("❌ Failed to refresh Bearer token")
-#             return False
-            
-#     except ImportError:
-#         st.error("❌ Browser automation module not available. Please install playwright and python-dotenv.")
-#         return False
-#     except Exception as e:
-#         st.error(f"❌ Error refreshing token: {e}")
-#         return False
 
 if __name__ == "__main__":
     main()
