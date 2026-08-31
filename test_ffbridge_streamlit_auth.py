@@ -1,5 +1,6 @@
 import unittest
-from unittest.mock import patch
+from contextlib import nullcontext
+from unittest.mock import Mock, patch
 
 import polars as pl
 
@@ -113,6 +114,46 @@ class StreamlitLancelotRoutingTests(unittest.TestCase):
         self.assertTrue(result)
         self.assertIn(300749, state["game_urls_d"]["9500754"])
         self.assertNotIn("player_search_error", state)
+
+    def test_generation_error_is_saved_for_the_next_rerun(self):
+        state = SessionState(
+            game_urls_d={"9500754": {300749: {}}},
+            debug_mode=False,
+        )
+        error = app.pm_api.FfbridgeApiClientError("writer generation failed")
+        with (
+            patch.object(app.st, "session_state", state),
+            patch.object(app.st, "spinner", side_effect=lambda *_a, **_k: nullcontext()),
+            patch.object(app.st, "error") as show_error,
+            patch.object(app, "populate_game_urls_for_player", return_value=True),
+            patch.object(app.pm_api, "generate_and_wait", side_effect=error),
+        ):
+            failed = app._change_game_state_lancelot("9500754", 300749)
+
+        self.assertTrue(failed)
+        self.assertEqual(state["report_error"], "writer generation failed")
+        show_error.assert_called_once_with("writer generation failed")
+
+    def test_deferred_report_failure_does_not_immediately_rerun(self):
+        state = SessionState(
+            player_id="9500754",
+            deferred_start_report=True,
+            game_urls_d={"9500754": {300749: {}}},
+            report_error=None,
+        )
+        view = object.__new__(app.FFBridgeApp)
+        view.create_sidebar = Mock()
+        with (
+            patch.object(app.st, "session_state", state),
+            patch.object(app.st, "error"),
+            patch.object(app.st, "rerun") as rerun,
+            patch.object(app, "populate_game_urls_for_player", return_value=True),
+            patch.object(app, "change_game_state", return_value=True),
+        ):
+            view.create_ui()
+
+        rerun.assert_not_called()
+        self.assertFalse(state["deferred_start_report"])
 
 
 if __name__ == "__main__":

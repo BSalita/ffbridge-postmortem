@@ -1681,31 +1681,42 @@ def _normalize_session_id_arg(session_id: Any) -> Any:
     return session_id
 
 
+def _report_failure(message: Any) -> bool:
+    """Persist a report error across Streamlit reruns and render it now."""
+    detail = str(message)
+    st.session_state.report_error = detail
+    st.error(detail)
+    return True
+
+
 def _change_game_state_lancelot(player_id: str, session_id: Optional[int]) -> bool:
     """Lancelot branch of change_game_state. Returns True on error, False on success."""
     session_id = _normalize_session_id_arg(session_id)
     with st.spinner(f"Retrieving a list of games for {player_id} ..."):
         if not populate_game_urls_for_player(player_id):
-            st.error(st.session_state.get('player_search_error') or f"Could not find any games for {player_id}.")
-            return True
+            return _report_failure(
+                st.session_state.get('player_search_error')
+                or f"Could not find any games for {player_id}."
+            )
         game_urls = st.session_state.game_urls_d[player_id]
         if session_id is None:
             session_id = next(iter(game_urls))  # most recent game
         session_id = int(session_id)
         if session_id not in game_urls:
-            st.error(f"Session {session_id} not found in games for {player_id}.")
-            return True
+            return _report_failure(
+                f"Session {session_id} not found in games for {player_id}."
+            )
         st.session_state.player_id = player_id
 
     with st.spinner('Preparing Bridge Game Postmortem Report...'):
         try:
             gen = pm_api.generate_and_wait(str(player_id), session_id=str(session_id))
         except pm_api.FfbridgeApiClientError as e:
-            st.error(str(e))
-            return True
+            return _report_failure(e)
         if gen.get("status") == "error":
-            st.error(gen.get("error") or "Postmortem generate failed.")
-            return True
+            return _report_failure(
+                gen.get("error") or "Postmortem generate failed."
+            )
         _remember_resolved_player_ids(gen)
         sid = str(gen.get("session_id") or session_id)
         results = gen.get("results") or gen.get("sessions") or []
@@ -1722,11 +1733,12 @@ def _change_game_state_lancelot(player_id: str, session_id: Optional[int]) -> bo
         con = get_session_duckdb_connection()
         con.register("self", st.session_state.df)
 
+    st.session_state.pop("report_error", None)
     print(f"=== change_game_state END: SUCCESS - player_id={st.session_state.player_id}, session_id={st.session_state.session_id} ===")
     return False
 
 
-def change_game_state(player_id: str, session_id: str) -> None: # todo: rename to session_id?
+def change_game_state(player_id: str, session_id: str) -> bool: # todo: rename to session_id?
 
     # Keep player_id stable as a string; other parts of the UI (e.g., game_urls_d keys) depend on this.
     player_id = str(player_id) if player_id is not None else player_id
@@ -1744,8 +1756,7 @@ def change_game_state(player_id: str, session_id: str) -> None: # todo: rename t
         except Exception as e:
             import traceback
             traceback.print_exc()
-            st.error(f"Error preparing Lancelot report: {e}")
-            return True
+            return _report_failure(f"Error preparing Lancelot report: {e}")
 
     with st.spinner(f"Retrieving a list of games for {player_id} ..."):
         t = time.time()
@@ -3052,6 +3063,7 @@ class FFBridgeApp(PostmortemBase):
             'person_organization_id': None,
             'nb_deals': None,
             'deferred_start_report': False,  # Flag to defer report generation until after sidebar refresh
+            'report_error': None,
         }
         
         for key, value in ffbridge_session_vars.items():
@@ -3073,6 +3085,8 @@ class FFBridgeApp(PostmortemBase):
     def create_ui(self):
         """Creates the main UI structure for FFBridge."""
         self.create_sidebar()
+        if st.session_state.get("report_error"):
+            st.error(st.session_state.report_error)
         # If a new player was entered, refresh sidebar first then start report
         if st.session_state.get('deferred_start_report', False):
             # Ensure games are available
@@ -3083,7 +3097,11 @@ class FFBridgeApp(PostmortemBase):
                     game_urls = st.session_state.game_urls_d.get(st.session_state.player_id, {})
                     if len(game_urls) > 0:
                         st.session_state.deferred_start_report = False
-                        change_game_state(str(st.session_state.player_id), None)
+                        failed = change_game_state(
+                            str(st.session_state.player_id), None
+                        )
+                        if failed:
+                            return
                         st.session_state.sql_query_mode = False
                         # Defer clearing search inputs to before widget creation
                         st.session_state.clear_player_search = True
@@ -3138,14 +3156,18 @@ class FFBridgeApp(PostmortemBase):
                 # url_session_key[0] is the public id from the URL (license
                 # or Lancelot). Aliases were stashed in initialize_session_state.
                 populate_game_urls_for_player(url_session_key[0])
-                change_game_state(url_session_key[0], url_session_key[1])
+                failed = change_game_state(
+                    url_session_key[0], url_session_key[1]
+                )
+                if failed:
+                    return
                 st.rerun()
                 return
             except Exception as e:
                 print(f"URL auto-load failed for {url_session_key}: {e}")
                 import traceback
                 traceback.print_exc()
-                st.error(
+                _report_failure(
                     f"Failed to auto-load report for player_id={url_session_key[0]}, "
                     f"session_id={url_session_key[1]}: {e}"
                 )
