@@ -10,13 +10,16 @@ The MCP server and Streamlit app are HTTP clients of this API.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import io
 import os
 from typing import Optional
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
+import ffbridge_postmortem_archive as archive
 import ffbridge_postmortem_create as create
 import ffbridge_postmortem_service as svc
 
@@ -62,6 +65,16 @@ async def value_error_handler(request, exc: ValueError) -> JSONResponse:
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
+@app.exception_handler(Exception)
+async def unhandled_error_handler(request, exc: Exception) -> JSONResponse:
+    if isinstance(exc, HTTPException):
+        return await http_exception_handler(request, exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc), "hint": type(exc).__name__},
+    )
+
+
 @app.get("/health")
 def health() -> dict:
     """Readiness and persisted job diagnostics without authentication or Lancelot calls."""
@@ -71,6 +84,10 @@ def health() -> dict:
         "status": "ok",
         "service": "ffbridge-postmortem-api",
         "detail": "ready",
+        "archive": archive.archive_info(),
+        "hierarchical_archive": svc.normalized.hierarchical_info(
+            svc.HIERARCHICAL_DIR
+        ),
     }
     payload.update(create.generate_health(svc.CACHE_DIR))
     return payload
@@ -151,6 +168,30 @@ def played_today(
     ),
 ) -> dict:
     return svc.played_today(player, clubs)
+
+
+@app.get("/archive/rows")
+def archive_rows(
+    date_from: Optional[str] = Query(None, description="YYYY-MM-DD"),
+    date_to: Optional[str] = Query(None, description="YYYY-MM-DD"),
+    series_id: Optional[str] = Query(None),
+    session_id: Optional[str] = Query(None),
+    player_id: Optional[str] = Query(None),
+    columns: Optional[str] = Query(None, description="Comma-separated projection"),
+    limit: int = Query(svc.DEFAULT_SQL_ROW_LIMIT, ge=1, le=svc.MAX_SQL_ROW_LIMIT),
+) -> dict:
+    projected = [value.strip() for value in columns.split(",")] if columns else None
+    return svc.archive_rows(
+        date_from=date_from,
+        date_to=date_to,
+        series_id=series_id,
+        session_id=session_id,
+        player_id=player_id,
+        columns=projected,
+        limit=limit,
+    )
+
+
 @app.post("/generate")
 def generate(
     player_id: str,
@@ -192,8 +233,19 @@ def postmortem_boards(
     columns: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=svc.MAX_SQL_ROW_LIMIT),
 ) -> dict:
-    df, meta = svc.load_postmortem(player_id, session_id)
     cols = [c.strip() for c in columns.split(",")] if columns else None
+    if session_id is not None:
+        try:
+            return svc.hierarchical_board_results(
+                player_id,
+                session_id,
+                only_my_boards=only_my_boards,
+                columns=cols,
+                limit=limit,
+            )
+        except FileNotFoundError:
+            pass
+    df, meta = svc.load_postmortem(player_id, session_id)
     return svc.board_results(df, meta, only_my_boards=only_my_boards, columns=cols, limit=limit)
 
 
@@ -223,13 +275,17 @@ def postmortem_schema(
 
 @app.get("/postmortems/{player_id}/parquet")
 def postmortem_parquet(player_id: str, session_id: Optional[str] = None) -> Response:
-    path = svc.resolve_cache_file(str(player_id), session_id)
+    frame, meta = svc.load_postmortem(str(player_id), session_id)
+    buffer = io.BytesIO()
+    frame.write_parquet(buffer, compression="zstd")
+    filename = f"df-{meta['session_id']}-{meta.get('matched_player_id') or player_id}.parquet"
     return Response(
-        content=path.read_bytes(),
+        content=buffer.getvalue(),
         media_type="application/vnd.apache.parquet",
         headers={
-            "Content-Disposition": f'inline; filename="{path.name}"',
-            "X-FFBridge-Cache-File": path.name,
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "X-FFBridge-Cache-File": filename,
+            "X-FFBridge-Data-Source": meta["data_source"],
         },
     )
 

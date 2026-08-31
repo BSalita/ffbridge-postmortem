@@ -320,6 +320,72 @@ class OtherPlayerSessionTests(unittest.TestCase):
         )
         logged_in.assert_not_called()
 
+    def test_list_source_uses_shared_index_for_logged_in_player(self):
+        auth = create.LancelotAuth("token", "246273", "9500754")
+        resolved = create.ResolvedPlayer("246273", "9500754", "246273", "597539")
+        indexed = [
+            {
+                "session_id": "300749",
+                "date": "2026-08-17",
+                "club": "Bridge Club Levallois Perret",
+            }
+        ]
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.object(create, "ensure_lancelot_auth", return_value=auth),
+            patch.object(create, "resolve_player", return_value=resolved),
+            patch.object(
+                create,
+                "fetch_other_player_source_sessions",
+                return_value=indexed,
+            ) as indexed_source,
+            patch.object(create, "fetch_logged_in_source_sessions") as logged_in,
+        ):
+            result = create.list_source_sessions(
+                "246273",
+                cache_dir=pathlib.Path(tmp),
+            )
+
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["sessions"][0]["session_id"], "300749")
+        indexed_source.assert_called_once()
+        logged_in.assert_not_called()
+
+    def test_logged_in_search_me_is_used_only_when_index_is_missing(self):
+        auth = create.LancelotAuth("token", "246273", "9500754")
+        resolved = create.ResolvedPlayer("246273", "9500754", "246273", "597539")
+        live = [
+            {
+                "session_id": "300749",
+                "date": "2026-08-17",
+                "club": "Bridge Club Levallois Perret",
+            }
+        ]
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.object(create, "ensure_lancelot_auth", return_value=auth),
+            patch.object(create, "resolve_player", return_value=resolved),
+            patch.object(
+                create,
+                "fetch_other_player_source_sessions",
+                side_effect=FileNotFoundError("no index"),
+            ),
+            patch.object(
+                create,
+                "fetch_logged_in_source_sessions",
+                return_value=live,
+            ) as logged_in,
+        ):
+            result = create.list_source_sessions(
+                "246273",
+                cache_dir=pathlib.Path(tmp),
+            )
+
+        self.assertEqual(result["count"], 1)
+        logged_in.assert_called_once_with("token")
+
     def test_list_source_accepts_all_indexed_identifier_namespaces(self):
         with tempfile.TemporaryDirectory() as tmp:
             index_dir = pathlib.Path(tmp) / "player_session_index"

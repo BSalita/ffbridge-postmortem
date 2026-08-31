@@ -263,6 +263,10 @@ def ensure_lancelot_auth(*, force: bool = False) -> LancelotAuth:
         if persons_me is None:
             token = _firebase_refresh_token()
             persons_me = mlBridgeFFLib.get_persons_me(token)
+        if not isinstance(persons_me, dict) or persons_me.get("id") is None:
+            raise ValueError(
+                "Lancelot persons/me did not return a person record"
+            )
         auth = LancelotAuth(
             token=token,
             lancelot_id=str(persons_me["id"]),
@@ -379,9 +383,16 @@ def fetch_logged_in_source_sessions(token: str) -> List[Dict[str, Any]]:
     items: List[Dict[str, Any]] = []
     page = 1
     while True:
-        response = mlBridgeFFLib.lancelot_get(f"results/search/me?currentPage={page}", token=token)
-        items.extend(response.get("items", []))
-        pagination = response.get("pagination", {})
+        response = mlBridgeFFLib.lancelot_get(
+            f"results/search/me?currentPage={page}", token=token
+        )
+        if not isinstance(response, dict):
+            raise ValueError(
+                "Lancelot results/search/me returned "
+                f"{type(response).__name__}, not an object"
+            )
+        items.extend(response.get("items") or [])
+        pagination = response.get("pagination") or {}
         if not pagination.get("has_next_page") or page >= 20:
             break
         page += 1
@@ -529,14 +540,16 @@ def list_source_sessions(
     token = token or auth.token
     resolved = resolve_player(player_id, token=token)
     directory = pathlib.Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
-    if resolved.lancelot_id == auth.lancelot_id:
-        source_sessions = fetch_logged_in_source_sessions(token)
-    else:
+    try:
         source_sessions = fetch_other_player_source_sessions(
             resolved.lancelot_id,
             date_from=date_from,
             date_to=date_to,
         )
+    except FileNotFoundError:
+        if resolved.lancelot_id != auth.lancelot_id:
+            raise
+        source_sessions = fetch_logged_in_source_sessions(token)
     sessions = []
     for entry in source_sessions:
         if not _in_date_window(entry.get("date"), date_from, date_to):
