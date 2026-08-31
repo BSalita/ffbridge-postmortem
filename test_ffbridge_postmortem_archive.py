@@ -231,6 +231,56 @@ class NormalizedArchiveTests(unittest.TestCase):
             self.assertEqual(meta["data_source"], "hierarchical_archive")
             self.assertGreater(loaded.height, 0)
 
+    def test_hierarchical_write_permits_additive_quality_columns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp) / "archive"
+            seed = pathlib.Path(tmp) / "seed"
+            production = pathlib.Path(tmp) / "hierarchical"
+            source = _session_frame()
+            archive.archive_session(source, "100", archive_dir=root)
+            normalized.build_normalized_subset(root, seed)
+            normalized.initialize_hierarchical_layout(
+                production, seed / "metadata.json"
+            )
+            augmented = source.with_columns(
+                pl.lit(1).cast(pl.Int8).alias("Par_Contract_NS"),
+                pl.lit(-1).cast(pl.Int8).alias("Par_Contract_EW"),
+                pl.lit(False).alias("Is_Sacrifice_Opportunity"),
+            )
+            written = normalized.write_hierarchical_session(
+                augmented,
+                session_id="100",
+                revision="additive",
+                output_dir=production,
+            )
+            self.assertTrue(written["created"])
+            report = normalized.normalized_player_report(
+                production,
+                session_id="100",
+                player_ids=["10"],
+                columns=["Board", "Contract", "Pct_NS"],
+            )
+            self.assertEqual(report.height, 2)
+
+    def test_hierarchical_write_rejects_missing_validated_columns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp) / "archive"
+            seed = pathlib.Path(tmp) / "seed"
+            production = pathlib.Path(tmp) / "hierarchical"
+            source = _session_frame()
+            archive.archive_session(source, "100", archive_dir=root)
+            normalized.build_normalized_subset(root, seed)
+            normalized.initialize_hierarchical_layout(
+                production, seed / "metadata.json"
+            )
+            with self.assertRaisesRegex(ValueError, "Missing="):
+                normalized.write_hierarchical_session(
+                    source.drop("Pct_NS"),
+                    session_id="101",
+                    revision="missing",
+                    output_dir=production,
+                )
+
 
 class HierarchicalResolveTests(unittest.TestCase):
     def test_env_wins_over_published_candidates(self):

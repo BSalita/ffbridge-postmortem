@@ -398,7 +398,11 @@ def prepare_hierarchical_session(
     output_dir: pathlib.Path,
     series_id: str | None = None,
 ) -> dict[str, Any]:
-    """Write one immutable boards/results hierarchy without updating its manifest."""
+    """Write one immutable boards/results hierarchy without updating its manifest.
+
+    Additive columns beyond the validated mapping are dropped. Missing
+    validated columns still fail.
+    """
     output = pathlib.Path(output_dir)
     metadata = _load_metadata(output)
     mapping = metadata["column_mapping"]
@@ -406,15 +410,16 @@ def prepare_hierarchical_session(
         pl.lit(str(session_id)).alias("session_id")
     ).with_row_index("_result_row_id")
     expected = set(mapping) - {"session_id", "_result_row_id"}
-    missing = sorted(expected - set(canonical.columns))
-    extra = sorted(
-        set(canonical.columns) - set(mapping) - {"session_id", "_result_row_id"}
-    )
-    if missing or extra:
+    present = set(canonical.columns)
+    missing = sorted(expected - present)
+    extra = sorted(present - set(mapping) - {"session_id", "_result_row_id"})
+    if missing:
         raise ValueError(
             "Hierarchical schema differs from the validated layout. "
             f"Missing={missing[:20]}, extra={extra[:20]}"
         )
+    if extra:
+        canonical = canonical.drop(extra)
 
     board_columns = {
         column
