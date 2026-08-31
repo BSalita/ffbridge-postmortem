@@ -1651,8 +1651,22 @@ def _latest_session_id(game_urls: Mapping[Any, Mapping[str, Any]]) -> Optional[i
     return next(iter(ordered))
 
 
-def _clear_selected_session() -> None:
+def _clear_selected_session(*, clear_games: bool = False) -> None:
     """Drop a bookmarked or leftover session so the next load picks the newest game."""
+    if clear_games:
+        game_urls = st.session_state.get("game_urls_d") or {}
+        aliases = {
+            str(value)
+            for value in (
+                st.session_state.get("player_id"),
+                st.session_state.get("lancelot_player_id"),
+                st.session_state.get("classic_player_id"),
+                st.session_state.get("player_license_number"),
+            )
+            if value is not None
+        }
+        for alias in aliases:
+            game_urls.pop(alias, None)
     st.session_state.session_id = None
     st.session_state.pop("club_session_ids_selectbox", None)
     st.session_state.pop("_url_loaded_session_key", None)
@@ -1691,7 +1705,40 @@ def _populate_game_urls_for_player_lancelot(player_id: str) -> bool:
             ),
         }
 
+    try:
+        live = pm_api.last_game(player_id)
+    except pm_api.FfbridgeApiClientError as e:
+        st.session_state.player_search_error = (
+            f"Could not determine the current latest game: {e}"
+        )
+        return False
+    live_game = live.get("game")
+    if live_game:
+        live_session_id = int(live_game["session_id"])
+        game_urls[live_session_id] = {
+            "description": " ".join(
+                str(value)
+                for value in (
+                    live_game.get("date"),
+                    live_game.get("competition"),
+                    live_game.get("club_name"),
+                )
+                if value
+            ),
+            "date": live_game.get("date"),
+            "session_id": live_session_id,
+            "group_id": live_game.get("group_id"),
+            "organization_id": live_game.get("club_code"),
+            "organization_name": live_game.get("club_name"),
+            "competition_label": live_game.get("competition"),
+            "session_label": live_game.get("competition"),
+            "team_id": live_game.get("team_id"),
+            "results_url": live_game.get("results_url"),
+            "listing_source": "live Lancelot latest-game lookup",
+        }
+
     _remember_resolved_player_ids(listed)
+    _remember_resolved_player_ids(live)
     canonical_id = listed['player_id']
     st.session_state.game_urls_d[canonical_id] = game_urls
     if player_id != canonical_id:
@@ -2580,7 +2627,7 @@ def show_player_selection_modal(filtered_options):
                                 del st.session_state.show_player_modal
                             
                             # Flag for main loop to refresh after modal selection
-                            _clear_selected_session()
+                            _clear_selected_session(clear_games=True)
                             st.session_state.deferred_start_report = True
                             
                             # Immediately hide the dialog visually before rerun completes
@@ -2753,6 +2800,7 @@ def player_search_input_on_change_with_query(query: str) -> None:
             st.session_state.player_id = str(player_id)
             if license_number:
                 st.session_state.player_license_number = str(license_number)
+        _clear_selected_session(clear_games=True)
         try:
             has_games = populate_game_urls_for_player(st.session_state.player_id)
         except Exception as e:
@@ -2778,7 +2826,6 @@ def player_search_input_on_change_with_query(query: str) -> None:
         st.session_state.last_search_query = query
         
         # Defer report start: first refresh sidebar with games, then start report
-        _clear_selected_session()
         st.session_state.deferred_start_report = True
         return
         
@@ -3428,7 +3475,8 @@ class FFBridgeApp(PostmortemBase):
                             if license_number:
                                 st.session_state.player_license_number = str(license_number)
                         
-                        # Populate sidebar first, then defer report start until after sidebar refresh
+                        # Refresh live latest-game data, then populate the sidebar.
+                        _clear_selected_session(clear_games=True)
                         has_games = populate_game_urls_for_player(st.session_state.player_id)
                         
                         if not has_games:
@@ -3441,7 +3489,6 @@ class FFBridgeApp(PostmortemBase):
                         
                         # Store the original search query for error messages
                         st.session_state.last_search_query = input_value
-                        _clear_selected_session()
                         st.session_state.deferred_start_report = True
                         return
                     else:

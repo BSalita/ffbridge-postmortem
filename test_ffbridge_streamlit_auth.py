@@ -108,12 +108,62 @@ class StreamlitLancelotRoutingTests(unittest.TestCase):
         with (
             patch.object(app.st, "session_state", state),
             patch.object(app.pm_api, "list_source_sessions", return_value=listed),
+            patch.object(
+                app.pm_api,
+                "last_game",
+                return_value={
+                    "player_id": "246273",
+                    "player_license_number": "9500754",
+                    "found": False,
+                    "game": None,
+                },
+            ),
         ):
             result = app._populate_game_urls_for_player_lancelot("9500754")
 
         self.assertTrue(result)
         self.assertIn(300749, state["game_urls_d"]["9500754"])
         self.assertNotIn("player_search_error", state)
+
+    def test_live_today_game_is_newer_than_stale_index(self):
+        state = SessionState(lancelot_token_valid=True, game_urls_d={})
+        listed = {
+            "player_id": "246273",
+            "player_license_number": "9500754",
+            "sessions": [
+                {
+                    "session_id": "282839",
+                    "description": "2026-08-25 Rondes de France",
+                    "date": "2026-08-25",
+                }
+            ],
+        }
+        live = {
+            "player_id": "246273",
+            "player_license_number": "9500754",
+            "found": True,
+            "game": {
+                "session_id": "300753",
+                "date": "2026-08-31",
+                "competition": "Simultané Octopus",
+                "group_id": "21333",
+                "club_code": "5802079",
+                "club_name": "Bridge Club Levallois Perret",
+                "team_id": 15158159,
+                "results_url": "https://www.ffbridge.fr/result/300753",
+            },
+        }
+        with (
+            patch.object(app.st, "session_state", state),
+            patch.object(app.pm_api, "list_source_sessions", return_value=listed),
+            patch.object(app.pm_api, "last_game", return_value=live),
+        ):
+            result = app._populate_game_urls_for_player_lancelot("9500754")
+
+        self.assertTrue(result)
+        games = state["game_urls_d"]["9500754"]
+        self.assertEqual(list(games), [300753, 282839])
+        self.assertEqual(app._latest_session_id(games), 300753)
 
     def test_generation_error_is_saved_for_the_next_rerun(self):
         state = SessionState(
@@ -245,12 +295,15 @@ class StreamlitLancelotRoutingTests(unittest.TestCase):
             session_id=282792,
             club_session_ids_selectbox="282792, 2026-06-01 Ronde",
             _url_loaded_session_key=("9500754", 282792),
+            player_id="9500754",
+            game_urls_d={"9500754": {282792: {"date": "2026-06-01"}}},
         )
         with patch.object(app.st, "session_state", state):
-            app._clear_selected_session()
+            app._clear_selected_session(clear_games=True)
         self.assertIsNone(state["session_id"])
         self.assertNotIn("club_session_ids_selectbox", state)
         self.assertNotIn("_url_loaded_session_key", state)
+        self.assertNotIn("9500754", state["game_urls_d"])
 
 
 if __name__ == "__main__":

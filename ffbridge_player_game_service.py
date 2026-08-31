@@ -517,6 +517,7 @@ def _game(
     game = {
         "session_id": candidate["session_id"],
         "group_id": candidate.get("group_id"),
+        "series_id": candidate.get("series_id"),
         "competition": candidate.get("session_label") or "FFBridge",
         "date": candidate["date"],
         "moment": moment,
@@ -528,6 +529,7 @@ def _game(
         "theoretical_rank": ranking.get("theoreticalRank"),
         "section": ranking.get("section") or team.get("section"),
         "table_number": ranking.get("tableNumber") or team.get("startTableNumber"),
+        "team_id": team.get("id"),
         "player_name": _person_name(target),
         "player_seat": target_seat,
         "partner_name": _person_name(partner),

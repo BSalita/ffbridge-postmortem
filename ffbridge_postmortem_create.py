@@ -1132,6 +1132,7 @@ class GenerateJob:
     session_ids: List[str]
     force: bool
     started_at: str
+    session_entries: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     finished_at: Optional[str] = None
     error: Optional[str] = None
     continue_on_error: bool = True
@@ -1287,7 +1288,18 @@ def _select_sessions_to_generate(
     date_from: Optional[str],
     date_to: Optional[str],
     cache_dir: pathlib.Path,
+    session_entry: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
+    if session_entry is not None:
+        entry = dict(session_entry)
+        entry_sid = str(entry.get("session_id") or "").strip()
+        requested_sid = str(session_id or "").strip()
+        if not entry_sid or requested_sid.lower() == "latest" or entry_sid != requested_sid:
+            raise ValueError(
+                "A live session entry must have the explicitly requested session_id."
+            )
+        return [entry]
+
     listed = list_source_sessions(
         resolved.lancelot_id,
         date_from=date_from,
@@ -1393,6 +1405,7 @@ def _run_generate_job(
             cache_dir=cache_dir,
         )
         by_id = {s["session_id"]: s for s in listed["sessions"]}
+        by_id.update(job.session_entries)
         remaining = _remaining_session_ids(job)
         for sid in tqdm(remaining, desc="Generating postmortems"):
             with _jobs_lock:
@@ -1737,6 +1750,7 @@ def generate_postmortems(
     continue_on_error: Optional[bool] = None,
     *,
     cache_dir: Optional[pathlib.Path] = None,
+    session_entry: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Create postmortem parquet(s). Returns immediately with a job_id when work is needed.
 
@@ -1773,7 +1787,13 @@ def generate_postmortems(
     if continue_on_error is None:
         continue_on_error = date_from is not None or date_to is not None
     sessions = _select_sessions_to_generate(
-        resolved, None, session_id, date_from, date_to, directory
+        resolved,
+        None,
+        session_id,
+        date_from,
+        date_to,
+        directory,
+        session_entry=session_entry,
     )
 
     cached_results = []
@@ -1833,6 +1853,10 @@ def generate_postmortems(
         session_ids=[s["session_id"] for s in to_build],
         force=force,
         started_at=_utc_now_iso(),
+        session_entries={
+            str(entry["session_id"]): dict(entry)
+            for entry in to_build
+        },
         continue_on_error=bool(continue_on_error),
         results=list(cached_results),
         progress={"done": len(cached_results), "total": len(cached_results) + len(to_build)},

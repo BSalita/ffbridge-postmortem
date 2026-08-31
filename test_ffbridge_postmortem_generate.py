@@ -65,6 +65,44 @@ class GenerateJobTests(unittest.TestCase):
         self.assertEqual(job.progress["done"], 2)
         self.assertIsNone(job.progress["current_session_id"])
 
+    def test_live_session_entry_survives_background_job_start(self):
+        entry = {
+            "session_id": "300753",
+            "date": "2026-08-31",
+            "group_id": "21333",
+        }
+        job = self._job()
+        job.session_ids = ["300753"]
+        job.session_entries = {"300753": entry}
+        with (
+            patch.object(
+                create,
+                "list_source_sessions",
+                return_value={"sessions": [{"session_id": "282839"}]},
+            ),
+            patch.object(
+                create,
+                "create_lancelot_postmortem",
+                return_value={
+                    "session_id": "300753",
+                    "player_id": "246273",
+                    "status": "ok",
+                    "cache_file": "df-300753-246273.parquet",
+                },
+            ) as create_postmortem,
+            patch.object(create, "tqdm", side_effect=lambda values, **_kwargs: values),
+            patch.object(create, "_persist_job"),
+        ):
+            create._run_generate_job(
+                job,
+                create.LancelotAuth("token", "246273", "9500754"),
+                pathlib.Path("cache"),
+                False,
+            )
+
+        self.assertEqual(job.status, "ok")
+        self.assertEqual(create_postmortem.call_args.args[2], entry)
+
     def test_stop_on_error_counts_failed_session(self):
         job = self._job(continue_on_error=False)
         sessions = {"sessions": [{"session_id": "bad"}, {"session_id": "good"}]}

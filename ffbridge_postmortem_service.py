@@ -40,6 +40,8 @@ MAX_SCHEMA_COLUMNS = 1000
 # df-{session_id}-{player_id}.parquet. FFBridge (Lancelot) player ids never
 # contain dashes, so the player id is the trailing dash-free token.
 _CACHE_FILE_RE = re.compile(r"^df-(?P<session_id>.+)-(?P<player_id>[^-]+)\.parquet$")
+_live_session_entries: Dict[Tuple[str, str], Dict[str, Any]] = {}
+_live_session_entries_lock = threading.Lock()
 
 # (player_direction, pair_direction, partner_direction, opponent_pair_direction)
 # ffbridge_streamlit.py keeps directions as seat letters (see filter_dataframe),
@@ -647,7 +649,43 @@ def last_game(
     player: str,
     clubs: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    return player_games.last_game(player, clubs)
+    result = player_games.last_game(player, clubs)
+    game = result.get("game")
+    if game:
+        entry = {
+            "session_id": str(game["session_id"]),
+            "date": game.get("date"),
+            "raw_date": game.get("date"),
+            "club": game.get("club_name"),
+            "organization_id": game.get("club_code"),
+            "organization_name": game.get("club_name"),
+            "group_id": game.get("group_id"),
+            "competition_label": game.get("competition"),
+            "session_label": game.get("competition"),
+            "description": " ".join(
+                str(value)
+                for value in (
+                    game.get("date"),
+                    game.get("competition"),
+                    game.get("club_name"),
+                )
+                if value
+            ),
+            "series_id": game.get("series_id"),
+            "team_id": game.get("team_id"),
+            "results_url": game.get("results_url"),
+            "listing_source": "live Lancelot latest-game lookup",
+        }
+        aliases = {
+            str(player),
+            str(result.get("player_id") or ""),
+            str(result.get("player_license_number") or ""),
+        }
+        aliases.discard("")
+        with _live_session_entries_lock:
+            for alias in aliases:
+                _live_session_entries[(alias, entry["session_id"])] = entry
+    return result
 
 
 def played_today(
@@ -665,6 +703,21 @@ def generate_postmortems(
     force: bool = False,
     continue_on_error: Optional[bool] = None,
 ) -> Dict[str, Any]:
+    live_entry = None
+    if session_id is not None and str(session_id).lower() != "latest":
+        sid = str(session_id)
+        key = (str(player_id), sid)
+        with _live_session_entries_lock:
+            live_entry = _live_session_entries.get(key)
+        if live_entry is None:
+            indexed = create.list_source_sessions(
+                player_id,
+                cache_dir=CACHE_DIR,
+            )
+            if not any(str(row["session_id"]) == sid for row in indexed["sessions"]):
+                last_game(player_id)
+                with _live_session_entries_lock:
+                    live_entry = _live_session_entries.get(key)
     return create.generate_postmortems(
         player_id,
         session_id=session_id,
@@ -673,6 +726,7 @@ def generate_postmortems(
         force=force,
         continue_on_error=continue_on_error,
         cache_dir=CACHE_DIR,
+        session_entry=live_entry,
     )
 
 

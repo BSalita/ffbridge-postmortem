@@ -75,5 +75,81 @@ class PersonalizeAliasTests(unittest.TestCase):
         self.assertEqual(meta["player_id"], "9500754")
 
 
+class LiveLatestGameTests(unittest.TestCase):
+    def setUp(self):
+        with svc._live_session_entries_lock:
+            svc._live_session_entries.clear()
+
+    def test_live_game_metadata_reaches_generation(self):
+        live = {
+            "player_id": "246273",
+            "player_license_number": "9500754",
+            "found": True,
+            "game": {
+                "session_id": "300753",
+                "date": "2026-08-31",
+                "competition": "Simultané Octopus",
+                "group_id": "21333",
+                "series_id": 42,
+                "club_code": "5802079",
+                "club_name": "Bridge Club Levallois Perret",
+                "team_id": 15158159,
+                "results_url": "https://www.ffbridge.fr/result/300753",
+            },
+        }
+        with (
+            patch.object(svc.player_games, "last_game", return_value=live),
+            patch.object(
+                svc.create,
+                "generate_postmortems",
+                return_value={"status": "started"},
+            ) as generate,
+        ):
+            svc.last_game("9500754")
+            result = svc.generate_postmortems("9500754", session_id="300753")
+
+        self.assertEqual(result["status"], "started")
+        entry = generate.call_args.kwargs["session_entry"]
+        self.assertEqual(entry["session_id"], "300753")
+        self.assertEqual(entry["date"], "2026-08-31")
+        self.assertEqual(entry["group_id"], "21333")
+        self.assertEqual(entry["team_id"], 15158159)
+
+    def test_direct_generation_discovers_latest_when_index_is_stale(self):
+        live = {
+            "player_id": "246273",
+            "player_license_number": "9500754",
+            "found": True,
+            "game": {
+                "session_id": "300753",
+                "date": "2026-08-31",
+                "competition": "Simultané Octopus",
+                "group_id": "21333",
+                "club_code": "5802079",
+                "club_name": "Bridge Club Levallois Perret",
+                "team_id": 15158159,
+            },
+        }
+        with (
+            patch.object(
+                svc.create,
+                "list_source_sessions",
+                return_value={"sessions": [{"session_id": "282839"}]},
+            ),
+            patch.object(svc.player_games, "last_game", return_value=live),
+            patch.object(
+                svc.create,
+                "generate_postmortems",
+                return_value={"status": "started"},
+            ) as generate,
+        ):
+            svc.generate_postmortems("9500754", session_id="300753")
+
+        self.assertEqual(
+            generate.call_args.kwargs["session_entry"]["session_id"],
+            "300753",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
