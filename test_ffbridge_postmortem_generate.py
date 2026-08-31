@@ -352,6 +352,52 @@ class OtherPlayerSessionTests(unittest.TestCase):
         indexed_source.assert_called_once()
         logged_in.assert_not_called()
 
+    def test_list_source_does_not_require_lancelot_auth_when_index_exists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            index_dir = pathlib.Path(tmp) / "player_session_index"
+            create.mlBridgeFFIndexLib.build_and_write_index(
+                pl.DataFrame(
+                    {
+                        "tournament_id": ["300749"],
+                        "tournament_name": ["Octopus"],
+                        "date": ["2026-08-17"],
+                        "series_id": [1],
+                        "team_id": ["15106224"],
+                        "club_id": ["5802079"],
+                        "club_name": ["Bridge Club Levallois Perret"],
+                        "player1_name": ["SALITA"],
+                        "player2_name": ["Jacoupy"],
+                        "player1_lancelot_id": ["246273"],
+                        "player2_lancelot_id": ["33351"],
+                        "player1_classic_person_id": ["597539"],
+                        "player2_classic_person_id": ["99497"],
+                        "player1_license_number": ["9500754"],
+                        "player2_license_number": ["33351"],
+                    }
+                ),
+                index_dir=index_dir,
+            )
+            with (
+                patch.dict(
+                    create.os.environ,
+                    {"FFBRIDGE_PLAYER_SESSION_INDEX_DIR": str(index_dir)},
+                ),
+                patch.object(
+                    create,
+                    "ensure_lancelot_auth",
+                    side_effect=AssertionError("index listing must not login"),
+                ),
+            ):
+                result = create.list_source_sessions(
+                    "9500754",
+                    cache_dir=pathlib.Path(tmp) / "cache",
+                )
+
+        self.assertEqual(result["player_id"], "246273")
+        self.assertEqual(result["player_license_number"], "9500754")
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["sessions"][0]["session_id"], "300749")
+
     def test_logged_in_search_me_is_used_only_when_index_is_missing(self):
         auth = create.LancelotAuth("token", "246273", "9500754")
         resolved = create.ResolvedPlayer("246273", "9500754", "246273", "597539")

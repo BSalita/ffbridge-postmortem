@@ -1570,15 +1570,10 @@ def resolve_url_player_id_param(value: str) -> str:
 def _populate_game_urls_for_player_lancelot(player_id: str) -> bool:
     """Lancelot branch of populate_game_urls_for_player.
 
-    The Lancelot API only exposes a personal results list for the logged-in user
-    (/results/search/me); there is no public per-person results endpoint. So game
-    lists are available for the logged-in user only.
+    Session lists come from the shared player-session index via the writer API.
+    A live Lancelot login is not required to list games; it is only needed later
+    to download missing board scores.
     """
-    if not st.session_state.get('lancelot_token_valid'):
-        st.session_state.player_search_error = (
-            "Lancelot game lists require login. Set FFBRIDGE_EMAIL/FFBRIDGE_PASSWORD in .env and restart."
-        )
-        return False
     try:
         listed = pm_api.list_source_sessions(player_id)
     except pm_api.FfbridgeApiClientError as e:

@@ -535,9 +535,12 @@ def list_source_sessions(
     token: Optional[str] = None,
     cache_dir: Optional[pathlib.Path] = None,
 ) -> Dict[str, Any]:
-    """Playable Lancelot sessions for a player, with already_cached flags."""
-    auth = ensure_lancelot_auth()
-    token = token or auth.token
+    """Playable Lancelot sessions for a player, with already_cached flags.
+
+    The shared player-session index is enough to list games. Lancelot auth is
+    used only when the index is missing and the requested player is the
+    signed-in user (live ``results/search/me``).
+    """
     resolved = resolve_player(player_id, token=token)
     directory = pathlib.Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
     try:
@@ -547,6 +550,8 @@ def list_source_sessions(
             date_to=date_to,
         )
     except FileNotFoundError:
+        auth = ensure_lancelot_auth()
+        token = token or auth.token
         if resolved.lancelot_id != auth.lancelot_id:
             raise
         source_sessions = fetch_logged_in_source_sessions(token)
