@@ -3340,6 +3340,8 @@ class FFBridgeApp(PostmortemBase):
             status = 'up' if api_health[source]['ok'] else f"unreachable ({api_health[source]['detail']})"
             health_parts.append(f"{source.capitalize()}: {status}")
         st.sidebar.caption(' | '.join(health_parts))
+        if st.session_state.get('lancelot_sign_in_note'):
+            st.sidebar.caption(st.session_state.lancelot_sign_in_note)
         if not api_health[get_api_source()]['ok']:
             st.sidebar.warning(f"The selected API source ({get_api_source()}) is currently unreachable.")
 
@@ -3502,16 +3504,18 @@ class FFBridgeApp(PostmortemBase):
 def initialize_ffbridge_bearer_token() -> None:
     """Initialize FFBridge tokens (Lancelot bearer + Classic EASI) and logged-in identity.
 
-    Resilient by design: the Classic backend may be down (it currently returns 503),
-    and the .env Lancelot token may be expired. In that case we refresh the Lancelot
-    token via Firebase password sign-in (the same flow the ffbridge.fr SPA uses) and
-    derive a fresh EASI token from it. Failures degrade to public-only mode with a
-    warning instead of breaking startup.
+    Uses the shared create-path authenticator so an expired .env token is
+    refreshed via Firebase. Failures stay in index-only mode; they do not
+    block license lookup or indexed game lists.
     """
+    if st.session_state.get('_lancelot_auth_initialized'):
+        return
+    st.session_state._lancelot_auth_initialized = True
     st.session_state.lancelot_token_valid = False
     st.session_state.logged_in_player_id = None
     st.session_state.logged_in_license_number = None
     st.session_state.logged_in_lancelot_id = None
+    st.session_state.lancelot_sign_in_note = None
 
     health = probe_api_sources()
     if health[API_SOURCE_LANCELOT]['ok']:
@@ -3521,50 +3525,27 @@ def initialize_ffbridge_bearer_token() -> None:
         except Exception as e:
             print(f"Warning: Lancelot version check failed: {e}")
 
-    # Load tokens from .env
     load_dotenv()
     st.session_state.ffbridge_bearer_token = os.getenv('FFBRIDGE_BEARER_TOKEN_LANCELOT')
     st.session_state.ffbridge_easi_token = os.getenv('FFBRIDGE_EASI_TOKEN')
 
-    # Validate the Lancelot token; refresh via Firebase sign-in if invalid/missing.
-    persons_me = None
-    if health[API_SOURCE_LANCELOT]['ok']:
-        for attempt in ('env-token', 'refreshed-token'):
-            if st.session_state.ffbridge_bearer_token:
-                try:
-                    persons_me = make_lancelot_request('persons/me')
-                    break
-                except requests.exceptions.HTTPError as e:
-                    if e.response is not None and e.response.status_code == 401:
-                        print(f"Lancelot token invalid ({attempt}).")
-                    else:
-                        print(f"Lancelot persons/me failed ({attempt}): {e}")
-                        break
-                except Exception as e:
-                    print(f"Lancelot persons/me failed ({attempt}): {e}")
-                    break
-            if attempt == 'env-token':
-                fresh = refresh_lancelot_token_via_firebase()
-                if not fresh:
-                    break
-                st.session_state.ffbridge_bearer_token = fresh
+    auth = None
+    try:
+        auth = pm_create.ensure_lancelot_auth()
+        _sync_lancelot_session_token(auth.token)
+    except Exception as e:
+        print(f"Lancelot sign-in skipped: {e}")
 
-    if persons_me is not None:
-        st.session_state.lancelot_token_valid = True
-        # Store the logged-in user's identity but DON'T set player_id yet -
-        # Morty messages should show until the user enters a player number in the textbox.
-        # migrationId is the Classic person_id; ffbId is the license number.
-        st.session_state.logged_in_lancelot_id = str(persons_me['id'])
-        if persons_me.get('migrationId') is not None:
-            st.session_state.logged_in_player_id = str(persons_me['migrationId'])
-        st.session_state.logged_in_license_number = str(persons_me.get('ffbId') or '')
+    if auth is not None:
+        st.session_state.logged_in_lancelot_id = auth.lancelot_id
+        st.session_state.logged_in_player_id = auth.classic_person_id
+        st.session_state.logged_in_license_number = auth.license_number or ''
         print(f"Logged in: lancelot_id={st.session_state.logged_in_lancelot_id} "
               f"classic_person_id={st.session_state.logged_in_player_id} "
               f"license={st.session_state.logged_in_license_number}")
 
-        # Refresh the EASI token (used by the Classic API) from the valid Lancelot session.
         try:
-            easi_token = mlBridgeFFLib.get_easi_token(get_lancelot_token())
+            easi_token = mlBridgeFFLib.get_easi_token(auth.token)
             if easi_token:
                 st.session_state.ffbridge_easi_token = easi_token
                 try:
@@ -3576,14 +3557,15 @@ def initialize_ffbridge_bearer_token() -> None:
         except Exception as e:
             print(f"Warning: EASI token refresh failed: {e}")
     else:
-        st.warning(
-            "Not signed in to FFBridge (Lancelot). Member search and personal game lists are unavailable. "
-            "Set FFBRIDGE_EMAIL/FFBRIDGE_PASSWORD (or a fresh FFBRIDGE_BEARER_TOKEN_LANCELOT) in .env, "
-            "or run: python ffbridge_auth_playwright.py"
+        st.session_state.lancelot_sign_in_note = (
+            "Not signed in to FFBridge (Lancelot). License lookup and indexed "
+            "game lists still work. Name search and downloading uncached sessions "
+            "need FFBRIDGE_EMAIL/FFBRIDGE_PASSWORD or a fresh "
+            "FFBRIDGE_BEARER_TOKEN_LANCELOT."
         )
 
     if not st.session_state.ffbridge_easi_token and health[API_SOURCE_CLASSIC]['ok']:
-        st.warning("No EASI token available for the Classic API. Classic mode requests will fail.")
+        st.sidebar.caption("No EASI token for the Classic API. Classic mode requests will fail.")
 
         # # Try to import automation functions
         # try:
