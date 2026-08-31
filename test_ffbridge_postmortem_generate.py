@@ -235,6 +235,104 @@ class GenerateJobTests(unittest.TestCase):
         self.assertEqual({result["job_id"] for result in results}, {"test-job"})
         self.assertTrue(all(result["reused_job"] for result in results))
 
+    def test_cached_generate_does_not_require_lancelot_auth(self):
+        resolved = create.ResolvedPlayer(
+            "246273", "9500754", "9500754", "597539"
+        )
+        session = {
+            "session_id": "300749",
+            "series_id": 1,
+            "date": "2026-08-17",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = pathlib.Path(tmp)
+            cache_path = create.cache_parquet_path(
+                "300749", resolved.lancelot_id, cache_dir
+            )
+            cache_path.touch()
+            with (
+                patch.object(create, "initialize_generate_jobs"),
+                patch.object(create, "resolve_player", return_value=resolved),
+                patch.object(create, "_active_job_for_player", return_value=None),
+                patch.object(
+                    create,
+                    "_select_sessions_to_generate",
+                    return_value=[session],
+                ),
+                patch.object(
+                    create.pl,
+                    "read_parquet",
+                    return_value=pl.DataFrame({"Board": [1]}),
+                ),
+                patch.object(
+                    create.postmortem_archive,
+                    "archive_session",
+                    return_value={
+                        "archive_file": "session.parquet",
+                        "revision": "rev-1",
+                    },
+                ),
+                patch.object(
+                    create,
+                    "_write_hierarchical_if_configured",
+                    return_value=None,
+                ),
+                patch.object(
+                    create,
+                    "ensure_lancelot_auth",
+                    side_effect=AssertionError(
+                        "cached generation must not authenticate"
+                    ),
+                ),
+            ):
+                result = create.generate_postmortems(
+                    "9500754",
+                    session_id="300749",
+                    cache_dir=cache_dir,
+                )
+
+        self.assertEqual(result["status"], "cached")
+        self.assertEqual(result["player_id"], "246273")
+        self.assertEqual(result["session_id"], "300749")
+
+    def test_uncached_generate_authenticates_before_starting_job(self):
+        resolved = create.ResolvedPlayer(
+            "246273", "9500754", "9500754", "597539"
+        )
+        auth = create.LancelotAuth("token", "246273", "9500754", "597539")
+        session = {
+            "session_id": "300749",
+            "series_id": 1,
+            "date": "2026-08-17",
+        }
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.object(create, "initialize_generate_jobs"),
+            patch.object(create, "resolve_player", return_value=resolved),
+            patch.object(create, "_active_job_for_player", return_value=None),
+            patch.object(
+                create,
+                "_select_sessions_to_generate",
+                return_value=[session],
+            ),
+            patch.object(
+                create,
+                "ensure_lancelot_auth",
+                return_value=auth,
+            ) as ensure_auth,
+            patch.object(create, "_persist_job"),
+            patch.object(create, "_start_job_thread") as start_job,
+        ):
+            result = create.generate_postmortems(
+                "9500754",
+                session_id="300749",
+                cache_dir=pathlib.Path(tmp),
+            )
+
+        self.assertEqual(result["status"], "started")
+        ensure_auth.assert_called_once_with()
+        start_job.assert_called_once()
+
 
 class OtherPlayerSessionTests(unittest.TestCase):
     def test_shared_index_lists_only_target_player_in_date_window(self):

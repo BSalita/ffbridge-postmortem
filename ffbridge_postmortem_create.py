@@ -1172,7 +1172,7 @@ def generate_status(job_id: str) -> Dict[str, Any]:
 
 def _select_sessions_to_generate(
     resolved: ResolvedPlayer,
-    auth: LancelotAuth,
+    token: Optional[str],
     session_id: Optional[str],
     date_from: Optional[str],
     date_to: Optional[str],
@@ -1182,7 +1182,7 @@ def _select_sessions_to_generate(
         resolved.lancelot_id,
         date_from=date_from,
         date_to=date_to,
-        token=auth.token,
+        token=token,
         cache_dir=cache_dir,
     )
     sessions: List[Dict[str, Any]] = listed["sessions"]
@@ -1637,8 +1637,7 @@ def generate_postmortems(
     _log(f"start generate player={player_id} session={session_id} at {started.isoformat(timespec='seconds')}")
     directory = pathlib.Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
     initialize_generate_jobs(directory)
-    auth = ensure_lancelot_auth()
-    resolved = resolve_player(player_id, token=auth.token)
+    resolved = resolve_player(player_id)
     active_job = _active_job_for_player(resolved.lancelot_id, directory)
     if active_job is not None:
         pending = _remaining_session_ids(active_job)
@@ -1664,7 +1663,7 @@ def generate_postmortems(
     if continue_on_error is None:
         continue_on_error = date_from is not None or date_to is not None
     sessions = _select_sessions_to_generate(
-        resolved, auth, session_id, date_from, date_to, directory
+        resolved, None, session_id, date_from, date_to, directory
     )
 
     cached_results = []
@@ -1713,6 +1712,7 @@ def generate_postmortems(
         }
         return payload
 
+    auth = ensure_lancelot_auth()
     job_id = uuid.uuid4().hex
     job = GenerateJob(
         job_id=job_id,
