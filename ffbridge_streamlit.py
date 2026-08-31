@@ -1667,8 +1667,15 @@ def _populate_game_urls_for_player_lancelot(player_id: str) -> bool:
     license_number = listed.get('player_license_number')
     if license_number and str(license_number) != player_id:
         st.session_state.game_urls_d[str(license_number)] = game_urls
+    ordered = {
+        int(row["session_id"]): game_urls[int(row["session_id"])]
+        for row in pm_create.sessions_newest_first(game_urls.values())
+    }
+    for key in list(st.session_state.game_urls_d):
+        if st.session_state.game_urls_d[key] is game_urls:
+            st.session_state.game_urls_d[key] = ordered
     st.session_state.person_organization_id = None
-    return len(game_urls) > 0
+    return len(ordered) > 0
 
 
 def populate_game_urls_for_player(player_id: str) -> bool:

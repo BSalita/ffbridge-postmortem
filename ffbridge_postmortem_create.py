@@ -18,7 +18,7 @@ import unicodedata
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from dotenv import load_dotenv
 from tqdm import tqdm
@@ -449,6 +449,25 @@ def _parse_session_date(value: Any) -> Optional[str]:
     return str(value)[:10]
 
 
+def _session_recency_key(entry: Mapping[str, Any]) -> tuple[str, int]:
+    date_text = _parse_session_date(
+        entry.get("date") or entry.get("session_date") or entry.get("raw_date")
+    ) or ""
+    sid = str(entry.get("session_id") or "")
+    try:
+        sid_n = int(sid)
+    except ValueError:
+        sid_n = 0
+    return (date_text, sid_n)
+
+
+def sessions_newest_first(
+    sessions: Sequence[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Newest session date first; session_id breaks ties."""
+    return sorted((dict(row) for row in sessions), key=_session_recency_key, reverse=True)
+
+
 def _in_date_window(date_str: Optional[str], date_from: Optional[str], date_to: Optional[str]) -> bool:
     if date_from is None and date_to is None:
         return True
@@ -513,7 +532,7 @@ def fetch_logged_in_source_sessions(token: str) -> List[Dict[str, Any]]:
                 "raw_date": item.get("date"),
             }
         )
-    return sessions
+    return sessions_newest_first(sessions)
 
 
 def _find_player_session_index_dir() -> pathlib.Path:
@@ -607,7 +626,7 @@ def fetch_other_player_source_sessions(
                 "listing_source": "shared Lancelot player-session index",
             }
         )
-    return sessions
+    return sessions_newest_first(sessions)
 
 
 def list_source_sessions(
@@ -648,6 +667,7 @@ def list_source_sessions(
         row["already_cached"] = cache_file.is_file()
         row["cache_file"] = cache_file.name if cache_file.is_file() else None
         sessions.append(row)
+    sessions = sessions_newest_first(sessions)
     return {
         "player_id": resolved.lancelot_id,
         "player_license_number": resolved.license_number,
