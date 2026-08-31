@@ -311,6 +311,28 @@ def get_lancelot_token() -> str:
     return token
 
 
+def _sync_lancelot_session_token(token: str) -> None:
+    st.session_state.ffbridge_bearer_token = token
+    st.session_state.lancelot_token_valid = True
+
+
+def _validated_lancelot_token(*, force: bool = False) -> str:
+    """Return a library-validated Lancelot token and keep session_state in sync.
+
+    Streamlit can keep a stale FFBRIDGE_BEARER_TOKEN_LANCELOT in session_state
+    after startup. ensure_lancelot_auth() re-checks persons/me and refreshes
+    via Firebase when the env token is rejected.
+    """
+    auth = pm_create.ensure_lancelot_auth(force=force)
+    _sync_lancelot_session_token(auth.token)
+    return auth.token
+
+
+def _is_lancelot_unauthorized(exc: BaseException) -> bool:
+    response = getattr(exc, "response", None)
+    return response is not None and response.status_code == 401
+
+
 def make_lancelot_request(path: str, use_auth: bool = True) -> Any:
     """GET a Lancelot API path and return parsed JSON.
 
@@ -320,7 +342,13 @@ def make_lancelot_request(path: str, use_auth: bool = True) -> Any:
     """
     token = get_lancelot_token() if use_auth else None
     print(f"Making Lancelot API request to: {lancelot_api_url(path)}")
-    return mlBridgeFFLib.lancelot_get(path, token=token)
+    try:
+        return mlBridgeFFLib.lancelot_get(path, token=token)
+    except requests.exceptions.HTTPError as e:
+        if use_auth and _is_lancelot_unauthorized(e):
+            token = _validated_lancelot_token(force=True)
+            return mlBridgeFFLib.lancelot_get(path, token=token)
+        raise
 
 
 def refresh_lancelot_token_via_firebase() -> Optional[str]:
@@ -350,6 +378,122 @@ def refresh_lancelot_token_via_firebase() -> Optional[str]:
         return None
 
 
+_LANCELOT_SEARCH_SCHEMA = {
+    'person_id': pl.Utf8,
+    'person_firstname': pl.Utf8,
+    'person_lastname': pl.Utf8,
+    'person_license_number': pl.Utf8,
+    'person_migration_id': pl.Int64,
+}
+
+
+def _lancelot_search_df(rows: List[Dict[str, Any]]) -> pl.DataFrame:
+    return pl.DataFrame(rows, schema=_LANCELOT_SEARCH_SCHEMA)
+
+
+def _lancelot_search_row(
+    *,
+    person_id: str,
+    license_number: str = '',
+    firstname: str = '',
+    lastname: str = '',
+    migration_id: Any = None,
+) -> Dict[str, Any]:
+    mid = None
+    if migration_id is not None and str(migration_id).strip().lstrip('-').isdigit():
+        mid = int(migration_id)
+    return {
+        'person_id': str(person_id),
+        'person_firstname': firstname or '',
+        'person_lastname': lastname or '',
+        'person_license_number': str(license_number or ''),
+        'person_migration_id': mid,
+    }
+
+
+def _license_lookup_from_logged_in_user(query: str) -> Optional[pl.DataFrame]:
+    """Resolve the signed-in player's own license/Lancelot/Classic id without Lancelot."""
+    wanted = pm_create._norm_digits(query)
+    lancelot_id = st.session_state.get('logged_in_lancelot_id')
+    if not lancelot_id:
+        return None
+    aliases = {
+        pm_create._norm_digits(value)
+        for value in (
+            st.session_state.get('logged_in_license_number'),
+            lancelot_id,
+            st.session_state.get('logged_in_player_id'),
+        )
+        if value
+    }
+    if wanted not in aliases:
+        return None
+    return _lancelot_search_df([
+        _lancelot_search_row(
+            person_id=str(lancelot_id),
+            license_number=str(st.session_state.get('logged_in_license_number') or ''),
+            migration_id=st.session_state.get('logged_in_player_id'),
+        )
+    ])
+
+
+def _search_df_if_license_match(
+    query: str,
+    *,
+    person_id: Optional[str],
+    license_number: Optional[str],
+    migration_id: Any = None,
+) -> Optional[pl.DataFrame]:
+    if not person_id or not license_number:
+        return None
+    if pm_create._norm_digits(license_number) != pm_create._norm_digits(query):
+        return None
+    return _lancelot_search_df([
+        _lancelot_search_row(
+            person_id=str(person_id),
+            license_number=str(license_number),
+            migration_id=migration_id,
+        )
+    ])
+
+
+def _license_lookup_from_index_or_api(query: str) -> Optional[pl.DataFrame]:
+    """Resolve a known license from the player-session index, then the writer API."""
+    try:
+        indexed = pm_create._resolve_player_from_index(query)
+    except FileNotFoundError:
+        indexed = None
+    if indexed is not None:
+        found = _search_df_if_license_match(
+            query,
+            person_id=indexed.lancelot_id,
+            license_number=indexed.license_number,
+            migration_id=indexed.classic_person_id,
+        )
+        if found is not None:
+            return found
+    try:
+        resolved = pm_api.resolve_player(query)
+    except pm_api.FfbridgeApiClientError as e:
+        print(f"search_members: API resolve failed for {query!r}: {e}")
+        return None
+    return _search_df_if_license_match(
+        query,
+        person_id=resolved.get('player_id') or resolved.get('lancelot_id'),
+        license_number=resolved.get('player_license_number') or resolved.get('license_number'),
+        migration_id=resolved.get('classic_person_id'),
+    )
+
+
+def _search_persons_lancelot(query: str) -> List[Dict[str, Any]]:
+    try:
+        return mlBridgeFFLib.search_persons(query, _validated_lancelot_token())
+    except requests.exceptions.HTTPError as e:
+        if _is_lancelot_unauthorized(e):
+            return mlBridgeFFLib.search_persons(query, _validated_lancelot_token(force=True))
+        raise
+
+
 def search_members(query: str) -> pl.DataFrame:
     """Source-aware member search.
 
@@ -357,21 +501,30 @@ def search_members(query: str) -> pl.DataFrame:
     person_id, person_firstname, person_lastname, person_license_number
 
     In Classic mode person_id is the Classic person_id; in Lancelot mode it is the Lancelot person id.
+    Numeric Lancelot lookups use the signed-in identity or the player-session
+    index first so an expired bearer token does not block a known license.
     """
     q = (query or '').strip()
     if is_lancelot_mode():
-        items = mlBridgeFFLib.search_persons(q, get_lancelot_token())
+        if q.isdigit():
+            local = _license_lookup_from_logged_in_user(q)
+            if local is not None:
+                return local
+            indexed = _license_lookup_from_index_or_api(q)
+            if indexed is not None:
+                return indexed
+        items = _search_persons_lancelot(q)
         rows = [
-            {
-                'person_id': str(item['id']),
-                'person_firstname': item.get('firstName') or '',
-                'person_lastname': item.get('lastName') or '',
-                'person_license_number': str(item.get('ffbId') or ''),
-                'person_migration_id': item.get('migrationId'),
-            }
+            _lancelot_search_row(
+                person_id=str(item['id']),
+                license_number=str(item.get('ffbId') or ''),
+                firstname=item.get('firstName') or '',
+                lastname=item.get('lastName') or '',
+                migration_id=item.get('migrationId'),
+            )
             for item in items
         ]
-        return pl.DataFrame(rows, schema={'person_id': pl.Utf8, 'person_firstname': pl.Utf8, 'person_lastname': pl.Utf8, 'person_license_number': pl.Utf8, 'person_migration_id': pl.Int64})
+        return _lancelot_search_df(rows)
     else:
         api_urls_d = {
             'search': (classic_api_url(f"search-members?alive=1&search={q}"), False),
