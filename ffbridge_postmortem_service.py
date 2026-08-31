@@ -349,7 +349,7 @@ def _load_hierarchical_postmortem(
     columns = [
         column
         for column in mapping
-        if column not in {"session_id", "Board", "_result_row_id"}
+        if column not in {"session_id", "_result_row_id"}
     ]
     frame = normalized.normalized_player_report(
         HIERARCHICAL_DIR,

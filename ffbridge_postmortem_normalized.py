@@ -810,8 +810,9 @@ def normalized_player_report(
         )
     else:
         result = results
+    output_columns = list(dict.fromkeys(["Board", *selected_columns]))
     return (
         result.sort("_result_row_id")
-        .select(*selected_columns)
+        .select(*output_columns)
         .collect(engine="streaming")
     )

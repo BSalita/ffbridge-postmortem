@@ -230,6 +230,8 @@ class NormalizedArchiveTests(unittest.TestCase):
             )
             self.assertEqual(meta["data_source"], "hierarchical_archive")
             self.assertGreater(loaded.height, 0)
+            self.assertIn("Board", loaded.columns)
+            self.assertEqual(loaded["Board"].to_list(), [1, 1])
 
     def test_hierarchical_write_permits_additive_quality_columns(self):
         with tempfile.TemporaryDirectory() as tmp:
