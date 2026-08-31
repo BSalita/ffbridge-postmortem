@@ -1626,6 +1626,38 @@ def resolve_url_player_id_param(value: str) -> str:
     return value
 
 
+def _games_newest_first(game_urls: Mapping[Any, Mapping[str, Any]]) -> Dict[int, Dict[str, Any]]:
+    """Return club games keyed in newest-date-first order."""
+    if not game_urls:
+        return {}
+    ordered = pm_create.sessions_newest_first(
+        [
+            {**dict(entry), "session_id": key}
+            for key, entry in game_urls.items()
+        ]
+    )
+    result: Dict[int, Dict[str, Any]] = {}
+    for row in ordered:
+        session_id = int(row["session_id"])
+        result[session_id] = dict(game_urls[session_id] if session_id in game_urls else row)
+        result[session_id]["session_id"] = session_id
+    return result
+
+
+def _latest_session_id(game_urls: Mapping[Any, Mapping[str, Any]]) -> Optional[int]:
+    ordered = _games_newest_first(game_urls)
+    if not ordered:
+        return None
+    return next(iter(ordered))
+
+
+def _clear_selected_session() -> None:
+    """Drop a bookmarked or leftover session so the next load picks the newest game."""
+    st.session_state.session_id = None
+    st.session_state.pop("club_session_ids_selectbox", None)
+    st.session_state.pop("_url_loaded_session_key", None)
+
+
 def _populate_game_urls_for_player_lancelot(player_id: str) -> bool:
     """Lancelot branch of populate_game_urls_for_player.
 
@@ -1797,9 +1829,10 @@ def _change_game_state_lancelot(player_id: str, session_id: Optional[int]) -> bo
                 st.session_state.get('player_search_error')
                 or f"Could not find any games for {player_id}."
             )
-        game_urls = st.session_state.game_urls_d[player_id]
+        game_urls = _games_newest_first(st.session_state.game_urls_d[player_id])
+        st.session_state.game_urls_d[player_id] = game_urls
         if session_id is None:
-            session_id = next(iter(game_urls))  # most recent game
+            session_id = _latest_session_id(game_urls)
         session_id = int(session_id)
         if session_id not in game_urls:
             return _report_failure(
@@ -1824,6 +1857,9 @@ def _change_game_state_lancelot(player_id: str, session_id: Optional[int]) -> bo
         if not meta:
             meta = pm_api.postmortem_meta(str(player_id), sid)
         _apply_lancelot_session_meta(meta)
+        listing = game_urls.get(int(sid)) or game_urls.get(session_id)
+        if listing and listing.get("date"):
+            st.session_state.tournament_date = str(listing["date"])[:10]
         df = pm_api.postmortem_dataframe(str(player_id), sid)
         if st.session_state.debug_mode:
             debug_capture_df("Final Dataframe", df, source="ffbridge_postmortem_api")
@@ -1918,7 +1954,8 @@ def change_game_state(player_id: str, session_id: str) -> bool: # todo: rename t
                         if not (player_id in st.session_state.game_urls_d and st.session_state.game_urls_d[player_id]):
                             st.session_state.game_urls_d[player_id] = {}
                             return True  # Only signal error if we have nothing to show
-        game_urls = st.session_state.game_urls_d[player_id]
+        game_urls = _games_newest_first(st.session_state.game_urls_d[player_id])
+        st.session_state.game_urls_d[player_id] = game_urls
         if game_urls is None:
             st.error(f"Player number {player_id} not found.")
             return True  # Return True to indicate error
@@ -1926,10 +1963,7 @@ def change_game_state(player_id: str, session_id: str) -> bool: # todo: rename t
             st.error(f"Could not find any games for {player_id}.")
             return True  # Return error if no games found
         elif session_id is None:
-            iterator = iter(game_urls)
-            #next(iterator)  # Skip first
-            session_id = next(iterator)  # Get second
-            #session_id = next(iter(game_urls))  # default to most recent club game
+            session_id = _latest_session_id(game_urls)
         st.session_state.player_id = player_id
         print(f"session_id:{session_id}")
         st.session_state.session_id = session_id
@@ -2546,6 +2580,7 @@ def show_player_selection_modal(filtered_options):
                                 del st.session_state.show_player_modal
                             
                             # Flag for main loop to refresh after modal selection
+                            _clear_selected_session()
                             st.session_state.deferred_start_report = True
                             
                             # Immediately hide the dialog visually before rerun completes
@@ -2743,6 +2778,7 @@ def player_search_input_on_change_with_query(query: str) -> None:
         st.session_state.last_search_query = query
         
         # Defer report start: first refresh sidebar with games, then start report
+        _clear_selected_session()
         st.session_state.deferred_start_report = True
         return
         
@@ -3405,6 +3441,7 @@ class FFBridgeApp(PostmortemBase):
                         
                         # Store the original search query for error messages
                         st.session_state.last_search_query = input_value
+                        _clear_selected_session()
                         st.session_state.deferred_start_report = True
                         return
                     else:
@@ -3523,15 +3560,26 @@ class FFBridgeApp(PostmortemBase):
 
         player_id_key = str(st.session_state.player_id) if st.session_state.player_id is not None else None
         if player_id_key is not None and player_id_key in st.session_state.game_urls_d:
+            games = _games_newest_first(st.session_state.game_urls_d[player_id_key])
+            st.session_state.game_urls_d[player_id_key] = games
+            options = [f"{k}, {v.get('description')}" for k, v in games.items()]
+            current = st.session_state.get("session_id")
+            current_index = next(
+                (i for i, key in enumerate(games) if str(key) == str(current)),
+                0,
+            )
+            desired = options[current_index] if options else None
+            if desired and st.session_state.get("club_session_ids_selectbox") not in options:
+                st.session_state.club_session_ids_selectbox = desired
             st.sidebar.selectbox(
-                "Choose a club game.", 
-                index=0, 
-                options=[f"{k}, {v['description']}" for k, v in st.session_state.game_urls_d[player_id_key].items()], 
-                on_change=club_session_id_on_change, 
+                "Choose a club game.",
+                index=current_index,
+                options=options,
+                on_change=club_session_id_on_change,
                 key='club_session_ids_selectbox'
             )
             # Show a small verification of how many games are available
-            st.sidebar.caption(f"Games found: {len(st.session_state.game_urls_d.get(player_id_key, {}))}")
+            st.sidebar.caption(f"Games found: {len(games)}")
 
         results_url = _ensure_game_results_url()
         if results_url:

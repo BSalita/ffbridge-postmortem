@@ -580,6 +580,21 @@ class OtherPlayerSessionTests(unittest.TestCase):
         self.assertEqual({result["count"] for result in results}, {1})
 
 
+class SessionRecencyTests(unittest.TestCase):
+    def test_newest_first_puts_august_ahead_of_june(self):
+        ordered = create.sessions_newest_first(
+            [
+                {"session_id": "282792", "date": "2026-06-01"},
+                {"session_id": "282839", "date": "2026-08-25"},
+                {"session_id": "300751", "date": "2026-08-24"},
+            ]
+        )
+        self.assertEqual(
+            [row["session_id"] for row in ordered],
+            ["282839", "300751", "282792"],
+        )
+
+
 class ResultsPageUrlTests(unittest.TestCase):
     def test_pair_url_requires_group_and_session(self):
         self.assertEqual(

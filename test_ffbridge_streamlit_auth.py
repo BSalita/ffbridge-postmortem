@@ -188,6 +188,70 @@ class StreamlitLancelotRoutingTests(unittest.TestCase):
             )
         )
 
+    def test_latest_session_is_newest_date_not_first_list_item(self):
+        june_first = {
+            282792: {"date": "2026-06-01", "description": "2026-06-01 Ronde"},
+            282839: {"date": "2026-08-25", "description": "2026-08-25 Rondes de France"},
+            300751: {"date": "2026-08-24", "description": "2026-08-24 Octopus"},
+        }
+        ordered = app._games_newest_first(june_first)
+        self.assertEqual(list(ordered), [282839, 300751, 282792])
+        self.assertEqual(app._latest_session_id(june_first), 282839)
+
+    def test_omitted_session_loads_august_not_june(self):
+        june_first = {
+            282792: {"date": "2026-06-01", "description": "2026-06-01 Ronde"},
+            282839: {"date": "2026-08-25", "description": "2026-08-25 Rondes de France"},
+        }
+        state = SessionState(
+            game_urls_d={"9500754": june_first},
+            debug_mode=False,
+        )
+        with (
+            patch.object(app.st, "session_state", state),
+            patch.object(app.st, "spinner", side_effect=lambda *_a, **_k: nullcontext()),
+            patch.object(app, "populate_game_urls_for_player", return_value=True),
+            patch.object(
+                app.pm_api,
+                "generate_and_wait",
+                return_value={
+                    "status": "ok",
+                    "session_id": "282839",
+                    "results": [{
+                        "session_id": "282839",
+                        "meta": {
+                            "session_id": 282839,
+                            "tournament_date": "2026-06-01",
+                        },
+                    }],
+                },
+            ) as generate,
+            patch.object(app.pm_api, "postmortem_dataframe", return_value=pl.DataFrame()),
+            patch.object(app, "filter_dataframe", return_value=pl.DataFrame()),
+            patch.object(app, "_ensure_game_results_url"),
+            patch.object(app, "get_session_duckdb_connection", return_value=Mock()),
+        ):
+            failed = app._change_game_state_lancelot("9500754", None)
+
+        self.assertFalse(failed)
+        generate.assert_called_once()
+        self.assertEqual(generate.call_args.args[0], "9500754")
+        self.assertEqual(generate.call_args.kwargs["session_id"], "282839")
+        self.assertEqual(state["session_id"], 282839)
+        self.assertEqual(state["tournament_date"], "2026-08-25")
+
+    def test_go_clears_a_bookmarked_june_session(self):
+        state = SessionState(
+            session_id=282792,
+            club_session_ids_selectbox="282792, 2026-06-01 Ronde",
+            _url_loaded_session_key=("9500754", 282792),
+        )
+        with patch.object(app.st, "session_state", state):
+            app._clear_selected_session()
+        self.assertIsNone(state["session_id"])
+        self.assertNotIn("club_session_ids_selectbox", state)
+        self.assertNotIn("_url_loaded_session_key", state)
+
 
 if __name__ == "__main__":
     unittest.main()
