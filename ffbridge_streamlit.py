@@ -3430,9 +3430,6 @@ class FFBridgeApp(PostmortemBase):
         # Always render debug section (when enabled) so it doesn't disappear on reruns.
         render_debug_expander()
 
-        # Memory footer on the main page (same pattern as Elo_Ratings apps).
-        st.caption(streamlitlib.get_memory_caption_line(st))
-        
         # Re-inject CSS at the end to ensure it overrides any theme styles applied during render.
         self._inject_sidebar_button_css()
 
