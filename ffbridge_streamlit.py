@@ -23,6 +23,7 @@ from stqdm import stqdm
 
 
 import pathlib
+import re
 import pandas as pd # only used for __version__ for now. might need for plotting later as pandas plotting support is better than polars.
 import polars as pl
 import requests
@@ -467,6 +468,43 @@ def _search_persons_lancelot(query: str) -> List[Dict[str, Any]]:
         raise
 
 
+def _fuzzy_search_persons_from_index(query: str, limit: int = 40) -> List[Dict[str, Any]]:
+    """Elo-style name matches from the local Lancelot person index."""
+    try:
+        from mlBridge.mlBridgeFFIndexLib import load_persons
+    except ImportError:
+        return []
+    try:
+        persons = load_persons()
+    except (FileNotFoundError, OSError, ValueError):
+        return []
+    if persons.is_empty() or "display_name" not in persons.columns:
+        return []
+    names = persons["display_name"].drop_nulls().unique().to_list()
+    matched = [name for name in names if streamlitlib.name_query_matches(name, query)]
+    if not matched:
+        return []
+    hits = persons.filter(pl.col("display_name").is_in(matched))
+    rows = []
+    for rec in hits.to_dicts():
+        display = str(rec.get("display_name") or "").strip()
+        parts = display.split()
+        first = " ".join(parts[:-1]) if len(parts) > 1 else display
+        last = parts[-1] if parts else ""
+        rows.append(
+            {
+                "id": rec.get("lancelot_person_id"),
+                "ffbId": rec.get("license_number"),
+                "firstName": first,
+                "lastName": last,
+                "migrationId": rec.get("classic_person_id"),
+                "player_name": display,
+            }
+        )
+    ranked = streamlitlib.rank_named_records(rows, query, name_key="player_name")
+    return ranked[:limit]
+
+
 def search_members(query: str) -> pl.DataFrame:
     """Source-aware member search.
 
@@ -486,7 +524,20 @@ def search_members(query: str) -> pl.DataFrame:
             indexed = _license_lookup_from_index_or_api(q)
             if indexed is not None:
                 return indexed
-        items = _search_persons_lancelot(q)
+        items = list(_search_persons_lancelot(q))
+        if not q.isdigit():
+            seen = {str(item.get("id") or "") for item in items}
+            for item in _fuzzy_search_persons_from_index(q):
+                person_id = str(item.get("id") or "")
+                if person_id and person_id not in seen:
+                    seen.add(person_id)
+                    items.append(item)
+            named = []
+            for item in items:
+                first = item.get("firstName") or ""
+                last = item.get("lastName") or ""
+                named.append({**item, "player_name": f"{first} {last}".strip()})
+            items = streamlitlib.rank_named_records(named, q, name_key="player_name")
         rows = [
             _lancelot_search_row(
                 person_id=str(item['id']),
@@ -496,6 +547,7 @@ def search_members(query: str) -> pl.DataFrame:
                 migration_id=item.get('migrationId'),
             )
             for item in items
+            if item.get("id")
         ]
         return _lancelot_search_df(rows)
     else:
@@ -503,7 +555,21 @@ def search_members(query: str) -> pl.DataFrame:
             'search': (classic_api_url(f"search-members?alive=1&search={q}"), False),
         }
         dfs, _ = get_ffbridge_data_using_url_licencie(api_urls_d, show_progress=False)
-        return dfs['search']
+        result = dfs['search']
+        if not q.isdigit() and (result is None or result.height == 0):
+            rows = [
+                _lancelot_search_row(
+                    person_id=str(item.get("migrationId") or item.get("id") or ""),
+                    license_number=str(item.get("ffbId") or ""),
+                    firstname=item.get("firstName") or "",
+                    lastname=item.get("lastName") or "",
+                    migration_id=item.get("migrationId"),
+                )
+                for item in _fuzzy_search_persons_from_index(q)
+                if item.get("migrationId") or item.get("id")
+            ]
+            return _lancelot_search_df(rows)
+        return result
 
 
 # Legacy function - now handled by the base class
@@ -2685,8 +2751,8 @@ def player_search_input_on_change_with_query(query: str) -> None:
             del st.session_state.player_search_error
         return
     
-    # Only search if we have at least 4 characters (to avoid premature searches)
-    if len(query.strip()) < 4:
+    letters = re.sub(r"[^a-z0-9]+", "", query, flags=re.I)
+    if len(letters) < 3:
         return
         
     try:
@@ -2868,11 +2934,11 @@ def create_sidebar() -> None:
         # Fallback for backward compatibility - basic sidebar
         st.sidebar.caption(f"Build:{st.session_state.get('app_datetime', '')}")
         st.sidebar.text_input(
-            "Enter ffbridge license number", 
-            on_change=player_search_input_on_change, 
-            placeholder=st.session_state.get('player_license_number', ''), 
-            key='player_search_input', 
-            help="Enter ffbridge license number or (partial) last name."
+            "FFBridge license number or name",
+            on_change=player_search_input_on_change,
+            placeholder=st.session_state.get('player_license_number', ''),
+            key='player_search_input',
+            help="Digits-only license / Lancelot / Classic ID, or a fuzzy player name.",
         )
 
 
@@ -3549,10 +3615,10 @@ class FFBridgeApp(PostmortemBase):
         # which can make the Go button appear "disabled".)
         with st.sidebar.form(key="player_search_form", clear_on_submit=False):
             st.text_input(
-            "Enter ffbridge license number",
+            "FFBridge license number or name",
             key='player_search_input',
-            placeholder="Enter license number",
-            help="Enter ffbridge license number or (partial) last name."
+            placeholder="9500754 or Robert Salita",
+            help="Digits-only license / Lancelot / Classic ID, or a fuzzy player name.",
         )
             submitted = st.form_submit_button("Go", type="primary", use_container_width=True)
 
