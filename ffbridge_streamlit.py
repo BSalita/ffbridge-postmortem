@@ -714,7 +714,7 @@ def api_source_on_change() -> None:
     st.session_state.df = None
     st.session_state.sql_query_mode = False
     st.session_state.deferred_start_report = False
-    for key in ('player_search_error', 'player_search_matches', 'show_player_modal', 'simultane_id', '_url_loaded_session_key'):
+    for key in ('player_search_error', 'player_search_matches', 'player_search_match_selection', 'simultane_id', '_url_loaded_session_key'):
         if key in st.session_state:
             del st.session_state[key]
 
@@ -2649,106 +2649,111 @@ def on_game_url_input_change() -> None:
         reset_game_data()
 
 
-@st.dialog("Select Player")
-def show_player_selection_modal(filtered_options):
-    """Show modal dialog with radio buttons and Select button"""
-    st.write(f"Found {len(filtered_options)} match(es). Select a player:")
-    
-    # Radio buttons for selection
-    selected_option = st.radio(
-        "Players:",
-        options=filtered_options,
-        index=None,
-        key='modal_player_radio',
-        label_visibility="collapsed"
+def _search_row_display(row: Mapping[str, Any]) -> Tuple[str, str, str, str]:
+    firstname = row.get('person_firstname', '') or row.get('firstname', '') or row.get('first_name', '')
+    lastname = row.get('person_lastname', '') or row.get('lastname', '') or row.get('last_name', '')
+    player_name = f"{firstname} {lastname}".strip()
+    license_number = (
+        row.get('person_license_number', '')
+        or row.get('license_number', '')
+        or row.get('licenseNumber', '')
     )
-    
-    # Action buttons
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if st.button("Select", disabled=selected_option is None, width="stretch", type="primary"):
-            if selected_option:
-                # Find the actual player_id for the selected option
-                if hasattr(st.session_state, 'player_search_matches'):
-                    for display_text, player_id, license_number, player_name in st.session_state.player_search_matches:
-                        if display_text == selected_option:
-                            # Update both the value state AND the widget key to sync the textbox
-                            st.session_state.player_search_value = str(license_number)
-                            st.session_state.player_search_input = str(license_number)
-                            # Keep the resolved license number in the textbox after the report
-                            # starts (overrides the clear_player_search flag set by that path).
-                            st.session_state.insert_player_search_value = str(license_number)
-                            
-                            # Also set the player_id for downstream processing
-                            st.session_state.player_id = str(player_id)
-                            
-                            # Clear dialog state to dismiss dialog
-                            if hasattr(st.session_state, 'player_search_matches'):
-                                del st.session_state.player_search_matches
-                            if hasattr(st.session_state, 'player_search_error'):
-                                del st.session_state.player_search_error
-                            # Clear the modal flag as well
-                            if hasattr(st.session_state, 'show_player_modal'):
-                                del st.session_state.show_player_modal
-                            
-                            # Flag for main loop to refresh after modal selection
-                            _clear_selected_session(clear_games=True)
-                            st.session_state.deferred_start_report = True
-                            
-                            # Immediately hide the dialog visually before rerun completes
-                            st.markdown(
-                                """<script>
-                                (function() {
-                                    var dialog = parent.document.querySelector('[data-testid="stModal"]');
-                                    if (dialog) dialog.style.display = 'none';
-                                    var overlay = parent.document.querySelector('[data-testid="stModalOverlay"]');
-                                    if (overlay) overlay.style.display = 'none';
-                                })();
-                                </script>""",
-                                unsafe_allow_html=True
-                            )
-                            
-                            # Rerun to apply session state changes
-                            st.rerun()
-                
-    with col2:
-        if st.button("Cancel", width="stretch"):
-            # Clear dialog state immediately (like X button does)
-            if hasattr(st.session_state, 'player_search_matches'):
-                del st.session_state.player_search_matches
-            if hasattr(st.session_state, 'player_search_error'):
-                del st.session_state.player_search_error
-            # Clear the modal flag as well
-            if hasattr(st.session_state, 'show_player_modal'):
-                del st.session_state.show_player_modal
-            
-            # Immediately hide the dialog visually before rerun completes
-            st.markdown(
-                """<script>
-                (function() {
-                    var dialog = parent.document.querySelector('[data-testid="stModal"]');
-                    if (dialog) dialog.style.display = 'none';
-                    var overlay = parent.document.querySelector('[data-testid="stModalOverlay"]');
-                    if (overlay) overlay.style.display = 'none';
-                })();
-                </script>""",
-                unsafe_allow_html=True
-            )
-            
-            # Rerun to apply state changes
-            st.rerun()
+    player_id = row.get('person_id', '') or row.get('id', '') or row.get('player_id', '')
+    if player_name and license_number:
+        display_text = f"{player_name} - {license_number}"
+    elif player_name:
+        display_text = f"{player_name} - {player_id}"
+    elif license_number:
+        display_text = f"License: {license_number}"
+    else:
+        display_text = f"Player ID: {player_id}"
+    return display_text, str(player_id or ''), str(license_number or ''), player_name
+
+
+def _player_search_matches_from_df(search_df: pl.DataFrame, query: str) -> List[Tuple[str, str, str, str]]:
+    rows = []
+    for row in search_df.iter_rows(named=True):
+        display_text, player_id, license_number, player_name = _search_row_display(row)
+        if not player_id:
+            continue
+        rows.append({
+            "display_text": display_text,
+            "player_id": player_id,
+            "license_number": license_number,
+            "player_name": player_name,
+        })
+    if rows and not query.isdigit():
+        ranked = streamlitlib.rank_named_records(
+            rows, query, name_key="player_name", drop_below_threshold=True
+        )
+        if not ranked:
+            ranked = streamlitlib.rank_named_records(rows, query, name_key="player_name")
+        rows = ranked
+    return [
+        (row["display_text"], row["player_id"], row["license_number"], row["player_name"])
+        for row in rows
+    ]
+
+
+def _clear_player_search_matches() -> None:
+    st.session_state.pop("player_search_matches", None)
+    st.session_state.pop("player_search_match_selection", None)
+    st.session_state.pop("show_player_modal", None)
+
+
+def _apply_resolved_search_player(player_id: str, license_number: str, query: str) -> None:
+    """Activate a unique name/ID hit and start the report."""
+    if license_number and str(license_number) != query.strip():
+        st.session_state.insert_player_search_value = str(license_number)
+        st.session_state.player_search_value = str(license_number)
+
+    st.session_state.pop("player_search_error", None)
+    _clear_player_search_matches()
+    if is_lancelot_mode():
+        st.session_state.lancelot_player_id = str(player_id)
+        if license_number:
+            st.session_state.player_license_number = str(license_number)
+            st.session_state.player_id = str(license_number)
+        else:
+            st.session_state.player_id = str(player_id)
+    else:
+        st.session_state.classic_player_id = str(player_id)
+        st.session_state.player_id = str(player_id)
+        if license_number:
+            st.session_state.player_license_number = str(license_number)
+    _clear_selected_session(clear_games=True)
+    try:
+        has_games = populate_game_urls_for_player(st.session_state.player_id)
+    except Exception as e:
+        st.session_state.player_search_error = f"Error loading games for player: {str(e)}"
+        st.session_state.player_id = None
+        return
+
+    if not has_games:
+        if not st.session_state.get("player_search_error"):
+            st.session_state.player_search_error = f"No games found for player '{query}'."
+        st.session_state.player_id = None
+        return
+
+    st.session_state.last_search_query = query
+    st.session_state.deferred_start_report = True
+
+
+def player_search_match_change() -> None:
+    selected = st.session_state.get("player_search_match_selection")
+    matches = st.session_state.get("player_search_matches") or []
+    for display_text, player_id, license_number, _player_name in matches:
+        if display_text == selected:
+            _apply_resolved_search_player(player_id, license_number, display_text)
+            return
 
 
 def player_search_input_on_change_with_query(query: str) -> None:
     """Handle player search with a specific query string"""
     
     if not query or not query.strip():
-        # Clear any existing search state when input is empty
-        if hasattr(st.session_state, 'player_search_matches'):
-            del st.session_state.player_search_matches
-        if hasattr(st.session_state, 'player_search_error'):
-            del st.session_state.player_search_error
+        _clear_player_search_matches()
+        st.session_state.pop("player_search_error", None)
         return
     
     letters = re.sub(r"[^a-z0-9]+", "", query, flags=re.I)
@@ -2757,151 +2762,34 @@ def player_search_input_on_change_with_query(query: str) -> None:
         
     try:
         dfs = {'search': search_members(query)}
-        
-        if len(dfs['search']) == 0:
-            # Store error message in session state to persist across reruns
-            st.session_state.player_search_error = f"No player found matching '{query}'. Please check the name or license number and try again."
-            # Clear all stale state to prevent proceeding with old data
+        matches = _player_search_matches_from_df(dfs['search'], query)
+
+        if not matches:
+            st.session_state.player_search_error = (
+                f"No player found matching '{query}'. "
+                "Please check the name or license number and try again."
+            )
             st.session_state.player_id = None
             st.session_state.deferred_start_report = False
-            # Clear stale tournament/session IDs that might cause confusing errors
-            if hasattr(st.session_state, 'simultane_id'):
-                del st.session_state.simultane_id
-            if hasattr(st.session_state, 'session_id'):
-                del st.session_state.session_id
+            _clear_player_search_matches()
+            st.session_state.pop("simultane_id", None)
+            st.session_state.pop("session_id", None)
             return
-            
-        if len(dfs['search']) > 1:
-            # If input is more than 3 characters, show matches in selectbox
-            if len(query.strip()) > 3:
-                # Store matches for selectbox display
-                matches = []
-                for row in dfs['search'].iter_rows(named=True):
-                    # Debug: Print available columns and values
-                    if st.session_state.get('debug_mode', False):
-                        print(f"Available columns: {list(row.keys())}")
-                        print(f"Row data: {row}")
-                    
-                    # Try different possible field names for firstname/lastname
-                    firstname = row.get('person_firstname', '') or row.get('firstname', '') or row.get('first_name', '')
-                    lastname = row.get('person_lastname', '') or row.get('lastname', '') or row.get('last_name', '')
-                    player_name = f"{firstname} {lastname}".strip()
-                    
-                    # Try different possible field names for license number
-                    license_number = row.get('person_license_number', '') or row.get('license_number', '') or row.get('licenseNumber', '')
-                    
-                    # Try different possible field names for player ID
-                    player_id = row.get('person_id', '') or row.get('id', '') or row.get('player_id', '')
-                    
-                    # Format: "First Last - number" - compact display for narrow selectbox
-                    if player_name.strip() and license_number:
-                        display_text = f"{player_name} - {license_number}"
-                    elif player_name.strip():
-                        display_text = f"{player_name} - {player_id}"
-                    elif license_number:
-                        display_text = f"License: {license_number}"
-                    else:
-                        display_text = f"Player ID: {player_id}"
-                    
-                    matches.append((display_text, player_id, license_number, player_name))
-                
-                st.session_state.player_search_matches = matches
-                # Store the search query for display in selectbox (strip whitespace)
-                st.session_state.player_search_query = query.strip()
-                
-                # Debug: Show what matches were created
-                if st.session_state.get('debug_mode', False):
-                    print(f"Created {len(matches)} matches:")
-                    for i, (display_text, player_id, license_number, player_name) in enumerate(matches):
-                        print(f"  Match {i}: '{display_text}' (ID: {player_id})")
-                
-                # Clear any error message since we're showing the selectbox instead
-                if hasattr(st.session_state, 'player_search_error'):
-                    del st.session_state.player_search_error
-                # Don't reset player_id here - we want to keep current state and show modal
-                # Set a flag to show modal on next run (after this search processing completes)
-                st.session_state.show_player_modal = True
-                return
-            else:
-                # For short inputs, don't show error - let user continue typing
-                # Clear any previous error message since we're not showing selectbox
-                if hasattr(st.session_state, 'player_search_error'):
-                    del st.session_state.player_search_error
-                # Don't reset player_id here either - just return
-                return
-            
-        # Single player found - get their ID using proper Polars syntax
-        try:
-            row = list(dfs['search'].iter_rows(named=True))[0]
-            player_id = row['person_id']
-        except Exception as e:
-            # More informative error if column doesn't exist
-            print(f"Error accessing person_id from search results: {e}")
-            print(f"Available columns: {dfs['search'].columns}")
-            print(f"Search dataframe:\n{dfs['search']}")
-            raise Exception(f"Could not extract player_id from search results. Available columns: {dfs['search'].columns}")
 
-        # Resolve the license number and insert it into the sidebar textbox
-        # (replaces the name the user typed), even if loading games fails below.
-        license_number = (
-            row.get('person_license_number', '')
-            or row.get('license_number', '')
-            or row.get('licenseNumber', '')
-        )
-        if license_number and str(license_number) != query.strip():
-            st.session_state.insert_player_search_value = str(license_number)
+        if len(matches) == 1:
+            _display, player_id, license_number, _name = matches[0]
+            _apply_resolved_search_player(player_id, license_number, query)
+            return
 
-        # Try to populate games for this player. Clear any stale error first so the
-        # no-games guard below can distinguish a fresh populate-supplied message.
-        st.session_state.pop('player_search_error', None)
-        if is_lancelot_mode():
-            st.session_state.lancelot_player_id = str(player_id)
-            if license_number:
-                st.session_state.player_license_number = str(license_number)
-                st.session_state.player_id = str(license_number)
-            else:
-                st.session_state.player_id = str(player_id)
-        else:
-            st.session_state.classic_player_id = str(player_id)
-            st.session_state.player_id = str(player_id)
-            if license_number:
-                st.session_state.player_license_number = str(license_number)
-        _clear_selected_session(clear_games=True)
-        try:
-            has_games = populate_game_urls_for_player(st.session_state.player_id)
-        except Exception as e:
-            st.session_state.player_search_error = f"Error loading games for player: {str(e)}"
-            st.session_state.player_id = None
-            return
-        
-        # Check if player has any games. Keep a more specific message if populate
-        # already set one (e.g. the Lancelot logged-in-user-only limitation).
-        if not has_games:
-            if not st.session_state.get('player_search_error'):
-                st.session_state.player_search_error = f"No games found for player '{query}'."
-            st.session_state.player_id = None
-            return
-        
-        # Clear any previous error message and matches on successful search
-        if hasattr(st.session_state, 'player_search_error'):
-            del st.session_state.player_search_error
-        if hasattr(st.session_state, 'player_search_matches'):
-            del st.session_state.player_search_matches
-        
-        # Store the original search query for error messages
-        st.session_state.last_search_query = query
-        
-        # Defer report start: first refresh sidebar with games, then start report
-        st.session_state.deferred_start_report = True
+        st.session_state.player_search_matches = matches
+        st.session_state.player_search_query = query.strip()
+        st.session_state.pop("player_search_error", None)
+        st.session_state.pop("player_search_match_selection", None)
         return
         
     except Exception as e:
-        # Store only the underlying error message (no prefix) for clarity
         st.session_state.player_search_error = str(e)
-        # Clear any previous matches
-        if hasattr(st.session_state, 'player_search_matches'):
-            del st.session_state.player_search_matches
-        # Reset player_id and deferred_start_report to prevent stale state issues
+        _clear_player_search_matches()
         st.session_state.player_id = None
         st.session_state.deferred_start_report = False
 
@@ -3162,6 +3050,7 @@ def app_info() -> None:
 
 def main() -> None:
     """Main application entry point"""
+    st.set_page_config(layout="wide", initial_sidebar_state="expanded")
     if 'app' not in st.session_state:
         st.session_state.app = FFBridgeApp()
     st.session_state.app.main()
@@ -3177,6 +3066,7 @@ class FFBridgeApp(PostmortemBase):
     
     def main(self):
         """Main application entry point - shows Morty messages on first load."""
+        st.set_page_config(layout="wide", initial_sidebar_state="expanded")
         # Inject CSS for green Go button FIRST, before any content renders.
         # This prevents the red flash when the button first appears.
         self._inject_sidebar_button_css()
@@ -3629,7 +3519,7 @@ class FFBridgeApp(PostmortemBase):
                 st.session_state.process_go_button_input = input_value
                 st.rerun()
             else:
-                # Non-numeric input - trigger search/modal
+                # Non-numeric input - resolve a unique name or show a selectbox
                 if input_value:
                     player_search_input_on_change_with_query(input_value)
                     # If a name resolved to a license number, rerun so the textbox
@@ -3641,27 +3531,21 @@ class FFBridgeApp(PostmortemBase):
         if hasattr(st.session_state, 'player_search_error'):
             st.sidebar.error(st.session_state.player_search_error)
         
-        # Show modal dialog if we have matches AND the flag is set (meaning search processing is complete)
-        if (st.session_state.get('show_player_modal', False) and
-            hasattr(st.session_state, 'player_search_matches') and 
-            st.session_state.player_search_matches):
-            
-            # Filter matches based on current textbox content
-            current_input = st.session_state.get('player_search_input', '').lower()
-            match_options = [match[0] for match in st.session_state.player_search_matches]
-            
-            # Further filter options based on current textbox input
-            if current_input and len(current_input) > 0:
-                filtered_options = [opt for opt in match_options if current_input in opt.lower()]
-            else:
-                filtered_options = match_options
-            
-            # Check one more time right before showing dialog
-            if filtered_options and hasattr(st.session_state, 'player_search_matches'):
-                # Clear the flag since we're now showing the modal
-                st.session_state.show_player_modal = False
-                # Show modal dialog with player selection
-                show_player_selection_modal(filtered_options)
+        matches = st.session_state.get('player_search_matches') or []
+        if len(matches) == 1:
+            _display, player_id, license_number, _name = matches[0]
+            _apply_resolved_search_player(player_id, license_number, _display)
+            st.rerun()
+        elif len(matches) > 1:
+            st.sidebar.selectbox(
+                f"Matching players ({len(matches)})",
+                options=[match[0] for match in matches],
+                index=None,
+                placeholder="Select the player",
+                on_change=player_search_match_change,
+                key="player_search_match_selection",
+                help="Several people matched. Pick one to generate the report.",
+            )
         
         # If a player is selected but games haven't been loaded yet, try to populate them
         if (st.session_state.player_id is not None and
