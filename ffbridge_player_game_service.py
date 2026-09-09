@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import threading
+import time
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
@@ -12,6 +13,11 @@ from typing import Any, Dict, Iterable, List, Optional
 import requests
 
 import ffbridge_postmortem_create as create
+
+
+_SIMULTANEOUS_PAGE_TTL_S = 300
+_simultaneous_page_cache: Dict[tuple[int, int], tuple[float, Dict[str, Any]]] = {}
+_simultaneous_page_cache_lock = threading.Lock()
 
 
 _CLUB_CATALOG_LOCK = threading.Lock()
@@ -225,30 +231,48 @@ def resolve_clubs(clubs: Optional[List[str]]) -> List[Dict[str, Any]]:
     return list({row["group_id"]: row for row in resolved}.values())
 
 
-def _simultaneous_sessions(
+def _clear_simultaneous_page_cache() -> None:
+    with _simultaneous_page_cache_lock:
+        _simultaneous_page_cache.clear()
+
+
+def _cached_simultaneous_page(lancelot_series_id: int, page: int) -> Dict[str, Any]:
+    key = (int(lancelot_series_id), int(page))
+    now = time.monotonic()
+    with _simultaneous_page_cache_lock:
+        hit = _simultaneous_page_cache.get(key)
+        if hit is not None and hit[0] > now:
+            return hit[1]
+    response = create.mlBridgeFFLib.get_simultaneous_sessions_page(
+        lancelot_series_id,
+        page=page,
+        per_page=80,
+    )
+    with _simultaneous_page_cache_lock:
+        _simultaneous_page_cache[key] = (now + _SIMULTANEOUS_PAGE_TTL_S, response)
+    return response
+
+
+def _series_sessions(
+    lancelot_series_id: int,
+    migration_series_id: int,
     date_from: str,
     date_to: str,
 ) -> List[Dict[str, Any]]:
-    sessions: Dict[str, Dict[str, Any]] = {}
-    for lancelot_series_id, migration_series_id in (
-        create.mlBridgeFFLib.LANCELOT_TO_MIGRATION.items()
-    ):
-        for page in range(1, 21):
-            response = create.mlBridgeFFLib.get_simultaneous_sessions_page(
-                lancelot_series_id,
-                page=page,
-                per_page=80,
-            )
-            items = response.get("items") or []
-            dates = [parsed for item in items if (parsed := _date(item.get("date")))]
-            for item in items:
-                session_date = _date(item.get("date"))
-                if not session_date or not date_from <= session_date <= date_to:
-                    continue
-                session_id = item.get("id")
-                if session_id is None:
-                    continue
-                sessions[str(session_id)] = {
+    sessions: List[Dict[str, Any]] = []
+    for page in range(1, 21):
+        response = _cached_simultaneous_page(lancelot_series_id, page)
+        items = response.get("items") or []
+        dates = [parsed for item in items if (parsed := _date(item.get("date")))]
+        for item in items:
+            session_date = _date(item.get("date"))
+            if not session_date or not date_from <= session_date <= date_to:
+                continue
+            session_id = item.get("id")
+            if session_id is None:
+                continue
+            sessions.append(
+                {
                     "session_id": str(session_id),
                     "date": session_date,
                     "raw_date": item.get("date"),
@@ -261,10 +285,32 @@ def _simultaneous_sessions(
                     "club_name": None,
                     "scope": "simultaneous",
                 }
-            if dates and max(dates) < date_from:
-                break
-            if not (response.get("pagination") or {}).get("has_next_page"):
-                break
+            )
+        if dates and max(dates) < date_from:
+            break
+        if not (response.get("pagination") or {}).get("has_next_page"):
+            break
+    return sessions
+
+
+def _simultaneous_sessions(
+    date_from: str,
+    date_to: str,
+) -> List[Dict[str, Any]]:
+    series = list(create.mlBridgeFFLib.LANCELOT_TO_MIGRATION.items())
+    if not series:
+        return []
+    with ThreadPoolExecutor(max_workers=min(8, len(series))) as executor:
+        parts = list(
+            executor.map(
+                lambda item: _series_sessions(item[0], item[1], date_from, date_to),
+                series,
+            )
+        )
+    sessions: Dict[str, Dict[str, Any]] = {}
+    for rows in parts:
+        for row in rows:
+            sessions[row["session_id"]] = row
     return list(sessions.values())
 
 
@@ -586,12 +632,17 @@ def _lookup(
     target_date: Optional[str],
     clubs: Optional[List[str]],
     first_only: bool,
+    resolved: Optional[create.ResolvedPlayer] = None,
+    display_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     query = str(player or "").strip()
     if not query:
         raise ValueError("player is required; provide a player name or number")
-    auth = create.ensure_lancelot_auth()
-    resolved, display_name = create.resolve_player_query(query, auth=auth)
+    if resolved is None:
+        auth = create.ensure_lancelot_auth()
+        resolved, display_name = create.resolve_player_query(query, auth=auth)
+    else:
+        create.ensure_lancelot_auth()
     if not resolved.license_number:
         raise ValueError(f"Could not determine a license number for {query!r}")
     games: List[Dict[str, Any]] = []
@@ -631,8 +682,78 @@ def _lookup(
     }
 
 
+def _game_from_index_row(row: Dict[str, Any], display_name: str) -> Dict[str, Any]:
+    competition = row.get("session_label") or row.get("competition_label") or "FFBridge"
+    club = row.get("club") or row.get("club_name") or ""
+    day = str(row.get("date") or "")[:10]
+    game = {
+        "session_id": str(row["session_id"]),
+        "group_id": row.get("group_id"),
+        "series_id": row.get("series_id"),
+        "competition": competition,
+        "date": day,
+        "moment": None,
+        "club_code": row.get("organization_id") or row.get("club_id"),
+        "club_name": club,
+        "team_count": None,
+        "local_rank": None,
+        "general_rank": None,
+        "theoretical_rank": None,
+        "section": None,
+        "table_number": None,
+        "team_id": row.get("team_id"),
+        "player_name": display_name,
+        "player_seat": None,
+        "partner_name": None,
+        "partner_seat": None,
+        "percentage": None,
+        "scope": "simultaneous_index",
+        "results_url": None,
+    }
+    game["summary"] = " — ".join(part for part in (competition, day, club) if part)
+    return game
+
+
 def last_game(player: str, clubs: Optional[List[str]] = None) -> Dict[str, Any]:
-    return _lookup(player, target_date=None, clubs=clubs, first_only=True)
+    query = str(player or "").strip()
+    if not query:
+        raise ValueError("player is required; provide a player name or number")
+    if not clubs:
+        indexed = create.resolve_player_from_index_query(query)
+        if indexed is not None:
+            resolved, display_name = indexed
+            try:
+                baseline = _indexed_baseline(resolved)
+            except FileNotFoundError:
+                baseline = None
+            latest_date = str((baseline or {}).get("date") or "")[:10]
+            if baseline is not None and latest_date >= date.today().isoformat():
+                game = _game_from_index_row(
+                    baseline, display_name or str(resolved.requested_id)
+                )
+                return {
+                    "player_query": query,
+                    "player_id": resolved.lancelot_id,
+                    "player_license_number": resolved.license_number,
+                    "player_name": game["player_name"],
+                    "found": True,
+                    "game": game,
+                    "games": [game],
+                    "summary": game["summary"],
+                    "coverage": "indexed simultaneous sessions",
+                    "coverage_complete": True,
+                    "clubs": [],
+                    "club_errors": [],
+                }
+            return _lookup(
+                query,
+                target_date=None,
+                clubs=None,
+                first_only=True,
+                resolved=resolved,
+                display_name=display_name,
+            )
+    return _lookup(query, target_date=None, clubs=clubs, first_only=True)
 
 
 def played_today(player: str, clubs: Optional[List[str]] = None) -> Dict[str, Any]:

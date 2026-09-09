@@ -1,4 +1,5 @@
 import unittest
+from datetime import date
 from unittest.mock import Mock, patch
 
 import requests
@@ -137,6 +138,82 @@ class PlayerGameSummaryTests(unittest.TestCase):
     def test_player_is_mandatory(self):
         with self.assertRaisesRegex(ValueError, "player is required"):
             games.last_game("")
+
+    def test_last_game_uses_today_index_without_lancelot(self):
+        resolved = create.ResolvedPlayer(
+            "246273", "9500754", "SALITA", "597539"
+        )
+        baseline = {
+            "session_id": "304735",
+            "date": date.today().isoformat(),
+            "session_label": "Festival",
+            "club": "Bridge Club Levallois Perret",
+        }
+        with (
+            patch.object(
+                games.create,
+                "resolve_player_from_index_query",
+                return_value=(resolved, "SALITA Robert"),
+            ),
+            patch.object(games, "_indexed_baseline", return_value=baseline),
+            patch.object(games, "_lookup") as lookup,
+        ):
+            result = games.last_game("SALITA")
+
+        lookup.assert_not_called()
+        self.assertEqual(result["player_id"], "246273")
+        self.assertEqual(result["game"]["session_id"], "304735")
+        self.assertEqual(result["game"]["scope"], "simultaneous_index")
+        self.assertEqual(result["coverage"], "indexed simultaneous sessions")
+
+    def test_last_game_stale_index_uses_live_resolved_player(self):
+        resolved = create.ResolvedPlayer(
+            "246273", "9500754", "SALITA", "597539"
+        )
+        baseline = {"session_id": "1", "date": "2026-09-01"}
+        live = {"player_id": "246273", "found": True, "game": {"session_id": "9"}}
+        with (
+            patch.object(
+                games.create,
+                "resolve_player_from_index_query",
+                return_value=(resolved, "SALITA Robert"),
+            ),
+            patch.object(games, "_indexed_baseline", return_value=baseline),
+            patch.object(games, "_lookup", return_value=live) as lookup,
+        ):
+            result = games.last_game("SALITA")
+
+        lookup.assert_called_once()
+        self.assertEqual(lookup.call_args.kwargs["resolved"], resolved)
+        self.assertEqual(result["game"]["session_id"], "9")
+
+    def test_last_game_with_clubs_skips_index_short_circuit(self):
+        with (
+            patch.object(games.create, "resolve_player_from_index_query") as index_resolve,
+            patch.object(games, "_lookup", return_value={"found": False}) as lookup,
+        ):
+            games.last_game("SALITA", clubs=["5802079"])
+
+        index_resolve.assert_not_called()
+        lookup.assert_called_once()
+
+    def test_simultaneous_sessions_cache_avoids_repeat_fetches(self):
+        games._clear_simultaneous_page_cache()
+        response = {
+            "items": [{"id": 1, "date": "2026-09-09T14:00:00+02:00", "label": "X"}],
+            "pagination": {"has_next_page": False},
+        }
+        series_count = len(games.create.mlBridgeFFLib.LANCELOT_TO_MIGRATION)
+        with patch.object(
+            games.create.mlBridgeFFLib,
+            "get_simultaneous_sessions_page",
+            return_value=response,
+        ) as fetch:
+            first = games._simultaneous_sessions("2026-09-09", "2026-09-09")
+            second = games._simultaneous_sessions("2026-09-09", "2026-09-09")
+        self.assertEqual(fetch.call_count, series_count)
+        self.assertEqual(len(first), 1)
+        self.assertEqual(len(second), 1)
 
     def test_played_today_returns_boolean_and_rich_game(self):
         auth = create.LancelotAuth("token", "246273", "9500754", "597539")

@@ -588,6 +588,70 @@ def _resolve_player_from_index(player_id: str) -> Optional[ResolvedPlayer]:
     )
 
 
+def resolve_player_from_index_query(
+    player: str,
+) -> Optional[Tuple[ResolvedPlayer, Optional[str]]]:
+    """Resolve a name or number from the local persons index. None if missing."""
+    query = str(player or "").strip()
+    if not query:
+        raise ValueError("player is required; provide a player name or number")
+    try:
+        persons = mlBridgeFFIndexLib.load_persons(_find_player_session_index_dir())
+    except FileNotFoundError:
+        return None
+    if query.isdigit() or ":" in query:
+        person = mlBridgeFFIndexLib.lookup_person(persons, query)
+        if person is None:
+            return None
+        resolved = ResolvedPlayer(
+            lancelot_id=str(person["lancelot_person_id"]),
+            license_number=(
+                str(person["license_number"])
+                if person.get("license_number") is not None
+                else None
+            ),
+            requested_id=query,
+            classic_person_id=(
+                str(person["classic_person_id"])
+                if person.get("classic_person_id") is not None
+                else None
+            ),
+        )
+        return resolved, person.get("display_name")
+    matches = mlBridgeFFIndexLib.lookup_persons_by_name(persons, query, limit=10)
+    if not matches:
+        return None
+    if len(matches) != 1:
+        summaries = [
+            {
+                "name": row.get("display_name"),
+                "player_id": row.get("lancelot_person_id"),
+                "license_number": row.get("license_number"),
+            }
+            for row in matches
+        ]
+        raise ValueError(
+            f"Player name {query!r} matched {len(matches)} people; "
+            f"provide a license number. Candidates: {summaries}"
+        )
+    person = matches[0]
+    resolved = ResolvedPlayer(
+        lancelot_id=str(person["lancelot_person_id"]),
+        license_number=(
+            str(person["license_number"])
+            if person.get("license_number") is not None
+            else None
+        ),
+        requested_id=query,
+        classic_person_id=(
+            str(person["classic_person_id"])
+            if person.get("classic_person_id") is not None
+            else None
+        ),
+    )
+    return resolved, person.get("display_name")
+
+
 def fetch_other_player_source_sessions(
     lancelot_person_id: str,
     *,
