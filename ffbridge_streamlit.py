@@ -3138,7 +3138,7 @@ class FFBridgeApp(PostmortemBase):
         # Persist augmented dataframes to cache/df-{session_id}-{player_id}.parquet
         # (PostmortemBase defaults do_not_cache_df to True). Besides speeding up
         # revisits, the parquet cache is the data source exposed by
-        # MortyBridgeBot's FFBridge postmortem tools.
+        # MortyBridgeMCP's FFBridge postmortem tools.
         st.session_state.do_not_cache_df = False
 
         # Default before URL params are applied; URL ?player_id=... will override below.
