@@ -690,5 +690,29 @@ class ResultsPageUrlTests(unittest.TestCase):
         fetch.assert_called_once()
 
 
+class JsonNormalizeApiTests(unittest.TestCase):
+    def test_mixed_player_image_after_nulls(self):
+        rows = [
+            {"team": {"player1": {"id": index, "image": None}}}
+            for index in range(120)
+        ]
+        rows.append(
+            {
+                "team": {
+                    "player1": {
+                        "id": 121,
+                        "image": "femalechristinecharroux-594e50ec45e76_big.jpg",
+                    }
+                }
+            }
+        )
+        frame = create.json_normalize_api(rows)
+        self.assertEqual(frame.height, 121)
+        self.assertEqual(
+            frame["team_player1_image"][-1],
+            "femalechristinecharroux-594e50ec45e76_big.jpg",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

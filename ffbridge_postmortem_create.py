@@ -263,8 +263,12 @@ def _write_hierarchical_if_configured(
 
 
 def json_normalize_api(json_data: Any, separator: str = "_") -> pl.DataFrame:
-    """Flatten Lancelot ranking/score payloads the way Streamlit did via pandas."""
-    return pl.json_normalize(json_data, separator=separator)
+    """Flatten Lancelot ranking/score payloads the way Streamlit did via pandas.
+
+    Scan every row. The default infer_schema_length (100) treats a later
+    player-image filename as a type clash when the first rows are null.
+    """
+    return pl.json_normalize(json_data, separator=separator, infer_schema_length=None)
 
 
 def _as_int_str(value: Any) -> Optional[str]:
