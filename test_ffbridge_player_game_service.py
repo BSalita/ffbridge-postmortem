@@ -135,6 +135,60 @@ class PlayerGameSummaryTests(unittest.TestCase):
             "57,80 %",
         )
 
+    def test_visitor_name_string_keeps_published_seats(self):
+        candidate = {
+            "session_id": "304735",
+            "date": "2026-09-07",
+            "raw_date": "2026-09-07T14:00:00+02:00",
+            "session_label": "FESTIVAL DES SIMULTANÉS",
+            "moment": "A",
+            "group_id": "23165",
+            "club_code": "5803081",
+            "club_name": "Bridge Club De Bois Colombes",
+            "scope": "simultaneous",
+        }
+        ranking = {
+            "rank": 745,
+            "theoreticalRank": 756,
+            "sessionScore": 54.21,
+            "simultaneousId": 5803081,
+            "orientation": "NS",
+            "section": "A",
+            "tableNumber": 7,
+            "team": {
+                "id": 15223755,
+                "player1": "MADAR .",
+                "player2": {
+                    "id": 100544,
+                    "migrationId": 240070,
+                    "ffbId": 2583335,
+                    "firstName": "Juliette",
+                    "lastName": "SYMCHOWICZ",
+                },
+            },
+        }
+        resolved = create.ResolvedPlayer(
+            "100544",
+            "2583335",
+            "100544",
+            "240070",
+        )
+        with patch.object(
+            games.create.mlBridgeFFLib,
+            "get_session_ranking",
+            return_value=[ranking],
+        ), patch.object(
+            games,
+            "_session_club_context",
+            return_value={},
+        ):
+            result = games._game(candidate, ranking, resolved)
+
+        self.assertEqual(result["player_seat"], "South")
+        self.assertEqual(result["partner_seat"], "North")
+        self.assertEqual(result["partner_name"], "MADAR .")
+        self.assertIn("SYMCHOWICZ Juliette South, MADAR . North", result["summary"])
+
     def test_player_is_mandatory(self):
         with self.assertRaisesRegex(ValueError, "player is required"):
             games.last_game("")

@@ -713,6 +713,58 @@ class JsonNormalizeApiTests(unittest.TestCase):
             "femalechristinecharroux-594e50ec45e76_big.jpg",
         )
 
+    def test_session_meta_keeps_visitor_name_string_partner(self):
+        ranking = [
+            {
+                "orientation": "NS",
+                "section": "A",
+                "tableNumber": 7,
+                "simultaneousId": 5803081,
+                "team": {
+                    "id": 15223755,
+                    "player1": "MADAR .",
+                    "player2": {
+                        "id": 100544,
+                        "migrationId": 240070,
+                        "ffbId": 2583335,
+                        "firstName": "Juliette",
+                        "lastName": "SYMCHOWICZ",
+                    },
+                },
+            }
+        ]
+        resolved = create.ResolvedPlayer(
+            lancelot_id="100544",
+            license_number="2583335",
+            requested_id="100544",
+            classic_person_id="240070",
+        )
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.object(create, "resolve_player", return_value=resolved),
+            patch.object(create, "_fetch_lancelot_json_cached", return_value=ranking),
+        ):
+            meta, _teams, team_d = create.lancelot_session_meta(
+                "100544",
+                "304735",
+                {
+                    "group_id": "23165",
+                    "date": "2026-09-07",
+                    "organization_id": "5803081",
+                    "club": "Bridge Club De Bois Colombes",
+                },
+                cache_dir=tmp,
+            )
+        self.assertEqual(meta.player_id, "100544")
+        self.assertIsNone(meta.partner_id)
+        self.assertEqual(meta.player_name, "Juliette SYMCHOWICZ")
+        self.assertEqual(meta.partner_name, "MADAR .")
+        self.assertEqual(meta.player_direction, "S")
+        self.assertEqual(meta.partner_direction, "N")
+        self.assertFalse(
+            create._ranking_player_id_matches(team_d.get("team_player1_id"), 100544)
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

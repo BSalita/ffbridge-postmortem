@@ -50,6 +50,15 @@ def _person_name(person: Dict[str, Any]) -> str:
     return " ".join(part for part in (last, first) if part)
 
 
+def _lineup_person(value: Any) -> Dict[str, Any]:
+    """Keep visitor name strings in their published seat; do not drop the chair."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        return {"lastName": value.strip(), "firstName": ""}
+    return {}
+
+
 def _player_matches(person: Dict[str, Any], resolved: create.ResolvedPlayer) -> bool:
     identifiers = {
         str(value)
@@ -525,11 +534,7 @@ def _game(
         row for row in all_rows if str(row.get("simultaneousId") or "") == club_code
     ]
     team = ranking.get("team") or {}
-    players = [
-        player
-        for number in range(1, 9)
-        if isinstance((player := team.get(f"player{number}")), dict)
-    ]
+    players = [_lineup_person(team.get(f"player{number}")) for number in (1, 2)]
     target_index = next(
         (index for index, person in enumerate(players) if _player_matches(person, resolved)),
         None,
@@ -539,16 +544,11 @@ def _game(
             f"Personal ranking did not contain player {resolved.requested_id!r}"
         )
     target = players[target_index]
-    partner = next(
-        (person for index, person in enumerate(players) if index != target_index),
-        {},
-    )
+    partner = players[1 - target_index]
     orientation = str(ranking.get("orientation") or team.get("orientation") or "")
     seats = ("North", "South") if orientation == "NS" else ("East", "West")
-    target_seat = seats[target_index] if target_index < 2 else None
-    partner_seat = (
-        seats[1 - target_index] if target_index in (0, 1) and partner else None
-    )
+    target_seat = seats[target_index]
+    partner_seat = seats[1 - target_index]
     local_position = _local_rank(local_rows, team.get("id"))
     raw_date = str(candidate.get("raw_date") or "")
     moment = _MOMENTS.get(str(candidate.get("moment") or "").upper())

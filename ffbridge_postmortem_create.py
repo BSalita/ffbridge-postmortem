@@ -275,6 +275,40 @@ def _as_int_str(value: Any) -> Optional[str]:
     return None if value is None else str(int(value))
 
 
+def _ranking_player_id_matches(value: Any, player_id: int) -> bool:
+    if value is None:
+        return False
+    try:
+        return int(value) == player_id
+    except (TypeError, ValueError):
+        return False
+
+
+def _ranking_player_id_expr(frame: pl.DataFrame, player_id: int) -> pl.Expr:
+    matches = [
+        pl.col(column).cast(pl.Int64, strict=False).eq(player_id)
+        for column in ("team_player1_id", "team_player2_id")
+        if column in frame.columns
+    ]
+    if not matches:
+        return pl.lit(False)
+    expr = matches[0]
+    for extra in matches[1:]:
+        expr = expr | extra
+    return expr
+
+
+def _ranking_display_name(team_d: Dict[str, Any], prefix: str) -> str:
+    first = team_d.get(f"{prefix}_firstName")
+    last = team_d.get(f"{prefix}_lastName")
+    if first is not None or last is not None:
+        return " ".join(part for part in (first, last) if part)
+    raw = team_d.get(prefix)
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    return ""
+
+
 def _norm_digits(value: Any) -> str:
     return str(value or "").strip().lstrip("0") or "0"
 
@@ -895,14 +929,15 @@ def lancelot_session_meta(
         directory,
     )
     teams_df = json_normalize_api(ranking_json)
-    match_df = teams_df.filter(
-        pl.col("team_player1_id").cast(pl.Int64, strict=False).eq(pid)
-        | pl.col("team_player2_id").cast(pl.Int64, strict=False).eq(pid)
-    )
+    match_df = teams_df.filter(_ranking_player_id_expr(teams_df, pid))
     if match_df.height == 0:
         raise ValueError(f"Player {resolved.lancelot_id} not found in ranking of session {sid}.")
     team_d = match_df.to_dicts()[0]
-    is_player1 = int(team_d["team_player1_id"]) == pid
+    is_player1 = _ranking_player_id_matches(team_d.get("team_player1_id"), pid)
+    if not is_player1 and not _ranking_player_id_matches(
+        team_d.get("team_player2_id"), pid
+    ):
+        raise ValueError(f"Player {resolved.lancelot_id} not found in ranking of session {sid}.")
     pair_direction = team_d["orientation"]
     me, partner = ("team_player1", "team_player2") if is_player1 else ("team_player2", "team_player1")
     team_id = team_d["team_id"]
@@ -913,13 +948,13 @@ def lancelot_session_meta(
         token=token,
     )
     meta = LancelotSessionMeta(
-        player_id=_as_int_str(team_d[f"{me}_id"]) or resolved.lancelot_id,
+        player_id=_as_int_str(team_d.get(f"{me}_id")) or resolved.lancelot_id,
         session_id=str(sid),
-        partner_id=_as_int_str(team_d[f"{partner}_id"]),
-        player_license_number=_as_int_str(team_d[f"{me}_ffbId"]),
-        partner_license_number=_as_int_str(team_d[f"{partner}_ffbId"]),
-        player_name=f"{team_d[f'{me}_firstName']} {team_d[f'{me}_lastName']}",
-        partner_name=f"{team_d[f'{partner}_firstName']} {team_d[f'{partner}_lastName']}",
+        partner_id=_as_int_str(team_d.get(f"{partner}_id")),
+        player_license_number=_as_int_str(team_d.get(f"{me}_ffbId")),
+        partner_license_number=_as_int_str(team_d.get(f"{partner}_ffbId")),
+        player_name=_ranking_display_name(team_d, me),
+        partner_name=_ranking_display_name(team_d, partner),
         group_id=group_id,
         org_id=game_entry.get("organization_id"),
         tournament_date=_parse_session_date(game_entry.get("date") or game_entry.get("raw_date")),
