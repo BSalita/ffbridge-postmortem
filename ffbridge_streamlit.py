@@ -2820,6 +2820,7 @@ def create_sidebar() -> None:
         st.session_state.app.create_sidebar()
     else:
         # Fallback for backward compatibility - basic sidebar
+        # Build caption is the git commit of this file, not Docker mtime.
         st.sidebar.caption(f"Build:{st.session_state.get('app_datetime', '')}")
         st.sidebar.text_input(
             "FFBridge license number or name",
