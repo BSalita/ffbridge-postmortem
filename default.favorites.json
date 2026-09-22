@@ -212,7 +212,7 @@
 			},
 			"Boards_We_Underperformed_DD": {
 				"title": "Boards We Underperformed Double Dummy (DD)",
-				"row_click": "Show all four hands, the contract, and the lead for board {Board}.",
+				"row_click": "Show all four hands for board {Board}, with Dealer_Direction, Vul, Par, Contract, Declarer_Name, EV, Result, Score, and Pct.",
 				"help": "**Showing boards we played where our side took fewer tricks than double dummy, whether we declared or defended.**",
 				"prompts": [
 					{
@@ -416,7 +416,7 @@
 			},
 			"Boards_We_Declared": {
 				"title": "Boards We Declared",
-				"row_click": "Show all four hands, the contract, and the lead for board {Board}.",
+				"row_click": "Show all four hands for board {Board}, with Dealer_Direction, Vul, Par, Contract, Declarer_Name, EV, Result, Score, and Pct.",
 				"help": "**Showing boards our partnership declared.**",
 				"prompts": [
 					{
