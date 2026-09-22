@@ -4,7 +4,7 @@
 		"Summarize": {
 			"title": "**Summarize**",
 			"help": "Summarize the game's results",
-			"comment": "@ in prompt means prompt is a key into ['SelectBoxes']['Vetted_Prompts'] list.",
+			"comment": "@ in prompt means prompt is a key into ['SelectBoxes']['Vetted_Prompts'] list. Optional prompt key Output is Grid, Deal, or Info; missing Output stays Grid.",
 			"prompts": [
 				"@About",
 				"@Boards_We_Played",
@@ -48,7 +48,7 @@
 		"Summarize_Briefly": {
 			"title": "Summarize Briefly",
 			"help": "Summarize the game's results. Expert statistics only.",
-			"comment": "@ in prompt means prompt is a key into ['SelectBoxes']['Vetted_Prompts'] list.",
+			"comment": "@ in prompt means prompt is a key into ['SelectBoxes']['Vetted_Prompts'] list. Optional prompt key Output is Grid, Deal, or Info; missing Output stays Grid.",
 			"prompts": [
 				"@About",
 				"@Boards_We_Played",
@@ -66,7 +66,7 @@
 		"AI_Predictions": {
 			"title": "AI Predictions",
 			"help": "Show AI Predictions",
-			"comment": "@ in prompt means prompt is a key into ['SelectBoxes']['Vetted_Prompts'] list.",
+			"comment": "@ in prompt means prompt is a key into ['SelectBoxes']['Vetted_Prompts'] list. Optional prompt key Output is Grid, Deal, or Info; missing Output stays Grid.",
 			"prompts": [
 				"@About",
 				"@Overall_Rankings_Predictions",
