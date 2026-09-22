@@ -56,9 +56,10 @@ _SEAT_TUPLES = (
 # Default column set for the per-board summary tool; intersected with the
 # actual dataframe columns since older caches may predate some augmentations.
 BOARD_SUMMARY_COLUMNS = [
-    "Board", "Contract", "Declarer_Direction", "Declarer_ID", "Declarer_Name",
+    "Board", "Dealer", "Vul", "Contract", "Declarer_Direction", "Declarer_ID", "Declarer_Name",
     "Result", "Tricks", "Score_NS", "Score_EW", "Pct_NS", "Pct_EW",
     "MP_NS", "MP_EW", "MP_Top", "Par_NS", "ParContract",
+    "DD_Score_NS", "DD_Score_EW", "EV_Pct_Max_NS", "EV_Pct_Max_EW",
     "Pair_Number_NS", "Pair_Number_EW", "PBN",
 ]
 
