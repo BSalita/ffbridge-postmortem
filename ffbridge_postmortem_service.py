@@ -60,7 +60,7 @@ BOARD_SUMMARY_COLUMNS = [
     "Result", "Tricks", "Score_NS", "Score_EW", "Pct_NS", "Pct_EW",
     "MP_NS", "MP_EW", "MP_Top", "Par_NS", "ParContract",
     "DD_Score_NS", "DD_Score_EW", "EV_Score_NS", "EV_Score_EW",
-    "Pair_Number_NS", "Pair_Number_EW", "PBN",
+    "Pair_Number_NS", "Pair_Number_EW", "PBN", "Lead",
 ]
 
 
@@ -367,6 +367,7 @@ def _load_hierarchical_postmortem(
         )
     frame, meta = personalize(frame, str(player_id))
     frame = archive.restore_pair_direction(frame, meta["pair_direction"])
+    frame = attach_opening_lead(frame, str(session_id))
     meta.update(
         {
             "session_id": str(session_id),
@@ -379,6 +380,108 @@ def _load_hierarchical_postmortem(
         }
     )
     return frame, meta
+
+
+def _id_token(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text.lower() == "null":
+        return None
+    if text.endswith(".0"):
+        text = text[:-2]
+    try:
+        return str(int(float(text)))
+    except ValueError:
+        return text
+
+
+def _lineup_seat_ids(lineup: Dict[str, Any], seat: str) -> Tuple[Optional[str], Optional[str]]:
+    player = lineup.get(seat)
+    if not isinstance(player, dict):
+        return None, None
+    return _id_token(player.get("id")), _id_token(player.get("migrationId"))
+
+
+def _opening_leads_from_scores(session_id: str) -> Optional[pl.DataFrame]:
+    """Opening card from the Lancelot scores JSON cached during postmortem create."""
+    directory = CACHE_DIR / "scores"
+    if not directory.is_dir():
+        return None
+    rows: List[Dict[str, Any]] = []
+    for path in directory.glob(f"*_{session_id}.json"):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, list):
+            continue
+        for board in payload:
+            if not isinstance(board, dict):
+                continue
+            lineup = board.get("lineup")
+            if not isinstance(lineup, dict):
+                continue
+            seats = {
+                "N": _lineup_seat_ids(lineup, "northPlayer"),
+                "E": _lineup_seat_ids(lineup, "eastPlayer"),
+                "S": _lineup_seat_ids(lineup, "southPlayer"),
+                "W": _lineup_seat_ids(lineup, "westPlayer"),
+            }
+            lead = str(board.get("lead") or "").strip()
+            board_number = board.get("boardNumber")
+            variants = []
+            for index in (0, 1):
+                ids = {seat: pair[index] for seat, pair in seats.items()}
+                if any(value is None for value in ids.values()):
+                    continue
+                variants.append(ids)
+            for ids in variants:
+                rows.append(
+                    {
+                        "Board": board_number,
+                        "Player_ID_N": ids["N"],
+                        "Player_ID_E": ids["E"],
+                        "Player_ID_S": ids["S"],
+                        "Player_ID_W": ids["W"],
+                        "Lead": lead or None,
+                    }
+                )
+    if not rows:
+        return None
+    return pl.DataFrame(rows).unique(
+        subset=["Board", "Player_ID_N", "Player_ID_E", "Player_ID_S", "Player_ID_W"],
+        keep="first",
+    )
+
+
+def attach_opening_lead(frame: pl.DataFrame, session_id: Optional[str]) -> pl.DataFrame:
+    """Make Lead SQL-able. Prefer a stored column, else the cached score payload."""
+    if (
+        "Lead" in frame.columns
+        and frame.get_column("Lead").drop_nulls().len() > 0
+    ):
+        return frame
+    leads = _opening_leads_from_scores(str(session_id)) if session_id else None
+    keyed = [
+        column
+        for column in ("Board", "Player_ID_N", "Player_ID_E", "Player_ID_S", "Player_ID_W")
+        if column in frame.columns
+    ]
+    if leads is None or len(keyed) < 5:
+        if "Lead" in frame.columns:
+            return frame
+        return frame.with_columns(pl.lit(None).cast(pl.Utf8).alias("Lead"))
+    without_lead = frame.drop("Lead") if "Lead" in frame.columns else frame
+    joined = without_lead.with_columns(
+        [pl.col(column).cast(pl.Utf8) for column in keyed if column != "Board"]
+        + [pl.col("Board").cast(pl.Int64, strict=False)]
+    ).join(
+        leads.with_columns(pl.col("Board").cast(pl.Int64, strict=False)),
+        on=keyed,
+        how="left",
+    )
+    return joined
 
 
 def load_postmortem(player_id: str, session_id: Optional[str] = None) -> Tuple[pl.DataFrame, Dict[str, Any]]:
@@ -419,6 +522,7 @@ def load_postmortem(player_id: str, session_id: Optional[str] = None) -> Tuple[p
     meta["archive_file"] = str(path) if is_archive else None
     meta["requested_id"] = str(player_id)
     meta["cache_player_id"] = cache_player_id
+    df = attach_opening_lead(df, resolved_session_id)
     return df, meta
 
 
@@ -528,6 +632,7 @@ def hierarchical_board_results(
     )
     frame, meta = personalize(frame, str(player_id))
     frame = archive.restore_pair_direction(frame, meta["pair_direction"])
+    frame = attach_opening_lead(frame, str(session_id))
     meta.update(
         {
             "session_id": str(session_id),

@@ -1,3 +1,6 @@
+import json
+import pathlib
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -149,6 +152,48 @@ class LiveLatestGameTests(unittest.TestCase):
             generate.call_args.kwargs["session_entry"]["session_id"],
             "300753",
         )
+
+
+class OpeningLeadTests(unittest.TestCase):
+    def test_scores_cache_lead_joins_on_migration_ids(self):
+        payload = [
+            {
+                "boardNumber": 7,
+                "lead": "HK",
+                "lineup": {
+                    "northPlayer": {"id": 10, "migrationId": 100},
+                    "eastPlayer": {"id": 2, "migrationId": 102},
+                    "southPlayer": {"id": 1, "migrationId": 101},
+                    "westPlayer": {"id": 3, "migrationId": 103},
+                },
+            }
+        ]
+        frame = pl.DataFrame(
+            {
+                "Board": [7],
+                "Player_ID_N": ["100"],
+                "Player_ID_E": ["102"],
+                "Player_ID_S": ["101"],
+                "Player_ID_W": ["103"],
+                "Contract": ["3NT"],
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            scores = pathlib.Path(tmp) / "scores"
+            scores.mkdir()
+            (scores / "99_304747.json").write_text(json.dumps(payload), encoding="utf-8")
+            with patch.object(svc, "CACHE_DIR", pathlib.Path(tmp)):
+                attached = svc.attach_opening_lead(frame, "304747")
+        self.assertEqual(attached["Lead"][0], "HK")
+        self.assertEqual(attached.height, 1)
+
+    def test_missing_scores_cache_still_exposes_lead_column(self):
+        frame = pl.DataFrame({"Board": [1], "Contract": ["PASS"]})
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(svc, "CACHE_DIR", pathlib.Path(tmp)):
+                attached = svc.attach_opening_lead(frame, "1")
+        self.assertIn("Lead", attached.columns)
+        self.assertIsNone(attached["Lead"][0])
 
 
 if __name__ == "__main__":

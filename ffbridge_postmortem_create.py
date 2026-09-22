@@ -161,6 +161,7 @@ CORE_MLDF_COLUMNS = [
     "Declarer",
     "Contract",
     "Result",
+    "Lead",
     "Score_EW",
     "Score_NS",
     "Pct_NS",

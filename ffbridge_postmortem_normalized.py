@@ -149,6 +149,7 @@ def _namespace(column: str, table: str) -> str | None:
         "Declarer_ID",
         "Declarer_Name",
         "Result",
+        "Lead",
         "Tricks",
         "BidLvl",
         "BidSuit",
