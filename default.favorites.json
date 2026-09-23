@@ -3,6 +3,7 @@
 	"Buttons": {
 		"Summarize": {
 			"title": "**Summarize**",
+			"chip": "Full Postmortem",
 			"help": "Summarize the game's results",
 			"comment": "@ in prompt means prompt is a key into ['SelectBoxes']['Vetted_Prompts'] list. Optional prompt key Output is Grid, Deal, or Info; missing Output stays Grid.",
 			"prompts": [
@@ -47,6 +48,7 @@
 		},
 		"Summarize_Briefly": {
 			"title": "Summarize Briefly",
+			"chip": "Brief Postmortem",
 			"help": "Summarize the game's results. Expert statistics only.",
 			"comment": "@ in prompt means prompt is a key into ['SelectBoxes']['Vetted_Prompts'] list. Optional prompt key Output is Grid, Deal, or Info; missing Output stays Grid.",
 			"prompts": [
