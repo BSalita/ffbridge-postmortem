@@ -17,6 +17,19 @@ import ffbridge_postmortem_archive as archive
 LAYOUT_VERSION = 2
 KEY_COLUMNS = ("session_id", "Board")
 SEATS = ("N", "E", "S", "W")
+# Table-contract or seat-perspective metrics. Seed sessions can look
+# board-invariant when every table plays the same contract.
+RESULT_ONLY_COLUMNS = frozenset(
+    {
+        "Section_Name",
+        "MP_DD_Pct_Declarer",
+        "MP_EV_Max_Pct_Declarer",
+        "MP_EV_Pct_Declarer",
+        "MP_EV_Score_Declarer",
+        "MP_Par_Declarer",
+        "MP_Par_Pct_Declarer",
+    }
+)
 HIERARCHICAL_MANIFEST_SCHEMA: dict[str, pl.DataType] = {
     "session_id": pl.String,
     "revision": pl.String,
@@ -128,6 +141,8 @@ def _board_columns(frames: Sequence[pl.DataFrame]) -> set[str]:
 
 
 def _namespace(column: str, table: str) -> str | None:
+    if column in RESULT_ONLY_COLUMNS:
+        return None
     if table == "boards":
         if column in {"PBN", "Dealer", "Vul", "iVul", "Vul_NS", "Vul_EW"}:
             return "deal"
@@ -165,12 +180,13 @@ def _correct_column_mapping(
     mapping: Mapping[str, Mapping[str, str | None]],
 ) -> dict[str, dict[str, str | None]]:
     corrected = {column: dict(entry) for column, entry in mapping.items()}
-    if "Section_Name" in corrected:
-        corrected["Section_Name"] = {
-            "table": "results",
-            "storage_column": "Section_Name",
-            "field": None,
-        }
+    for column in RESULT_ONLY_COLUMNS:
+        if column in corrected:
+            corrected[column] = {
+                "table": "results",
+                "storage_column": column,
+                "field": None,
+            }
     return corrected
 
 
@@ -228,7 +244,7 @@ def build_normalized_subset(
         frames.append(frame.with_row_index("_result_row_id"))
 
     invariant = _board_columns(frames)
-    invariant.discard("Section_Name")
+    invariant.difference_update(RESULT_ONLY_COLUMNS)
     board_columns = [
         column
         for column in frames[0].columns
@@ -406,7 +422,7 @@ def prepare_hierarchical_session(
     """
     output = pathlib.Path(output_dir)
     metadata = _load_metadata(output)
-    mapping = metadata["column_mapping"]
+    mapping = _correct_column_mapping(metadata["column_mapping"])
     canonical = archive.canonicalize_frame(frame).with_columns(
         pl.lit(str(session_id)).alias("session_id")
     ).with_row_index("_result_row_id")
@@ -683,7 +699,11 @@ def _load_metadata(output_dir: pathlib.Path) -> dict[str, Any]:
     path = pathlib.Path(output_dir) / "metadata.json"
     if not path.is_file():
         raise FileNotFoundError(f"Normalized archive metadata not found: {path}")
-    return json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    mapping = payload.get("column_mapping")
+    if isinstance(mapping, dict):
+        payload["column_mapping"] = _correct_column_mapping(mapping)
+    return payload
 
 
 def _mapped_expr(

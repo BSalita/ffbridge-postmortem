@@ -1,3 +1,4 @@
+import json
 import os
 import pathlib
 import tempfile
@@ -282,6 +283,52 @@ class NormalizedArchiveTests(unittest.TestCase):
                     revision="missing",
                     output_dir=production,
                 )
+
+    def test_mp_dd_pct_declarer_is_forced_to_results(self):
+        mapping = normalized._correct_column_mapping(
+            {
+                "MP_DD_Pct_Declarer": {
+                    "table": "boards",
+                    "storage_column": "MP_DD_Pct_Declarer",
+                    "field": None,
+                }
+            }
+        )
+        self.assertEqual(mapping["MP_DD_Pct_Declarer"]["table"], "results")
+
+    def test_varying_mp_dd_pct_declarer_does_not_fail_hierarchical_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            production = pathlib.Path(tmp)
+            source = _session_frame().with_columns(
+                pl.Series("MP_DD_Pct_Declarer", [0.6, 0.4])
+            )
+            constant = source.with_columns(pl.lit(0.5).alias("MP_DD_Pct_Declarer"))
+            root = pathlib.Path(tmp) / "archive"
+            seed = pathlib.Path(tmp) / "seed"
+            archive.archive_session(constant, "100", archive_dir=root)
+            normalized.build_normalized_subset(root, seed)
+            metadata = json.loads((seed / "metadata.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                metadata["column_mapping"]["MP_DD_Pct_Declarer"]["table"],
+                "results",
+            )
+            normalized.initialize_hierarchical_layout(
+                production, seed / "metadata.json"
+            )
+            written = normalized.write_hierarchical_session(
+                source,
+                session_id="101",
+                revision="mixed-contracts",
+                output_dir=production,
+            )
+            self.assertTrue(written["created"])
+            report = normalized.normalized_player_report(
+                production,
+                session_id="101",
+                player_ids=["10"],
+                columns=["Board", "MP_DD_Pct_Declarer"],
+            )
+            self.assertEqual(sorted(report["MP_DD_Pct_Declarer"].to_list()), [0.4, 0.6])
 
 
 class HierarchicalResolveTests(unittest.TestCase):
