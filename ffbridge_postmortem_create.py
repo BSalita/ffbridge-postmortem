@@ -20,6 +20,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+import requests
 from dotenv import load_dotenv
 from tqdm import tqdm
 
@@ -109,18 +110,26 @@ def resolve_session_group_id(
 
     ``competitions/sessions/{id}`` lists each club's group. When
     ``organization_id`` is provided it must match that club; a single-group
-    session is used as-is.
+    session is used as-is. A session Lancelot does not have (HTTP 404)
+    returns None.
     """
     sid = _public_id(session_id)
     if not sid:
         return None
     directory = pathlib.Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
-    data = _fetch_lancelot_json_cached(
-        f"competitions/sessions/{sid}",
-        f"sessions/{sid}",
-        token,
-        directory,
-    )
+    try:
+        data = _fetch_lancelot_json_cached(
+            f"competitions/sessions/{sid}",
+            f"sessions/{sid}",
+            token,
+            directory,
+        )
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else None
+        if status == 404:
+            _log(f"Lancelot session {sid} was not found; no results group id")
+            return None
+        raise
     if not isinstance(data, dict):
         return None
     wanted = _public_id(organization_id)

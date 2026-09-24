@@ -1554,11 +1554,18 @@ def _ensure_game_results_url(df: Optional[pl.DataFrame] = None) -> Optional[str]
     )
     if url is None and session_id is not None and not group_id:
         cache_dir = st.session_state.get("cache_dir")
-        group_id = pm_create.resolve_session_group_id(
-            session_id,
-            organization_id=organization_id,
-            cache_dir=pathlib.Path(cache_dir) if cache_dir else None,
-        )
+        try:
+            group_id = pm_create.resolve_session_group_id(
+                session_id,
+                organization_id=organization_id,
+                cache_dir=pathlib.Path(cache_dir) if cache_dir else None,
+            )
+        except requests.RequestException as exc:
+            print(
+                f"Could not resolve FFBridge results group for session {session_id}: {exc}",
+                flush=True,
+            )
+            group_id = None
         if group_id:
             st.session_state.group_id = group_id
             url = pm_create.ffbridge_results_page_url(

@@ -3,6 +3,7 @@ from contextlib import nullcontext
 from unittest.mock import Mock, patch
 
 import polars as pl
+import requests
 
 import ffbridge_streamlit as app
 
@@ -229,6 +230,27 @@ class StreamlitLancelotRoutingTests(unittest.TestCase):
             "21333/sessions/300749/pairs/15106224",
         )
         self.assertEqual(state["game_url"], url)
+
+    def test_missing_session_does_not_break_results_link_lookup(self):
+        state = SessionState(
+            session_id=993420,
+            game_url=None,
+            cache_dir="cache",
+            game_urls_d={},
+        )
+        error = requests.HTTPError("404 Client Error")
+        error.response = Mock(status_code=404)
+        with (
+            patch.object(app.st, "session_state", state),
+            patch.object(
+                app.pm_create,
+                "resolve_session_group_id",
+                side_effect=error,
+            ),
+        ):
+            url = app._ensure_game_results_url()
+        self.assertIsNone(url)
+        self.assertIsNone(state.get("game_url"))
 
     def test_broken_none_group_url_is_rejected(self):
         self.assertIsNone(

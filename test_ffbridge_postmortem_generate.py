@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import polars as pl
+import requests
 
 import ffbridge_postmortem_create as create
 
@@ -688,6 +689,38 @@ class ResultsPageUrlTests(unittest.TestCase):
                 )
         self.assertEqual(group_id, "21333")
         fetch.assert_called_once()
+
+    def test_missing_lancelot_session_returns_none(self):
+        response = Mock(status_code=404)
+        error = requests.HTTPError("404 Client Error")
+        error.response = response
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(
+                create,
+                "_fetch_lancelot_json_cached",
+                side_effect=error,
+            ):
+                group_id = create.resolve_session_group_id(
+                    993420,
+                    cache_dir=pathlib.Path(tmp),
+                )
+        self.assertIsNone(group_id)
+
+    def test_non_404_http_error_propagates(self):
+        response = Mock(status_code=500)
+        error = requests.HTTPError("500 Server Error")
+        error.response = response
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(
+                create,
+                "_fetch_lancelot_json_cached",
+                side_effect=error,
+            ):
+                with self.assertRaises(requests.HTTPError):
+                    create.resolve_session_group_id(
+                        300749,
+                        cache_dir=pathlib.Path(tmp),
+                    )
 
 
 class JsonNormalizeApiTests(unittest.TestCase):

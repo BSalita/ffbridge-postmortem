@@ -1,0 +1,12 @@
+---
+description: Commit and deploy completed fixes without waiting to be asked
+alwaysApply: true
+---
+
+# Always commit and deploy
+
+After a completed, tested fix in this repo:
+
+- Commit the relevant source and tests (never `.env` or secrets).
+- Push `master` to `origin` (GitHub is what containers pull).
+- Deploy so production picks it up. For `.py`/asset-only changes, push then recreate the postmortem container (`postmortem_stop.ps1` + `postmortem_start.ps1`) so start-time `git pull` runs. Rebuild with `deploy_postmortem.ps1` when requirements or the Dockerfile change.
