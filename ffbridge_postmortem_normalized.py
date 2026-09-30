@@ -1,22 +1,37 @@
-"""Normalized Parquet layout for FFBridge postmortem analytics."""
+﻿"""Normalized Parquet layout for FFBridge postmortem analytics."""
 from __future__ import annotations
 
 import json
 import os
 import pathlib
+import shutil
 import threading
 from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping, Sequence
 
 import duckdb
 import polars as pl
+from tqdm import tqdm
 
 import ffbridge_postmortem_archive as archive
 
 
-LAYOUT_VERSION = 2
+LAYOUT_VERSION = 3
 KEY_COLUMNS = ("session_id", "Board")
 SEATS = ("N", "E", "S", "W")
+# Table-contract or seat-perspective metrics. Seed sessions can look
+# board-invariant when every table plays the same contract.
+RESULT_ONLY_COLUMNS = frozenset(
+    {
+        "Section_Name",
+        "MP_DD_Pct_Declarer",
+        "MP_EV_Max_Pct_Declarer",
+        "MP_EV_Pct_Declarer",
+        "MP_EV_Score_Declarer",
+        "MP_Par_Declarer",
+        "MP_Par_Pct_Declarer",
+    }
+)
 HIERARCHICAL_MANIFEST_SCHEMA: dict[str, pl.DataType] = {
     "session_id": pl.String,
     "revision": pl.String,
@@ -128,6 +143,8 @@ def _board_columns(frames: Sequence[pl.DataFrame]) -> set[str]:
 
 
 def _namespace(column: str, table: str) -> str | None:
+    if column in RESULT_ONLY_COLUMNS:
+        return None
     if table == "boards":
         if column in {"PBN", "Dealer", "Vul", "iVul", "Vul_NS", "Vul_EW"}:
             return "deal"
@@ -165,13 +182,23 @@ def _correct_column_mapping(
     mapping: Mapping[str, Mapping[str, str | None]],
 ) -> dict[str, dict[str, str | None]]:
     corrected = {column: dict(entry) for column, entry in mapping.items()}
-    if "Section_Name" in corrected:
-        corrected["Section_Name"] = {
-            "table": "results",
-            "storage_column": "Section_Name",
-            "field": None,
-        }
+    for column in RESULT_ONLY_COLUMNS:
+        if column in corrected:
+            corrected[column] = {
+                "table": "results",
+                "storage_column": column,
+                "field": None,
+            }
     return corrected
+
+
+def _require_layout_version(metadata: Mapping[str, Any]) -> None:
+    if metadata.get("layout_version") != LAYOUT_VERSION:
+        raise ValueError(
+            f"Hierarchical archive is layout version "
+            f"{metadata.get('layout_version')!r}, code requires {LAYOUT_VERSION}. "
+            "Run migrate_ffbridge_hierarchical_layout.py on the archive."
+        )
 
 
 def _pack_structs(
@@ -228,7 +255,7 @@ def build_normalized_subset(
         frames.append(frame.with_row_index("_result_row_id"))
 
     invariant = _board_columns(frames)
-    invariant.discard("Section_Name")
+    invariant.difference_update(RESULT_ONLY_COLUMNS)
     board_columns = [
         column
         for column in frames[0].columns
@@ -305,9 +332,9 @@ def initialize_hierarchical_layout(
     """Initialize a production layout from a validated representative subset."""
     output = pathlib.Path(output_dir)
     seed = json.loads(pathlib.Path(seed_metadata_path).read_text(encoding="utf-8"))
-    if seed.get("layout_version") not in {1, LAYOUT_VERSION}:
+    if seed.get("layout_version") not in {1, 2, LAYOUT_VERSION}:
         raise ValueError(
-            f"Expected layout version 1 or {LAYOUT_VERSION}, got "
+            f"Expected seed layout version 1, 2 or {LAYOUT_VERSION}, got "
             f"{seed.get('layout_version')!r}"
         )
     if not isinstance(seed.get("column_mapping"), dict):
@@ -317,13 +344,9 @@ def initialize_hierarchical_layout(
     destination = output / "metadata.json"
     if destination.is_file():
         existing = json.loads(destination.read_text(encoding="utf-8"))
-        existing["column_mapping"] = _correct_column_mapping(
-            existing["column_mapping"]
-        )
-        existing["layout_version"] = LAYOUT_VERSION
+        _require_layout_version(existing)
         if existing["column_mapping"] != seed["column_mapping"]:
             raise ValueError("Hierarchical layout already has a different mapping")
-        _atomic_write_json(existing, destination)
         return existing
     metadata = {
         **seed,
@@ -683,7 +706,9 @@ def _load_metadata(output_dir: pathlib.Path) -> dict[str, Any]:
     path = pathlib.Path(output_dir) / "metadata.json"
     if not path.is_file():
         raise FileNotFoundError(f"Normalized archive metadata not found: {path}")
-    return json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    _require_layout_version(payload)
+    return payload
 
 
 def _mapped_expr(
@@ -817,3 +842,110 @@ def normalized_player_report(
         .select(*output_columns)
         .collect(engine="streaming")
     )
+
+
+def migrate_hierarchical_layout(
+    output_dir: pathlib.Path,
+    *,
+    delete_old_fragments: bool = False,
+) -> dict[str, Any]:
+    """Migrate a layout-version-2 archive to 3 by moving result-only columns.
+
+    Fragments are rewritten beside the originals under ``layout_version=3``;
+    the manifest and metadata are swapped only after every fragment succeeds.
+    Run with writers and readers stopped: the compacted ``dataset`` is rebuilt.
+    """
+    output = pathlib.Path(output_dir)
+    metadata_path = output / "metadata.json"
+    if not metadata_path.is_file():
+        raise FileNotFoundError(f"Hierarchical metadata not found: {metadata_path}")
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    if metadata.get("layout_version") != 2:
+        raise ValueError(
+            f"Migration expects layout version 2, got "
+            f"{metadata.get('layout_version')!r}"
+        )
+    old_mapping = metadata["column_mapping"]
+    new_mapping = _correct_column_mapping(old_mapping)
+    moved = sorted(
+        column
+        for column, entry in old_mapping.items()
+        if entry["table"] == "boards" and new_mapping[column]["table"] == "results"
+    )
+    for column in moved:
+        if old_mapping[column]["field"] is not None:
+            raise ValueError(f"Cannot migrate struct-packed board column {column}")
+
+    manifest = read_hierarchical_manifest(output)
+    migrated_rows: list[dict[str, Any]] = []
+    old_files: list[pathlib.Path] = []
+    for row in tqdm(
+        manifest.iter_rows(named=True),
+        total=manifest.height,
+        desc="Migrating fragments",
+    ):
+        new_row = dict(row)
+        new_paths: dict[str, pathlib.Path] = {}
+        for path_column in ("boards_path", "results_path"):
+            old_relative = str(row[path_column])
+            if "layout_version=2" not in old_relative:
+                raise ValueError(f"Fragment is not layout version 2: {old_relative}")
+            new_relative = old_relative.replace("layout_version=2", "layout_version=3")
+            new_row[path_column] = new_relative
+            new_paths[path_column] = output / new_relative
+            old_files.append(output / old_relative)
+        boards = pl.read_parquet(output / str(row["boards_path"]))
+        results = pl.read_parquet(output / str(row["results_path"]))
+        if moved:
+            absent = [column for column in moved if column not in boards.columns]
+            if absent:
+                raise ValueError(
+                    f"Session {row['session_id']} boards lack {absent}"
+                )
+            clash = [column for column in moved if column in results.columns]
+            if clash:
+                raise ValueError(
+                    f"Session {row['session_id']} results already have {clash}"
+                )
+            results = results.join(
+                boards.select(*KEY_COLUMNS, *moved),
+                on=list(KEY_COLUMNS),
+                how="left",
+                validate="m:1",
+                maintain_order="left",
+            )
+            boards = boards.drop(moved)
+        if boards.height != row["board_rows"] or results.height != row["result_rows"]:
+            raise ValueError(f"Row counts changed for session {row['session_id']}")
+        if not new_paths["boards_path"].is_file():
+            _atomic_write_parquet(boards, new_paths["boards_path"])
+        if not new_paths["results_path"].is_file():
+            _atomic_write_parquet(results, new_paths["results_path"])
+        migrated_rows.append(new_row)
+
+    with _HIERARCHICAL_LOCK:
+        _atomic_write_parquet(
+            pl.DataFrame(migrated_rows, schema=HIERARCHICAL_MANIFEST_SCHEMA),
+            _hierarchical_manifest_path(output),
+        )
+        _atomic_write_json(
+            {
+                **metadata,
+                "layout_version": LAYOUT_VERSION,
+                "column_mapping": new_mapping,
+                "migrated_from_layout_version": 2,
+                "migrated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            },
+            metadata_path,
+        )
+    shutil.rmtree(output / "dataset", ignore_errors=True)
+    compaction = compact_hierarchical_archive(output, force=True)
+    if delete_old_fragments:
+        for path in old_files:
+            path.unlink(missing_ok=True)
+    return {
+        "fragments": len(migrated_rows),
+        "moved_columns": moved,
+        "compaction": compaction,
+        "old_fragments_deleted": delete_old_fragments,
+    }

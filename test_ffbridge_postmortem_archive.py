@@ -1,3 +1,4 @@
+﻿import json
 import os
 import pathlib
 import tempfile
@@ -282,6 +283,143 @@ class NormalizedArchiveTests(unittest.TestCase):
                     revision="missing",
                     output_dir=production,
                 )
+
+    def test_mp_dd_pct_declarer_is_forced_to_results(self):
+        mapping = normalized._correct_column_mapping(
+            {
+                "MP_DD_Pct_Declarer": {
+                    "table": "boards",
+                    "storage_column": "MP_DD_Pct_Declarer",
+                    "field": None,
+                }
+            }
+        )
+        self.assertEqual(mapping["MP_DD_Pct_Declarer"]["table"], "results")
+
+    def test_varying_mp_dd_pct_declarer_does_not_fail_hierarchical_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            production = pathlib.Path(tmp)
+            source = _session_frame().with_columns(
+                pl.Series("MP_DD_Pct_Declarer", [0.6, 0.4])
+            )
+            constant = source.with_columns(pl.lit(0.5).alias("MP_DD_Pct_Declarer"))
+            root = pathlib.Path(tmp) / "archive"
+            seed = pathlib.Path(tmp) / "seed"
+            archive.archive_session(constant, "100", archive_dir=root)
+            normalized.build_normalized_subset(root, seed)
+            metadata = json.loads((seed / "metadata.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                metadata["column_mapping"]["MP_DD_Pct_Declarer"]["table"],
+                "results",
+            )
+            normalized.initialize_hierarchical_layout(
+                production, seed / "metadata.json"
+            )
+            written = normalized.write_hierarchical_session(
+                source,
+                session_id="101",
+                revision="mixed-contracts",
+                output_dir=production,
+            )
+            self.assertTrue(written["created"])
+            report = normalized.normalized_player_report(
+                production,
+                session_id="101",
+                player_ids=["10"],
+                columns=["Board", "MP_DD_Pct_Declarer"],
+            )
+            self.assertEqual(sorted(report["MP_DD_Pct_Declarer"].to_list()), [0.4, 0.6])
+
+
+class HierarchicalMigrationTests(unittest.TestCase):
+    def test_migration_moves_board_columns_to_results_and_rejects_v2_reads(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            production = pathlib.Path(tmp)
+            relative = pathlib.Path(
+                "fragments/year=2026/session_id=100/layout_version=2/revision=r1"
+            )
+            boards = pl.DataFrame(
+                {"session_id": ["100"], "Board": [1], "MP_DD_Pct_Declarer": [0.5]}
+            )
+            results = pl.DataFrame(
+                {
+                    "session_id": ["100", "100"],
+                    "Board": [1, 1],
+                    "_result_row_id": [0, 1],
+                    "Pct_NS": [0.6, 0.4],
+                    "Player_ID_N": ["10", "20"],
+                    "Player_ID_E": ["20", "10"],
+                    "Player_ID_S": ["11", "21"],
+                    "Player_ID_W": ["21", "11"],
+                }
+            )
+            normalized._atomic_write_parquet(
+                boards, production / relative / "boards.parquet"
+            )
+            normalized._atomic_write_parquet(
+                results, production / relative / "results.parquet"
+            )
+            normalized._atomic_write_parquet(
+                pl.DataFrame(
+                    [
+                        {
+                            "session_id": "100",
+                            "revision": "r1",
+                            "Date": date(2026, 8, 28),
+                            "year": 2026,
+                            "series_id": "series-a",
+                            "archived_at": "2026-08-28T00:00:00+00:00",
+                            "board_rows": 1,
+                            "result_rows": 2,
+                            "boards_path": (relative / "boards.parquet").as_posix(),
+                            "results_path": (relative / "results.parquet").as_posix(),
+                        }
+                    ],
+                    schema=normalized.HIERARCHICAL_MANIFEST_SCHEMA,
+                ),
+                production / "manifest.parquet",
+            )
+            mapping = {
+                column: {"table": "results", "storage_column": column, "field": None}
+                for column in results.columns
+                if column != "_result_row_id"
+            }
+            mapping["session_id"]["table"] = "boards"
+            mapping["Board"]["table"] = "boards"
+            mapping["MP_DD_Pct_Declarer"] = {
+                "table": "boards",
+                "storage_column": "MP_DD_Pct_Declarer",
+                "field": None,
+            }
+            (production / "metadata.json").write_text(
+                json.dumps({"layout_version": 2, "column_mapping": mapping}),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "migrate"):
+                normalized.normalized_player_report(
+                    production,
+                    session_id="100",
+                    player_ids=["10"],
+                    columns=["Board", "MP_DD_Pct_Declarer"],
+                )
+
+            summary = normalized.migrate_hierarchical_layout(production)
+
+            self.assertEqual(summary["moved_columns"], ["MP_DD_Pct_Declarer"])
+            migrated = json.loads(
+                (production / "metadata.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(migrated["layout_version"], normalized.LAYOUT_VERSION)
+            self.assertEqual(
+                migrated["column_mapping"]["MP_DD_Pct_Declarer"]["table"], "results"
+            )
+            report = normalized.normalized_player_report(
+                production,
+                session_id="100",
+                player_ids=["10"],
+                columns=["Board", "MP_DD_Pct_Declarer"],
+            )
+            self.assertEqual(report["MP_DD_Pct_Declarer"].to_list(), [0.5, 0.5])
 
 
 class HierarchicalResolveTests(unittest.TestCase):
