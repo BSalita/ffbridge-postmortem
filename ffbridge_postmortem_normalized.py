@@ -853,7 +853,8 @@ def migrate_hierarchical_layout(
 
     Fragments are rewritten beside the originals under ``layout_version=3``;
     the manifest and metadata are swapped only after every fragment succeeds.
-    Run with writers and readers stopped: the compacted ``dataset`` is rebuilt.
+    Run with writers and readers stopped. The derived compacted ``dataset`` is
+    removed, not rebuilt; rerun the domain compactor afterwards.
     """
     output = pathlib.Path(output_dir)
     metadata_path = output / "metadata.json"
@@ -938,14 +939,16 @@ def migrate_hierarchical_layout(
             },
             metadata_path,
         )
+    # The compacted dataset is derived and now has the wrong column layout.
+    # Rebuild it with src/elo/compact_ffbridge_hierarchical_domains.py; the
+    # flat compact_hierarchical_archive is impractically slow on this width.
     shutil.rmtree(output / "dataset", ignore_errors=True)
-    compaction = compact_hierarchical_archive(output, force=True)
     if delete_old_fragments:
         for path in old_files:
             path.unlink(missing_ok=True)
     return {
         "fragments": len(migrated_rows),
         "moved_columns": moved,
-        "compaction": compaction,
+        "stale_dataset_removed": True,
         "old_fragments_deleted": delete_old_fragments,
     }

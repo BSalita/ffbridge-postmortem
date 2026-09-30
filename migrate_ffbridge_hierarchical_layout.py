@@ -1,7 +1,8 @@
 """Migrate the FFBridge hierarchical archive from layout version 2 to 3.
 
 Moves result-only columns (e.g. MP_DD_Pct_Declarer) from boards to results.
-Stop the postmortem container first; the compacted dataset is rebuilt.
+Stop the postmortem container first. The derived compacted dataset is removed;
+rebuild it afterwards with src/elo/compact_ffbridge_hierarchical_domains.py.
 """
 from __future__ import annotations
 
