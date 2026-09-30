@@ -106,6 +106,43 @@ data = asyncio.run(extract_tournament_data())
 streamlit run ffbridge_streamlit.py
 ```
 
+## Historical Parquet archive
+
+Generated Lancelot postmortems are also stored as canonical, player-neutral
+session fragments. By default the durable archive is `cache/archive`; set
+`FFBRIDGE_POSTMORTEM_ARCHIVE_DIR` to place it on another durable volume.
+
+Audit source coverage without writing:
+
+```powershell
+python build_ffbridge_postmortem_archive.py --audit-only `
+    --source-dir E:\bridge\data\ffbridge\data
+```
+
+Backfill from the authoritative ranking/team-score JSON, rebuild player/session
+indexes, and compact affected year/series partitions:
+
+```powershell
+python build_ffbridge_postmortem_archive.py `
+    --source-dir E:\bridge\data\ffbridge\data `
+    --archive-dir E:\bridge\data\ffbridge\postmortem_archive
+```
+
+Use `--limit 1` for a smoke build. Existing player cache files can be migrated
+with `--from-cache`, but raw JSON is the authoritative backfill source. The API
+serves archived sessions before legacy player cache files and exposes bounded
+cross-session projection/filter queries at `GET /archive/rows`. Pass
+`--fetch-missing` explicitly to download audit-reported missing ranking/team
+JSON before a backfill.
+
+Measure cache duplication, archive size, projected session reads, and date
+aggregates with:
+
+```powershell
+python benchmark_ffbridge_postmortem_archive.py `
+    --cache-dir cache --archive-dir cache/archive
+```
+
 ## Automation: email a PDF report
 
 `ffbridge_postmortem_generator.py` drives the live app in a headless browser, captures

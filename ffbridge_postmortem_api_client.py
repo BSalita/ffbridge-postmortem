@@ -160,6 +160,30 @@ def played_today(
     )
 
 
+def archive_rows(
+    *,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    series_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    player_id: Optional[str] = None,
+    columns: Optional[str] = None,
+    limit: int = 500,
+) -> Dict[str, Any]:
+    return _get_json(
+        "/archive/rows",
+        {
+            "date_from": date_from,
+            "date_to": date_to,
+            "series_id": series_id,
+            "session_id": session_id,
+            "player_id": player_id,
+            "columns": columns,
+            "limit": limit,
+        },
+    )
+
+
 def generate(
     player_id: str,
     session_id: Optional[str] = None,
