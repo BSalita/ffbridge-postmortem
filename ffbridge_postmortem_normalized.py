@@ -684,21 +684,27 @@ def hierarchical_info(output_dir: pathlib.Path | None) -> dict[str, Any]:
             "available": False,
             "directory": str(output),
         }
+    layout_version = json.loads(metadata_path.read_text(encoding="utf-8")).get(
+        "layout_version"
+    )
     manifest = latest_hierarchical_manifest(output)
-    board_files = _table_files(output, "boards")
-    result_files = _table_files(output, "results")
+    board_paths = [output / value for value in manifest["boards_path"].to_list()]
+    result_paths = [output / value for value in manifest["results_path"].to_list()]
+    present = [path for path in (*board_paths, *result_paths) if path.is_file()]
+    present_set = set(present)
     return {
         "configured": True,
         "available": True,
         "directory": str(output),
+        "layout_version": layout_version,
+        "layout_version_expected": LAYOUT_VERSION,
         "sessions": manifest.height,
         "date_min": str(manifest["Date"].min()) if manifest.height else None,
         "date_max": str(manifest["Date"].max()) if manifest.height else None,
-        "board_files": len(board_files),
-        "result_files": len(result_files),
-        "bytes": sum(
-            path.stat().st_size for path in [*board_files, *result_files]
-        ),
+        "board_files": sum(1 for path in board_paths if path in present_set),
+        "result_files": sum(1 for path in result_paths if path in present_set),
+        "missing_fragment_files": len(board_paths) + len(result_paths) - len(present),
+        "bytes": sum(path.stat().st_size for path in present),
     }
 
 
@@ -726,18 +732,7 @@ def _mapped_expr(
 def _table_files(output_dir: pathlib.Path, table: str) -> list[pathlib.Path]:
     output = pathlib.Path(output_dir)
     direct = output / f"{table}.parquet"
-    if direct.is_file():
-        return [direct]
-    files = sorted(
-        (output / "dataset").glob(f"year=*/series_id=*/{table}.parquet")
-    )
-    if files:
-        return files
-    return sorted(
-        (output / "fragments").glob(
-            f"year=*/session_id=*/revision=*/{table}.parquet"
-        )
-    )
+    return [direct] if direct.is_file() else []
 
 
 def normalized_player_report(

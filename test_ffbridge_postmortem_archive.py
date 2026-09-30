@@ -421,6 +421,17 @@ class HierarchicalMigrationTests(unittest.TestCase):
             )
             self.assertEqual(report["MP_DD_Pct_Declarer"].to_list(), [0.5, 0.5])
 
+            info = normalized.hierarchical_info(production)
+            self.assertEqual(info["layout_version"], normalized.LAYOUT_VERSION)
+            self.assertEqual(info["sessions"], 1)
+            self.assertEqual(info["board_files"], 1)
+            self.assertEqual(info["result_files"], 1)
+            self.assertEqual(info["missing_fragment_files"], 0)
+            next(production.rglob("layout_version=3/**/results.parquet")).unlink()
+            info = normalized.hierarchical_info(production)
+            self.assertEqual(info["missing_fragment_files"], 1)
+            self.assertEqual(info["result_files"], 0)
+
 
 class HierarchicalResolveTests(unittest.TestCase):
     def test_env_wins_over_published_candidates(self):
