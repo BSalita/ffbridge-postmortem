@@ -184,6 +184,7 @@ def dataset_info() -> Dict[str, Any]:
             {c["player_id"] for c in cached if c["player_id"] is not None}
         ),
         "archive": archive.archive_info(),
+        "recent_boards": _recent_boards_info(),
         "hierarchical_archive": normalized.hierarchical_info(HIERARCHICAL_DIR),
         "generate": {
             "tool": "ffbridge_postmortem_generate",
@@ -198,11 +199,33 @@ def dataset_info() -> Dict[str, Any]:
         "note": (
             "Postmortems are produced on demand by ffbridge_postmortem_generate "
             "(same Lancelot + augment path as Streamlit) and written to this "
-            "cache. List playable sessions with "
+            "cache. Archive queries also include recent boards whose session "
+            "is not in the historical archive yet. List playable sessions with "
             "ffbridge_postmortem_list_source_sessions. Check writer readiness "
             "without generating with ffbridge_postmortem_writer_health. Streamlit "
             "(https://ffbridge.postmortem.chat) reads and writes the same cache."
         ),
+    }
+
+
+def _recent_boards_info() -> Dict[str, Any]:
+    path = pathlib.Path(
+        r"e:/bridge/data/ffbridge/recent/ffbridge_boards_recent.parquet"
+    )
+    sessions = None
+    if path.is_file():
+        schema = pl.scan_parquet(path).collect_schema()
+        if "session_id" in schema.names():
+            sessions = (
+                pl.scan_parquet(path)
+                .select(pl.col("session_id").n_unique())
+                .collect()
+                .item()
+            )
+    return {
+        "path": str(path) if path.is_file() else None,
+        "available": path.is_file(),
+        "sessions": sessions,
     }
 
 
