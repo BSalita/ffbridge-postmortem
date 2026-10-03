@@ -697,6 +697,23 @@ def archive_rows(
         schema = pl.scan_parquet(path).collect_schema()
         available = [column for column in wanted if column in schema]
         lazy_frames.append(pl.scan_parquet(path).select(available))
+    recent = pathlib.Path(r"e:/bridge/data/ffbridge/recent/ffbridge_boards_recent.parquet")
+    if recent.is_file():
+        schema = pl.scan_parquet(recent).collect_schema()
+        available = [column for column in wanted if column in schema]
+        recent_lf = pl.scan_parquet(recent).select(available)
+        if "session_id" in schema.names() and "session_id" in wanted:
+            id_frames = [
+                frame.select(pl.col("session_id").cast(pl.String))
+                for frame in lazy_frames
+                if "session_id" in frame.collect_schema().names()
+            ]
+            if id_frames:
+                known = pl.concat(id_frames, how="vertical_relaxed")
+                recent_lf = recent_lf.with_columns(
+                    pl.col("session_id").cast(pl.String)
+                ).join(known, on="session_id", how="anti")
+        lazy_frames.append(recent_lf)
     query = pl.concat(lazy_frames, how="diagonal_relaxed")
     if date_from is not None:
         query = query.filter(pl.col("Date").cast(pl.Date) >= date.fromisoformat(date_from))
