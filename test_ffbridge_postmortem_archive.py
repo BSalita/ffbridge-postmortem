@@ -69,6 +69,21 @@ class ArchiveWriteTests(unittest.TestCase):
             self.assertEqual(archive.read_manifest(root).height, 2)
             self.assertEqual(archive.latest_manifest(root).height, 1)
 
+    def test_missing_lead_is_stored_as_null_to_match_archive_schema(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            with_lead = _session_frame().with_columns(
+                pl.lit("HK").alias("Lead")
+            )
+            archive.archive_session(with_lead, "100", archive_dir=root)
+            archived = archive.archive_session(
+                _session_frame(), "101", archive_dir=root
+            )
+            stored = pl.read_parquet(archived["archive_file"])
+            self.assertIn("Lead", stored.columns)
+            self.assertEqual(stored["Lead"].null_count(), stored.height)
+            self.assertEqual(archive.read_manifest(root).height, 2)
+
     def test_incompatible_schema_fails_before_manifest_update(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)

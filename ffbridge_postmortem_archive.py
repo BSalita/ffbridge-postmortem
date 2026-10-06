@@ -86,6 +86,10 @@ def canonicalize_frame(frame: pl.DataFrame) -> pl.DataFrame:
         raise ValueError("Cannot archive an empty postmortem frame")
     if "Pair_Direction" not in frame.columns:
         raise ValueError("Postmortem frame lacks Pair_Direction")
+    # Caches written before opening-lead support omit Lead. The archive schema
+    # already has that column, and a missing column is rejected on commit.
+    if "Lead" not in frame.columns:
+        frame = frame.with_columns(pl.lit(None, dtype=pl.String).alias("Lead"))
     return frame.with_columns(
         pl.lit(None, dtype=pl.String).alias("Pair_Direction"),
     )
