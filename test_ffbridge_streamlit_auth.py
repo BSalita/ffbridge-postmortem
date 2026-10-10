@@ -21,12 +21,17 @@ class SessionState(dict):
 
 class StreamlitLancelotRoutingTests(unittest.TestCase):
     def test_default_source_is_lancelot_without_health_based_fallback(self):
-        with patch.object(
-            app,
-            "probe_api_sources",
-            side_effect=AssertionError("default selection must not probe"),
-        ):
-            self.assertEqual(app.auto_detect_api_source(), app.API_SOURCE_LANCELOT)
+        self.assertEqual(app.auto_detect_api_source(), app.API_SOURCE_LANCELOT)
+        self.assertTrue(app.is_lancelot_mode())
+
+    def test_stored_classic_source_is_ignored(self):
+        state = SessionState(api_source="classic")
+        with patch.object(app.st, "session_state", state):
+            self.assertEqual(app.get_api_source(), app.API_SOURCE_LANCELOT)
+
+    def test_classic_api_requests_are_disabled(self):
+        with self.assertRaises(RuntimeError):
+            app.make_api_request_licencie("https://api.ffbridge.fr/api/v1/members/1")
 
     def test_startup_loads_tokens_without_authenticating(self):
         state = SessionState()

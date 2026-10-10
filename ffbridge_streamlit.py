@@ -212,96 +212,31 @@ def _derive_person_organization_id_scalar(members_df: pl.DataFrame) -> Optional[
     return None
 
 def make_api_request_licencie(full_url: str, headers: Optional[Dict[str, str]] = None) -> Optional[Dict[str, Any]]:
-    """Make API request with full URL
-    
-    Args:
-        full_url: The complete URL to make the API request to
-        headers: Optional additional headers to include in the request
-        
-    Returns:
-        JSON response data as dictionary, or None if request failed
-    """
-    from urllib.parse import urlparse
-    
-    # Parse domain from URL
-    parsed_url = urlparse(full_url)
-    domain = parsed_url.netloc
-    
-    # Get appropriate token for domain
-    token = st.session_state.ffbridge_easi_token
-    if not token:
-        return None
-    
-    # Default headers
-    default_headers = {
-        "Authorization": f"Bearer {token}",
-        "accept": "application/json, text/plain, */*",
-        "accept-language": "en-US,en;q=0.9,fr;q=0.8",
-        "origin": "https://www.ffbridge.fr",
-        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    }
-    
-    # Merge with provided headers
-    if headers:
-        default_headers.update(headers)
-    
-    try:
-        print(f"Making API request to: {full_url}")
-        print(f"Using domain: {domain}")
-        print(f"Using token: {token[:20]}...")
-        
-        response = requests.get(full_url, headers=default_headers, timeout=30)
-        response.raise_for_status()
-        
-        return response.json()
-        
-    except Exception as e:
-        st.error(f"API request failed: {e}")
-        return None
+    """Classic api.ffbridge.fr client. Disabled: that API is deprecated."""
+    raise RuntimeError(
+        "The FFBridge Classic API (api.ffbridge.fr) is deprecated. "
+        "This app uses Lancelot only."
+    )
 
-# ----------------------------
-# API source (Classic vs Lancelot) infrastructure
-# ----------------------------
-
-# API constants, URL builders, and the low-level Lancelot client live in the shared
-# mlBridgeFFLib (used by the Elo_Ratings project too).
-classic_api_url = mlBridgeFFLib.classic_api_url
+# The FFBridge Classic API is deprecated. This app talks only to Lancelot.
+# URL builders and the low-level Lancelot client live in mlBridgeFFLib.
 lancelot_api_url = mlBridgeFFLib.lancelot_api_url
 
-API_SOURCE_CLASSIC = 'classic'
 API_SOURCE_LANCELOT = 'lancelot'
-API_SOURCE_LABELS = {
-    API_SOURCE_CLASSIC: 'Classic (api.ffbridge.fr)',
-    API_SOURCE_LANCELOT: 'Lancelot (api-lancelot.ffbridge.fr)',
-}
-
-
-@st.cache_data(ttl=300, show_spinner=False)
-def probe_api_sources() -> Dict[str, Dict[str, Any]]:
-    """Probe both API backends and report their health.
-
-    Cached for 5 minutes so the sidebar doesn't re-probe on every rerun.
-    Keys are API_SOURCE_CLASSIC / API_SOURCE_LANCELOT.
-    """
-    return mlBridgeFFLib.probe_ffbridge_health()
 
 
 def auto_detect_api_source() -> str:
-    """Use Lancelot unless the user explicitly selects Classic.
-
-    A transient public-version timeout must not switch identifier namespaces.
-    In particular, the Classic probe can return an auth-related 403 while the
-    server is reachable but unusable for member lookup.
-    """
+    """Lancelot is the only supported FFBridge API."""
     return API_SOURCE_LANCELOT
 
 
 def get_api_source() -> str:
-    return st.session_state.get('api_source', API_SOURCE_LANCELOT)
+    """Ignore any stored or bookmarked Classic selection."""
+    return API_SOURCE_LANCELOT
 
 
 def is_lancelot_mode() -> bool:
-    return get_api_source() == API_SOURCE_LANCELOT
+    return True
 
 
 def get_lancelot_token() -> str:
@@ -511,8 +446,8 @@ def search_members(query: str) -> pl.DataFrame:
     Returns a normalized DataFrame with columns:
     person_id, person_firstname, person_lastname, person_license_number
 
-    In Classic mode person_id is the Classic person_id; in Lancelot mode it is the Lancelot person id.
-    Numeric Lancelot lookups use the signed-in identity or the player-session
+    person_id is the Lancelot person id.
+    Numeric lookups use the signed-in identity or the player-session
     index first so an expired bearer token does not block a known license.
     """
     q = (query or '').strip()
@@ -550,26 +485,9 @@ def search_members(query: str) -> pl.DataFrame:
             if item.get("id")
         ]
         return _lancelot_search_df(rows)
-    else:
-        api_urls_d = {
-            'search': (classic_api_url(f"search-members?alive=1&search={q}"), False),
-        }
-        dfs, _ = get_ffbridge_data_using_url_licencie(api_urls_d, show_progress=False)
-        result = dfs['search']
-        if not q.isdigit() and (result is None or result.height == 0):
-            rows = [
-                _lancelot_search_row(
-                    person_id=str(item.get("migrationId") or item.get("id") or ""),
-                    license_number=str(item.get("ffbId") or ""),
-                    firstname=item.get("firstName") or "",
-                    lastname=item.get("lastName") or "",
-                    migration_id=item.get("migrationId"),
-                )
-                for item in _fuzzy_search_persons_from_index(q)
-                if item.get("migrationId") or item.get("id")
-            ]
-            return _lancelot_search_df(rows)
-        return result
+    raise RuntimeError(
+        "The FFBridge Classic API is deprecated. Member search uses Lancelot only."
+    )
 
 
 # Legacy function - now handled by the base class
@@ -618,19 +536,7 @@ def _parse_bool_param(raw: str) -> bool:
     raise ValueError(f"invalid boolean URL param value: {raw!r}")
 
 
-def _parse_api_source_param(raw: str) -> str:
-    s = str(raw).strip().lower()
-    if s not in (API_SOURCE_CLASSIC, API_SOURCE_LANCELOT):
-        raise ValueError(f"invalid api_source URL param value: {raw!r}")
-    return s
-
-
 SIDEBAR_URL_PARAM_MAP: Dict[str, Dict[str, Callable[[Any], Any]]] = {
-    'api_source': {
-        'state_key': 'api_source',
-        'parser': _parse_api_source_param,
-        'serializer': lambda v: None if v is None else str(v),
-    },
     'player_id': {
         'state_key': 'player_id',
         'parser': lambda v: str(v),
@@ -667,6 +573,8 @@ def apply_url_params_to_session_state() -> None:
     take precedence over defaults. Unknown / unparseable params are skipped with a warning.
     """
     qp = st.query_params
+    if 'api_source' in qp:
+        del qp['api_source']
     for url_key, cfg in SIDEBAR_URL_PARAM_MAP.items():
         if url_key not in qp:
             continue
@@ -698,25 +606,6 @@ def sync_session_state_to_url_params() -> None:
         else:
             if current != serialized:
                 qp[url_key] = serialized
-
-
-def api_source_on_change() -> None:
-    """Handle API source selectbox change: switch backend and clear per-source state.
-
-    Classic and Lancelot use different id spaces (person ids, session ids), so any
-    player/game state from the previous source is invalid after a switch.
-    """
-    st.session_state.api_source = st.session_state.api_source_selectbox
-    st.session_state.player_id = None
-    st.session_state.session_id = None
-    st.session_state.game_urls_d = {}
-    st.session_state.game_url = None
-    st.session_state.df = None
-    st.session_state.sql_query_mode = False
-    st.session_state.deferred_start_report = False
-    for key in ('player_search_error', 'player_search_matches', 'player_search_match_selection', 'simultane_id', '_url_loaded_session_key'):
-        if key in st.session_state:
-            del st.session_state[key]
 
 
 def game_url_on_change() -> None:
@@ -1646,9 +1535,7 @@ def resolve_url_player_id_param(value: str) -> str:
     URL from license to Lancelot id made filter_dataframe look up 246273 as
     a license and produced an empty/wrong report.
 
-    Lancelot mode returns ``value`` unchanged after stashing aliases.
-    Classic mode still remaps a license to Classic person_id because those
-    endpoints require it.
+    Returns ``value`` unchanged after stashing aliases.
     """
     v = (value or "").strip()
     if not v or not v.isdigit():
@@ -1667,36 +1554,6 @@ def resolve_url_player_id_param(value: str) -> str:
             print(f"resolve_url_player_id_param({v!r}): Lancelot resolve failed, "
                   f"falling through to direct lookup: {e}")
         return value
-
-    try:
-        search_df = search_members(v)
-    except Exception as e:
-        print(f"resolve_url_player_id_param({v!r}): search call failed, "
-              f"falling through to direct lookup: {e}")
-        return value
-    if search_df is None or len(search_df) != 1:
-        return value  # 0 or 2+ hits -- assume the URL value is already a person_id
-
-    row = list(search_df.iter_rows(named=True))[0]
-    # Match the field-name probing the manual flow uses (line ~2186).
-    license_from_api = (
-        row.get('person_license_number', '')
-        or row.get('license_number', '')
-        or row.get('licenseNumber', '')
-        or ''
-    )
-    license_norm = str(license_from_api).lstrip('0')
-    value_norm = v.lstrip('0')
-    if license_norm and license_norm == value_norm:
-        person_id = row.get('person_id')
-        if person_id is not None:
-            print(f"resolve_url_player_id_param: {v!r} matched license number; "
-                  f"resolved to person_id={person_id}.")
-            if license_from_api:
-                st.session_state.player_license_number = str(license_from_api)
-            st.session_state.classic_player_id = str(person_id)
-            return str(person_id)
-    return value
 
 
 def _games_newest_first(game_urls: Mapping[Any, Mapping[str, Any]]) -> Dict[int, Dict[str, Any]]:
@@ -1836,46 +1693,7 @@ def populate_game_urls_for_player(player_id: str) -> bool:
     """
     if player_id in st.session_state.game_urls_d and st.session_state.game_urls_d[player_id]:
         return True
-    if is_lancelot_mode():
-        return _populate_game_urls_for_player_lancelot(player_id)
-    api_urls_d = {
-        'members': (classic_api_url(f"members/{player_id}"), False),
-        'person': (classic_api_url(f"licensee-results/results/person/{player_id}?date=all&place=0&type=0"), False),
-    }
-    try:
-        dfs, _ = get_ffbridge_licencie_get_urls(api_urls_d)
-        if 'tournament_id' in dfs['person'].columns:
-            st.session_state.game_urls_d[player_id] = {k: v for k, v in zip(dfs['person']['tournament_id'], dfs['person'].to_dicts())}
-        else:
-            if 'id' in dfs['person'].columns:
-                st.session_state.game_urls_d[player_id] = {k: v for k, v in zip(dfs['person']['id'], dfs['person'].to_dicts())}
-            elif len(dfs['person']) > 0:
-                st.session_state.game_urls_d[player_id] = {i: v for i, v in enumerate(dfs['person'].to_dicts())}
-            else:
-                # Preserve any existing cache; otherwise leave empty
-                if not (player_id in st.session_state.game_urls_d and st.session_state.game_urls_d[player_id]):
-                    st.session_state.game_urls_d[player_id] = {}
-        st.session_state.person_organization_id = _derive_person_organization_id_scalar(dfs['members'])
-        return len(st.session_state.game_urls_d.get(player_id, {})) > 0
-    except Exception:
-        # Retry once
-        try:
-            dfs, _ = get_ffbridge_licencie_get_urls(api_urls_d)
-            if 'tournament_id' in dfs['person'].columns:
-                st.session_state.game_urls_d[player_id] = {k: v for k, v in zip(dfs['person']['tournament_id'], dfs['person'].to_dicts())}
-            else:
-                if 'id' in dfs['person'].columns:
-                    st.session_state.game_urls_d[player_id] = {k: v for k, v in zip(dfs['person']['id'], dfs['person'].to_dicts())}
-                elif len(dfs['person']) > 0:
-                    st.session_state.game_urls_d[player_id] = {i: v for i, v in enumerate(dfs['person'].to_dicts())}
-                else:
-                    if not (player_id in st.session_state.game_urls_d and st.session_state.game_urls_d[player_id]):
-                        st.session_state.game_urls_d[player_id] = {}
-            st.session_state.person_organization_id = dfs['members']['seasons_organization_id']
-            return len(st.session_state.game_urls_d.get(player_id, {})) > 0
-        except Exception as e2:
-            # Keep cached games if present
-            return len(st.session_state.game_urls_d.get(player_id, {})) > 0
+    return _populate_game_urls_for_player_lancelot(player_id)
 
 
 def _finalize_mldf_for_report(df: pl.DataFrame) -> bool:
@@ -2004,648 +1822,12 @@ def change_game_state(player_id: str, session_id: str) -> bool: # todo: rename t
 
     st.markdown('<div style="height: 50px;"><a name="top-of-report"></a></div>', unsafe_allow_html=True)
 
-    con = get_session_duckdb_connection()
-
-    if is_lancelot_mode():
-        try:
-            return _change_game_state_lancelot(player_id, session_id)
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            return _report_failure(f"Error preparing Lancelot report: {e}")
-
-    with st.spinner(f"Retrieving a list of games for {player_id} ..."):
-        t = time.time()
-        if player_id not in st.session_state.game_urls_d:
-            if True: # keeps indentation; Lancelot handling moved to _change_game_state_lancelot()
-                api_urls_d = {
-                    'members': (classic_api_url(f"members/{player_id}"), False),
-                    'person': (classic_api_url(f"licensee-results/results/person/{player_id}?date=all&place=0&type=0"), False),
-                }
-                try:
-                    dfs, api_urls_d = get_ffbridge_licencie_get_urls(api_urls_d)
-                    
-                    # Debug: Check what columns are available in the person DataFrame
-                    if st.session_state.get('debug_mode', False):
-                        print(f"Person DataFrame columns: {dfs['person'].columns}")
-                        print(f"Person DataFrame shape: {dfs['person'].shape}")
-                    
-                    # Handle missing tournament_id column gracefully
-                    if 'tournament_id' in dfs['person'].columns:
-                        st.session_state.game_urls_d[player_id] = {k:v for k,v in zip(dfs['person']['tournament_id'], dfs['person'].to_dicts())}
-                    else:
-                        # Try alternative column names or use a different approach
-                        if 'id' in dfs['person'].columns:
-                            st.session_state.game_urls_d[player_id] = {k:v for k,v in zip(dfs['person']['id'], dfs['person'].to_dicts())}
-                        elif len(dfs['person']) > 0:
-                            # Use row index as key if no suitable ID column found
-                            st.session_state.game_urls_d[player_id] = {i:v for i,v in enumerate(dfs['person'].to_dicts())}
-                        else:
-                            # Preserve existing cached games if present
-                            if player_id in st.session_state.game_urls_d and st.session_state.game_urls_d[player_id]:
-                                st.warning("Using cached games due to empty results.")
-                            else:
-                                st.session_state.game_urls_d[player_id] = {}
-                    
-                    # Derive a single person_organization_id scalar (not a Series)
-                    st.session_state.person_organization_id = _derive_person_organization_id_scalar(dfs['members'])
-                    
-                except Exception as e:
-                    # Retry once before falling back to cache
-                    try:
-                        dfs, api_urls_d = get_ffbridge_licencie_get_urls(api_urls_d)
-                        if 'tournament_id' in dfs['person'].columns:
-                            st.session_state.game_urls_d[player_id] = {k:v for k,v in zip(dfs['person']['tournament_id'], dfs['person'].to_dicts())}
-                        else:
-                            if 'id' in dfs['person'].columns:
-                                st.session_state.game_urls_d[player_id] = {k:v for k,v in zip(dfs['person']['id'], dfs['person'].to_dicts())}
-                            elif len(dfs['person']) > 0:
-                                st.session_state.game_urls_d[player_id] = {i:v for i,v in enumerate(dfs['person'].to_dicts())}
-                            else:
-                                if player_id in st.session_state.game_urls_d and st.session_state.game_urls_d[player_id]:
-                                    st.warning("Using cached games due to empty results.")
-                                else:
-                                    st.session_state.game_urls_d[player_id] = {}
-                        st.session_state.person_organization_id = _derive_person_organization_id_scalar(dfs['members'])
-                    except Exception as e2:
-                        print(f"Error loading player data for {player_id}: {e2}")
-                        st.error(f"Error loading player data: {str(e2)}")
-                        # Only clear if no cache exists; otherwise, keep cached games
-                        if not (player_id in st.session_state.game_urls_d and st.session_state.game_urls_d[player_id]):
-                            st.session_state.game_urls_d[player_id] = {}
-                            return True  # Only signal error if we have nothing to show
-        game_urls = _games_newest_first(st.session_state.game_urls_d[player_id])
-        st.session_state.game_urls_d[player_id] = game_urls
-        if game_urls is None:
-            st.error(f"Player number {player_id} not found.")
-            return True  # Return True to indicate error
-        if len(game_urls) == 0:
-            st.error(f"Could not find any games for {player_id}.")
-            return True  # Return error if no games found
-        elif session_id is None:
-            session_id = _latest_session_id(game_urls)
-        st.session_state.player_id = player_id
-        print(f"session_id:{session_id}")
-        st.session_state.session_id = session_id
-        print(f"st.session_state.session_id:{st.session_state.session_id}")
-        st.session_state.simultane_id = session_id
-        st.session_state.org_id = game_urls[session_id]['organization_id']
-        api_urls_d = {
-            'simultaneous_tournaments': (classic_api_url(f"simultaneous-tournaments/{st.session_state.simultane_id}"), False),
-        }
-        dfs, api_urls_d = get_ffbridge_licencie_get_urls(api_urls_d)
-        simultaneous_tournaments_df = dfs['simultaneous_tournaments']
-        st.session_state.player_row = simultaneous_tournaments_df.filter(
-            pl.col('team_players_id').cast(pl.Int64) == int(st.session_state.player_id)
-        )
-        if st.session_state.get('debug_mode', False):
-            debug_capture_df("player_row", st.session_state.player_row, source="simultaneous_tournaments")
-        # Do NOT change player_id type here; ensure it remains a string for consistent dict-keying and widgets.
-        st.session_state.player_id = str(st.session_state.player_row['team_players_id'].first())
-        st.session_state.player_license_number = st.session_state.player_row['team_players_license_number'].str.strip_chars_start('0').first()
-        st.session_state.pair_direction = st.session_state.player_row['team_orientation'].first()        
-        st.session_state.opponent_pair_direction = 'EW' if st.session_state.pair_direction == 'NS' else 'NS' # opposite of pair_direction
-        st.session_state.player_position = 0 if st.session_state.player_row['team_players_position'].first() == 1 else 1
-        st.session_state.partner_position = 0 if st.session_state.player_position == 1 else 1
-        st.session_state.player_direction = st.session_state.pair_direction[st.session_state.player_position]
-        st.session_state.partner_direction = st.session_state.pair_direction[st.session_state.partner_position]
-        st.session_state.team_id = st.session_state.player_row['team_id'].first()
-        st.session_state.section_name = st.session_state.player_row['team_section_name'].first()
-        st.session_state.simultaneeCode = st.session_state.player_row['simultaneeCode'].first()
-        st.session_state.organization_code = st.session_state.player_row['team_organization_code'].first()
-        st.session_state.organization_name = st.session_state.player_row['team_organization_name'].first()
-        st.session_state.tournament_date = datetime.fromisoformat(st.session_state.player_row['date'].first()).strftime('%Y-%m-%d')
-        st.session_state.game_description = st.session_state.player_row['name'].first()
-        st.session_state.player_name = st.session_state.player_row['team_players_firstname'].first() + ' ' + st.session_state.player_row['team_players_lastname'].first()
-        st.session_state.game_url = f"https://licencie.ffbridge.fr/#/resultats/simultane/{st.session_state.simultane_id}/details/{st.session_state.team_id}?orgId={st.session_state.org_id}"
-        st.session_state.team_number = st.session_state.player_row['team_table_number'].first()
-        # find same team_id but partner_position
-        st.session_state.partner_row = simultaneous_tournaments_df.filter(
-            pl.col('team_id').eq(st.session_state.team_id) &
-            pl.col('team_players_position').eq(st.session_state.partner_position+1)
-        )
-        if st.session_state.get('debug_mode', False):
-            debug_capture_df("partner_row", st.session_state.partner_row, source="simultaneous_tournaments")
-        # might need more partner info?
-        st.session_state.partner_id = st.session_state.partner_row['team_players_id'].first()
-        st.session_state.partner_license_number = st.session_state.partner_row['team_players_license_number'].first()
-        st.session_state.partner_name = st.session_state.partner_row['team_players_firstname'].first() + ' ' + st.session_state.partner_row['team_players_lastname'].first()
-        print('get_ffbridge_results_from_player_number time:', time.time()-t) # takes 4s
-
-    with st.spinner(f'Preparing Bridge Game Postmortem Report...'):
-        # Use the entered URL or fallback to default.
-        #st.session_state.game_url = st.session_state.game_url_input.strip()
-        #if st.session_state.game_url is None or st.session_state.game_url.strip() == "":
-        #    return True
-
-        # Fetch initial data using the URL.
-        # if (st.session_state.game_url.startswith('https://ffbridge.fr') or 
-        #     st.session_state.game_url.startswith('https://www.ffbridge.fr')):
-        #     df = get_ffbridge_data_using_url()
-        #     df = ffbridgelib.convert_ffdf_api_to_mldf(df) # warning: drops columns from df.
-        # elif st.session_state.game_url.startswith('https://licencie.ffbridge.fr'):
-        # Use the API endpoint instead of the web page
-        # api_urls values are tuples of (url, should_cache) where should_cache=False means always request fresh data
-        api_urls_d = {
-            'simultaneous_roadsheets': (classic_api_url(f"simultaneous-tournaments/{st.session_state.simultane_id}/teams/{st.session_state.team_id}/roadsheets"), False),
-            'simultaneous_dealsNumber': (classic_api_url(f"simultaneous-tournaments/{st.session_state.simultane_id}/teams/{st.session_state.team_id}/dealsNumber"), False),
-            'simultaneous_deals': (classic_api_url(f"simultaneous-tournaments/{st.session_state.simultane_id}/teams/{st.session_state.team_id}/deals/{{i}}"), False),
-            #'simultaneous_descriptions': (classic_api_url(f"simultaneous-tournaments/{st.session_state.simultane_id}/teams/{st.session_state.team_id}/deals/{{i}}/descriptions"), False),
-            'simultaneous_description_by_organization_id': (classic_api_url(f"simultaneous/{st.session_state.simultane_id}/deals/{{i}}/descriptions?organization_id={st.session_state.org_id}"), False),
-            'simultaneous_tournaments_by_organization_id': (classic_api_url(f"simultaneous-tournaments/{st.session_state.simultane_id}?organization_id={st.session_state.org_id}"), False),
-            'my_infos': (classic_api_url("users/my/infos"), False),
-            'members': (classic_api_url(f"members/{st.session_state.player_id}"), False),
-            'person': (classic_api_url(f"licensee-results/results/person/{st.session_state.player_id}?date=all&place=0&type=0"), False),
-            'organization_by_person_organization_id': (classic_api_url(f"licensee-results/results/organization/{st.session_state.org_id}?date=all&person_organization_id={str(st.session_state.person_organization_id or '')}&place=0&type=0"), False),
-            'person_by_person_organization_id': (classic_api_url(f"licensee-results/results/person/{st.session_state.player_id}?date=all&person_organization_id={str(st.session_state.person_organization_id or '')}&place=0&type=0"), False),
-        }
-        dfs, api_urls = get_ffbridge_licencie_get_urls(api_urls_d)
-        if st.session_state.simultaneeCode  == 'RRN':
-            # RRN (Roy Rene simultaneious tournament) has no deal related columns in the simultaneous_deals dataframe.
-            # so we need to get the boards from the tournament date and add the deal related columns to the simultaneous_deals dataframe.
-            st.session_state.tournament_id = mlBridgeBPLib.get_teams_by_tournament_date(st.session_state.tournament_date)
-            max_deals = 36 # todo: is max_deals (number of deals) available in any API at this point?
-            deal_numbers = dfs['simultaneous_roadsheets']['roadsheets_deals_dealNumber'].unique().to_list()
-            # uses st.session_state.player_license_number to get boards because Roy Rene website works with player_license_number to get boards.
-            with st.spinner(f"Roy Rene tournaments require an extra step. Takes 1 to 3 minutes..."):
-                # Get the Bridge+ club page to find the player's route link
-                async def get_player_route_url():
-                    # Fetch the club teams page which contains links to each pair's route
-                    teams_df = await mlBridgeBPLib.get_teams_by_tournament_async(
-                        st.session_state.tournament_id, 
-                        st.session_state.organization_code
-                    )
-                    
-                    # Normalize player_id by stripping leading zeros for robust string comparison
-                    norm_player_id = str(st.session_state.player_license_number).lstrip('0')
-                    
-                    # Find the team where the player_id matches either Player1_ID or Player2_ID
-                    player_team = teams_df.filter(
-                        (pl.col('Player1_ID').cast(pl.Utf8).str.strip_chars_start('0') == norm_player_id) | 
-                        (pl.col('Player2_ID').cast(pl.Utf8).str.strip_chars_start('0') == norm_player_id)
-                    )
-                    
-                    # Check if player was found
-                    if len(player_team) == 0:
-                        raise ValueError(f"Player {st.session_state.player_license_number} not found in tournament {st.session_state.tournament_id}, club {st.session_state.organization_code}")
-                    
-                    # Extract section and team number from the teams data
-                    section = player_team['Section'].first()
-                    team_number = player_team['Team_Number'].first()
-                    
-                    # Build the route URL using the extracted parameters
-                    route_url = f"https://www.bridgeplus.com/nos-simultanes/resultats/?p=route&res=sim&tr={st.session_state.tournament_id}&cl={st.session_state.organization_code}&sc={section}&eq={team_number}"
-                    
-                    return route_url, section, team_number
-                
-                # Get the route URL by finding the player in the club page
-                st.session_state.route_url, st.session_state.section_name, bridgeplus_team_number = asyncio.run(get_player_route_url())
-                print(f"Found player route URL: {st.session_state.route_url}")
-                print(f"Getting route data from: {st.session_state.route_url}")
-                if False:
-                    # calls internal async version which takes 60s. almost 3x faster than asyncio version below
-                    #  -- but this version doesn't show progress bar -- might overwhelm server as I'm getting blacklisted(?).
-                    boards_dfs = mlBridgeBPLib.get_all_boards_for_player(st.session_state.tournament_id, st.session_state.organization_code, st.session_state.player_license_number, max_deals=36)
-                else:
-                    # Get boards data with progress bar by processing boards one by one using the existing function
-                    boards_dfs = {'boards': None, 'score_frequency': None}
-                    
-                    try:
-                        
-                        async def get_boards_with_progress():
-                            # First, get the route data to see which boards this player actually played
-                            # We need to find the player's team first to get the route data
-                            # teams_df = await mlBridgeBPLib.get_teams_by_tournament_async(st.session_state.tournament_id, st.session_state.organization_code)
-                            
-                            # # Normalize player_id by stripping leading zeros for robust string comparison
-                            # norm_player_id = st.session_state.player_license_number.lstrip('0')
-                            
-                            # # Find the team where the player_id matches either Player1_ID or Player2_ID
-                            # player_team = teams_df.filter(
-                            #     (pl.col('Player1_ID').str.strip_chars_start('0') == norm_player_id) | 
-                            #     (pl.col('Player2_ID').str.strip_chars_start('0') == norm_player_id)
-                            # )
-                            
-                            # # Check if player was found
-                            # if len(player_team) == 0:
-                            #     raise ValueError(f"Player {st.session_state.player_license_number} not found in tournament {st.session_state.tournament_id}, club {st.session_state.organization_code}")
-                            
-                            # # Get the section and team number from the extracted data
-                            # sc = player_team['Section'].first()
-                            # team_number = player_team['Team_Number'].first()
-                            
-                            # print(f"Found player {st.session_state.player_license_number} in team {team_number}, section {sc}")
-                            
-                            # Get the route data to see which boards this team actually played
-                            # e.g. "https://www.bridgeplus.com/nos-simultanes/resultats/?p=route&res=sim&tr=S202602&cl=5802079&sc=A&eq=212"
-                            played_boards = []
-                            async with mlBridgeBPLib.get_browser_context_async() as context:
-                                try:
-                                    route_results = await mlBridgeBPLib.request_board_results_dataframe_async(st.session_state.route_url, context)
-                                    if len(route_results) == 0:
-                                        st.warning(f"No route data found for team {st.session_state.team_number}")
-                                        print(f"Route page returned empty - will try fallback: fetch boards directly")
-                                        # Don't return empty yet - try fallback below
-                                        played_boards = []  # Will trigger fallback
-                                    else:
-                                        played_boards = route_results['Board'].to_list()
-                                        print(f"Found {len(played_boards)} boards played by team {st.session_state.team_number}: {played_boards}")
-                                except Exception as e:
-                                    print(f"Error getting route data for team {st.session_state.team_number}: {e}")
-                                    print(f"Will try fallback: fetch boards directly")
-                                    # Don't raise - try fallback instead
-                                    played_boards = []  # Will trigger fallback
-                            
-                            # If no boards found in route, try fallback: fetch boards directly
-                            if not played_boards:
-                                print(f"No boards found in route data for team {st.session_state.team_number}")
-                                print("Attempting fallback: trying to fetch boards directly using p=donne URLs")
-                                print("This will try boards 1-40 (or until we find boards that exist)")
-                                # Try a reasonable range of boards (typically tournaments have 20-40 boards)
-                                max_deals = 40
-                                played_boards = list(range(1, max_deals + 1))
-                                print(f"Will try boards: {played_boards[:10]}... (up to {max_deals} boards)")
-                            
-                            # Create progress bar for board processing
-                            progress_bar = st.progress(0)
-                            progress_text = st.empty()
-                            
-                            # Now get board data only for the boards that were actually played using the existing function
-                            all_boards = []
-                            all_frequency = []
-                            
-                            async with mlBridgeBPLib.get_browser_context_async() as context:
-                                for idx, deal_num in enumerate(played_boards):
-                                    try:
-                                        # Update progress
-                                        progress = (idx + 1) / len(played_boards)
-                                        progress_bar.progress(progress)
-                                        progress_text.text(f"Processing board {idx + 1}/{len(played_boards)}: Board {deal_num}")
-                                        
-                                        # Try p=donne URL first (team-specific)
-                                        result = None
-                                        try:
-                                            result = await mlBridgeBPLib.get_board_for_player_async(
-                                                st.session_state.tournament_id, 
-                                                st.session_state.organization_code, 
-                                                st.session_state.player_license_number, 
-                                                str(deal_num), 
-                                                context
-                                            )
-                                            print(f"Board {deal_num}: get_board_for_player_async returned result with {len(result.get('boards', []))} boards")
-                                        except Exception as e1:
-                                            # If p=donne fails, try p=board URL (tournament-wide fallback)
-                                            print(f"p=donne URL failed for board {deal_num}: {e1}")
-                                            print(f"Trying fallback: p=board URL (tournament-wide board view)")
-                                            try:
-                                                board_url = f"https://www.bridgeplus.com/nos-simultanes/resultats/?p=board&res=sim&d={deal_num}&tr={st.session_state.tournament_id}"
-                                                result = await mlBridgeBPLib.request_boards_dataframe_async(board_url, context)
-                                                print(f"Board {deal_num}: p=board fallback returned result with {len(result.get('boards', []))} boards")
-                                            except Exception as e2:
-                                                print(f"Both p=donne and p=board URLs failed for board {deal_num}: {e2}")
-                                                raise e2
-                                        
-                                        if result:
-                                            boards_count = len(result.get('boards', []))
-                                            freq_count = len(result.get('score_frequency', []))
-                                            print(f"Board {deal_num}: result has {boards_count} boards, {freq_count} frequency records")
-                                            
-                                            if boards_count > 0:
-                                                all_boards.append(result['boards'])
-                                                print(f"Successfully added board {deal_num} to all_boards (total: {len(all_boards)})")
-                                            else:
-                                                print(f"Board {deal_num}: result['boards'] is empty, skipping")
-                                                
-                                            if freq_count > 0:
-                                                all_frequency.append(result['score_frequency'])
-                                        else:
-                                            print(f"Board {deal_num}: result is None, skipping")
-                                    except Exception as e:
-                                        print(f"Failed to scrape board {deal_num} for player {st.session_state.player_license_number}: {e}")
-                                        import traceback
-                                        print(f"Traceback: {traceback.format_exc()}")
-                                        continue
-                            
-                            # Complete progress bar
-                            progress_bar.progress(1.0)
-                            progress_text.text("✅ All boards processed successfully!")
-                            
-                            # Clean up progress indicators after a brief delay
-                            import time
-                            time.sleep(1)
-                            progress_bar.empty()
-                            progress_text.empty()
-                            
-                            # Combine all boards and frequency data
-                            print(f"Finished processing. Total boards fetched: {len(all_boards)}")
-                            if all_boards:
-                                combined_boards = pl.concat(all_boards, how='vertical_relaxed')
-                                print(f"Combined boards DataFrame height: {combined_boards.height}")
-                            else:
-                                combined_boards = pl.DataFrame()
-                                print("WARNING: No boards were accumulated in all_boards list!")
-                            
-                            if all_frequency:
-                                combined_frequency = pl.concat(all_frequency, how='vertical_relaxed')
-                            else:
-                                combined_frequency = pl.DataFrame()
-                            
-                            print(f"Returning boards_dfs with {combined_boards.height} boards")
-                            return {
-                                'boards': combined_boards,
-                                'score_frequency': combined_frequency
-                            }
-                        
-                        # Run the async function
-                        boards_dfs = asyncio.run(get_boards_with_progress())
-                        print(f"After asyncio.run: boards_dfs has {boards_dfs.get('boards', pl.DataFrame()).height} boards")
-                        
-                    except Exception as e:
-                        st.error(f"Error getting boards for player {st.session_state.player_license_number}: {e}")
-                        import traceback
-                        print(f"Full traceback: {traceback.format_exc()}")
-                        # Only set empty DataFrames if there was an error
-                        boards_dfs = {'boards': pl.DataFrame(), 'score_frequency': pl.DataFrame()}
-                        print("Set boards_dfs to empty DataFrames due to exception")
-
-            if st.session_state.debug_mode:
-                for k, v in boards_dfs.items():
-                    debug_capture_df(f"boards_dfs.{k}", v, source="RRN boards scrape")
-
-            df = dfs['simultaneous_roadsheets']
-            # 'roadsheets_deals_dealNumber', 'roadsheets_deals_opponentsAvgNote', 'roadsheets_deals_opponentsNote', 'roadsheets_deals_opponentsOrientation', 'roadsheets_deals_opponentsScore',
-            # 'roadsheets_deals_teamAvgNote', 'roadsheets_deals_teamNote', 'roadsheets_deals_teamOrientation', 'roadsheets_deals_teamScore',
-            # 'roadsheets_teams_cpt', 'roadsheets_player_[nesw]'
-            if st.session_state.pair_direction == 'NS':
-                # not liking that only one of the two columns (nsScore or ewScore) has a value. I prefer to have both with opposite signs.
-                # although this may be an issue for director adjustments. Creating new columns (Score_NS and Score_EW) with opposite signs.
-                df = df.with_columns([
-                    pl.when(pl.col('roadsheets_deals_teamScore').str.contains(r'^\d+$'))
-                        .then(pl.col('roadsheets_deals_teamScore'))
-                        .otherwise('-'+pl.col('roadsheets_deals_opponentsScore'))
-                        .cast(pl.Int16)
-                        .alias('Score_NS'),
-                ])
-                df = df.with_columns([
-                    pl.when(pl.col('roadsheets_deals_opponentsScore').str.contains(r'^\d+$'))
-                        .then(pl.col('roadsheets_deals_opponentsScore'))
-                        .otherwise('-'+pl.col('roadsheets_deals_teamScore'))
-                        .cast(pl.Int16)
-                        .alias('Score_EW'),
-                ])
-                df = df.with_columns([
-                    pl.col('roadsheets_deals_teamNote').cast(pl.Float32).alias('MP_NS'),
-                    pl.col('roadsheets_deals_opponentsNote').cast(pl.Float32).alias('MP_EW'),
-                ])
-                df = df.with_columns(
-                    (pl.col('roadsheets_deals_teamAvgNote')/100).round(2).alias('Pct_NS'),
-                    (pl.col('roadsheets_deals_opponentsAvgNote')/100).round(2).alias('Pct_EW'),
-                )
-                df = df.with_columns([
-                    pl.col('roadsheets_teams_players').list.get(0).alias('Player_Name_N'),
-                    pl.col('roadsheets_teams_players').list.get(1).alias('Player_Name_S'),
-                    pl.col('roadsheets_teams_opponents').list.get(0).alias('Player_Name_E'),
-                    pl.col('roadsheets_teams_opponents').list.get(1).alias('Player_Name_W'),
-                ])
-            else:
-                df = df.with_columns([
-                    pl.when(pl.col('roadsheets_deals_teamScore').str.contains(r'^\d+$'))
-                        .then(pl.col('roadsheets_deals_teamScore'))
-                        .otherwise('-'+pl.col('roadsheets_deals_opponentsScore'))
-                        .cast(pl.Int16)
-                        .alias('Score_EW'),
-                ])
-                df = df.with_columns([
-                    pl.when(pl.col('roadsheets_deals_opponentsScore').str.contains(r'^\d+$'))
-                        .then(pl.col('roadsheets_deals_opponentsScore'))
-                        .otherwise('-'+pl.col('roadsheets_deals_teamScore'))
-                        .cast(pl.Int16)
-                        .alias('Score_NS'),
-                ])
-                df = df.with_columns([
-                    pl.col('roadsheets_deals_teamNote').cast(pl.Float32).alias('MP_EW'),
-                    pl.col('roadsheets_deals_opponentsNote').cast(pl.Float32).alias('MP_NS'),
-                ])
-                df = df.with_columns(
-                    (pl.col('roadsheets_deals_teamAvgNote')/100).round(2).alias('Pct_EW'),
-                    (pl.col('roadsheets_deals_opponentsAvgNote')/100).round(2).alias('Pct_NS'),
-                )
-                df = df.with_columns([
-                    pl.col('roadsheets_teams_players').list.get(0).alias('Player_Name_E'),
-                    pl.col('roadsheets_teams_players').list.get(1).alias('Player_Name_W'),
-                    pl.col('roadsheets_teams_opponents').list.get(0).alias('Player_Name_N'),
-                    pl.col('roadsheets_teams_opponents').list.get(1).alias('Player_Name_S'),
-                ])
-            df = df.with_columns([
-                pl.col('roadsheets_deals_dealNumber').cast(pl.UInt32).alias('Board'),
-                pl.lit(st.session_state.team_id).alias('team_id'),
-                pl.lit(st.session_state.organization_code).alias('team_organization_code'),
-            ])
-            # df = df.with_columns([
-            #     pl.col('roadsheets_player_n').alias('Player_Name_N'),
-            #     pl.col('roadsheets_player_e').alias('Player_Name_E'),
-            #     pl.col('roadsheets_player_s').alias('Player_Name_S'),
-            #     pl.col('roadsheets_player_w').alias('Player_Name_W'),
-            # ])
-            df = df.select([pl.exclude('^roadsheets_.*$')])
-            # # create columns to match missing deal related columns
-            # simultaneous_tournaments_df = simultaneous_tournaments_df.with_columns([
-            #     pl.lit(st.session_state.tournament_id).alias('tournament_id'),
-            #     pl.lit(st.session_state.organization_code).alias('club_id'),
-            # ])
-            # simultaneous_tournaments_df = simultaneous_tournaments_df.with_columns([
-            #     pl.when(pl.col('team_orientation') == 'NS').then(pl.col('team_percent').cast(pl.Float64)/100).otherwise(1-(pl.col('team_percent').cast(pl.Float64)/100)).alias('Pct_NS'),
-            # ])
-            # simultaneous_tournaments_df = simultaneous_tournaments_df.with_columns([
-            #     pl.when(pl.col('team_orientation') == 'EW').then(pl.col('team_percent').cast(pl.Float64)/100).otherwise(1-(pl.col('team_percent').cast(pl.Float64)/100)).alias('Pct_EW'),
-            # ])
-            # player_n_df = simultaneous_tournaments_df.filter(pl.col('team_orientation') == 'NS').filter(pl.col('team_players_position') == 1).drop('team_players_position')
-            # player_n_df = player_n_df['team_organization_code','team_id','team_table_number','team_players_id','team_players_firstname','team_players_lastname']
-            # player_n_df = player_n_df.rename({'team_players_id':'Player_ID_N','team_players_firstname':'Player_Name_N','team_players_lastname':'Player_Lastname_N'})
-            # player_e_df = simultaneous_tournaments_df.filter(pl.col('team_orientation') == 'EW').filter(pl.col('team_players_position') == 1).drop('team_players_position')
-            # player_e_df = player_e_df['team_organization_code','team_id','team_table_number','team_players_id','team_players_firstname','team_players_lastname']
-            # player_e_df = player_e_df.rename({'team_players_id':'Player_ID_E','team_players_firstname':'Player_Name_E','team_players_lastname':'Player_Lastname_E'})
-            # player_s_df = simultaneous_tournaments_df.filter(pl.col('team_orientation') == 'NS').filter(pl.col('team_players_position') == 2).drop('team_players_position')
-            # player_s_df = player_s_df['team_organization_code','team_id','team_table_number','team_players_id','team_players_firstname','team_players_lastname']
-            # player_s_df = player_s_df.rename({'team_players_id':'Player_ID_S','team_players_firstname':'Player_Name_S','team_players_lastname':'Player_Lastname_S'})
-            # player_w_df = simultaneous_tournaments_df.filter(pl.col('team_orientation') == 'EW').filter(pl.col('team_players_position') == 2).drop('team_players_position')
-            # player_w_df = player_w_df['team_organization_code','team_id','team_table_number','team_players_id','team_players_firstname','team_players_lastname']
-            # player_w_df = player_w_df.rename({'team_players_id':'Player_ID_W','team_players_firstname':'Player_Name_W','team_players_lastname':'Player_Lastname_W'})
-            # pairs_ns_df = player_n_df.join(player_s_df,on=('team_id','team_organization_code','team_table_number'),how='inner')
-            # pairs_ew_df = player_e_df.join(player_w_df,on=('team_id','team_organization_code','team_table_number'),how='inner')
-            simultaneous_tournaments_df = simultaneous_tournaments_df.with_columns([
-                # mlBridgeAugmentLib.py wants Player_ID_[NESW] to be Utf8
-                pl.col('team_players_id').cast(pl.Utf8).alias('team_players_id'),
-            ])
-            # todo: section_name needs to be used to make unique.
-            # Easier to work with a unique id for each team: team_organization_code + section_name + team_orientation + team_table_number?
-            # Easier to work with a unique id for each player: team_organization_code + section_name + player_orientation + team_table_number?
-            player_n_df = simultaneous_tournaments_df.filter(pl.col('team_orientation') == 'NS').filter(pl.col('team_players_position') == 1).drop('team_players_position')
-            player_n_df = player_n_df['team_organization_code','team_table_number','team_players_id']
-            player_n_df = player_n_df.rename({'team_players_id':'Player_ID_N'})
-            player_e_df = simultaneous_tournaments_df.filter(pl.col('team_orientation') == 'EW').filter(pl.col('team_players_position') == 1).drop('team_players_position')
-            player_e_df = player_e_df['team_organization_code','team_table_number','team_players_id']
-            player_e_df = player_e_df.rename({'team_players_id':'Player_ID_E'})
-            player_s_df = simultaneous_tournaments_df.filter(pl.col('team_orientation') == 'NS').filter(pl.col('team_players_position') == 2).drop('team_players_position')
-            player_s_df = player_s_df['team_organization_code','team_table_number','team_players_id']
-            player_s_df = player_s_df.rename({'team_players_id':'Player_ID_S'})
-            player_w_df = simultaneous_tournaments_df.filter(pl.col('team_orientation') == 'EW').filter(pl.col('team_players_position') == 2).drop('team_players_position')
-            player_w_df = player_w_df['team_organization_code','team_table_number','team_players_id']
-            player_w_df = player_w_df.rename({'team_players_id':'Player_ID_W'})
-            # this code will probably work for creating 'Pair_Number_(NS|EW)' columns. instead of below method?
-            #pair_ns_df = simultaneous_tournaments_df.filter(pl.col('team_orientation') == 'NS')
-            #pair_ns_df = pair_ns_df['team_organization_code','team_table_number']
-            #pair_ns_df = pair_ns_df.rename({'team_table_number':'Pair_Number_NS'})
-            #pair_ew_df = simultaneous_tournaments_df.filter(pl.col('team_orientation') == 'EW')
-            #pair_ew_df = pair_ew_df['team_organization_code','team_table_number']
-            #pair_ew_df = pair_ew_df.rename({'team_table_number':'Pair_Number_EW'})
-            boards_df = boards_dfs['boards']
-            # todo: looks like board data reportedly cannot be found but actually is available at: https://www.bridgeplus.com/nos-simultanes/resultats/?p=board&res=sim&d=1&tr=S202639
-            if boards_df.height == 0:
-                error_msg = f"No boards found for tournament {st.session_state.tournament_id}"
-                error_msg += f"\n\nThis usually means:"
-                error_msg += f"\n  1. The route page (p=route) returned no boards"
-                error_msg += f"\n  2. The fallback (trying boards 1-40 directly) also found no boards"
-                error_msg += f"\n\nPossible causes:"
-                error_msg += f"\n  1. Team didn't play any boards"
-                error_msg += f"\n  2. Route page structure changed (expected div.row > div.col-1 a structure)"
-                error_msg += f"\n  3. Incorrect team/section/club parameters"
-                error_msg += f"\n  4. Board detail pages (p=donne) are not accessible or return errors"
-                error_msg += f"\n  5. Route URL: {st.session_state.get('route_url', 'Not set')}"
-                error_msg += f"\n\nNote: Board detail pages (p=board) exist but require different parsing."
-                error_msg += f"\nExample: https://www.bridgeplus.com/nos-simultanes/resultats/?p=board&res=sim&d=1&tr={st.session_state.tournament_id}"
-                raise ValueError(error_msg)
-            
-            # Debug: Check what columns we actually have
-            print(f"Boards DataFrame columns: {boards_df.columns}")
-            print(f"Boards DataFrame shape: {boards_df.shape}")
-            if st.session_state.debug_mode:
-                st.write("**Debug: Boards DataFrame sample:**")
-                st.dataframe(boards_df.head(3))
-            
-            boards_df = boards_df.with_columns([
-                pl.lit(st.session_state.tournament_id).alias('tournament_id'),
-                pl.lit(st.session_state.organization_code).alias('club_id'),
-                pl.lit(st.session_state.tournament_date).alias('Date'),
-                pl.lit(st.session_state.section_name).alias('Section_Name'),
-                #pl.lit(st.session_state.team_id).alias('team_id'),
-                pl.lit(st.session_state.player_license_number).cast(pl.Int64).alias('team_license_number'),
-                pl.lit(st.session_state.player_id).cast(pl.Int64).alias('Player_ID'),
-                pl.lit(st.session_state.partner_id).cast(pl.Int64).alias('Partner_ID'),
-                pl.lit(st.session_state.player_direction).alias('Player_Direction'),
-                pl.lit(st.session_state.pair_direction).alias('Pair_Direction'),
-            ])
-            
-            # Debug: Check boards_df before joins
-            print(f"Before joins - boards_df shape: {boards_df.shape}")
-            print(f"Before joins - boards_df columns: {boards_df.columns}")
-            if boards_df.height > 0:
-                print(f"Before joins - sample Pair_Number values: {boards_df['Pair_Number'].unique().to_list()[:5]}")
-                print(f"Before joins - sample Club_ID values: {boards_df['Club_ID'].unique().to_list()[:5]}")
-                print(f"Before joins - sample club_id values: {boards_df['club_id'].unique().to_list()[:5]}")
-            
-            # Debug: Check player dataframes before joins
-            print(f"player_n_df shape: {player_n_df.shape}")
-            if player_n_df.height > 0:
-                print(f"player_n_df sample team_table_number: {player_n_df['team_table_number'].unique().to_list()[:5]}")
-                print(f"player_n_df sample team_organization_code: {player_n_df['team_organization_code'].unique().to_list()[:5]}")
-            
-            if st.session_state.pair_direction == 'NS':
-                # Use LEFT joins to preserve boards even when player IDs don't match
-                # This is necessary because BridgePlus and FFBridge use different numbering systems
-                print(f"Joining with player_n_df...")
-                boards_df = boards_df.join(player_n_df,left_on=('club_id','Pair_Number'),right_on=('team_organization_code','team_table_number'),how='left')
-                print(f"After player_n_df join - boards_df shape: {boards_df.shape}")
-                
-                print(f"Joining with player_e_df...")
-                boards_df = boards_df.join(player_e_df,left_on=('club_id','Opponent_Pair_Number'),right_on=('team_organization_code','team_table_number'),how='left')
-                print(f"After player_e_df join - boards_df shape: {boards_df.shape}")
-                
-                print(f"Joining with player_s_df...")
-                boards_df = boards_df.join(player_s_df,left_on=('club_id','Pair_Number'),right_on=('team_organization_code','team_table_number'),how='left')
-                print(f"After player_s_df join - boards_df shape: {boards_df.shape}")
-                
-                print(f"Joining with player_w_df...")
-                boards_df = boards_df.join(player_w_df,left_on=('club_id','Opponent_Pair_Number'),right_on=('team_organization_code','team_table_number'),how='left')
-                print(f"After player_w_df join - boards_df shape: {boards_df.shape}")
-                
-                boards_df = boards_df.with_columns([
-                    pl.col('Pair_Number').alias('Pair_Number_NS'),
-                    pl.col('Opponent_Pair_Number').alias('Pair_Number_EW'),
-                ])
-                
-                # Fill in player IDs from session state for the user's pair if joins didn't match
-                # This handles the case where BridgePlus and FFBridge use different numbering
-                # Check if joins failed (columns don't exist or are all null)
-                needs_player_ids = ('Player_ID_N' not in boards_df.columns or 
-                                   (boards_df.height > 0 and boards_df['Player_ID_N'].is_null().all()))
-                if needs_player_ids:
-                    print("Player IDs not found from joins, populating from session state...")
-                    boards_df = boards_df.with_columns([
-                        pl.lit(str(st.session_state.player_id if st.session_state.player_direction == 'N' else st.session_state.partner_id if st.session_state.partner_direction == 'N' else '')).alias('Player_ID_N'),
-                        pl.lit(str(st.session_state.player_id if st.session_state.player_direction == 'S' else st.session_state.partner_id if st.session_state.partner_direction == 'S' else '')).alias('Player_ID_S'),
-                        pl.lit('').alias('Player_ID_E'),  # Opponents - unknown
-                        pl.lit('').alias('Player_ID_W'),  # Opponents - unknown
-                    ])
-            else:
-                # Use LEFT joins to preserve boards even when player IDs don't match
-                # This is necessary because BridgePlus and FFBridge use different numbering systems
-                print(f"Joining with player_n_df...")
-                boards_df = boards_df.join(player_n_df,left_on=('club_id','Opponent_Pair_Number'),right_on=('team_organization_code','team_table_number'),how='left')
-                print(f"After player_n_df join - boards_df shape: {boards_df.shape}")
-                
-                print(f"Joining with player_e_df...")
-                boards_df = boards_df.join(player_e_df,left_on=('club_id','Pair_Number'),right_on=('team_organization_code','team_table_number'),how='left')
-                print(f"After player_e_df join - boards_df shape: {boards_df.shape}")
-                
-                print(f"Joining with player_s_df...")
-                boards_df = boards_df.join(player_s_df,left_on=('club_id','Opponent_Pair_Number'),right_on=('team_organization_code','team_table_number'),how='left')
-                print(f"After player_s_df join - boards_df shape: {boards_df.shape}")
-                
-                print(f"Joining with player_w_df...")
-                boards_df = boards_df.join(player_w_df,left_on=('club_id','Pair_Number'),right_on=('team_organization_code','team_table_number'),how='left')
-                print(f"After player_w_df join - boards_df shape: {boards_df.shape}")
-                
-                boards_df = boards_df.with_columns([
-                    pl.col('Pair_Number').alias('Pair_Number_EW'),
-                    pl.col('Opponent_Pair_Number').alias('Pair_Number_NS'),
-                ])
-                
-                # Fill in player IDs from session state for the user's pair if joins didn't match
-                # This handles the case where BridgePlus and FFBridge use different numbering
-                # Check if joins failed (columns don't exist or are all null)
-                needs_player_ids = ('Player_ID_E' not in boards_df.columns or 
-                                   (boards_df.height > 0 and boards_df['Player_ID_E'].is_null().all()))
-                if needs_player_ids:
-                    print("Player IDs not found from joins, populating from session state...")
-                    boards_df = boards_df.with_columns([
-                        pl.lit('').alias('Player_ID_N'),  # Opponents - unknown
-                        pl.lit('').alias('Player_ID_S'),  # Opponents - unknown
-                        pl.lit(str(st.session_state.player_id if st.session_state.player_direction == 'E' else st.session_state.partner_id if st.session_state.partner_direction == 'E' else '')).alias('Player_ID_E'),
-                        pl.lit(str(st.session_state.player_id if st.session_state.player_direction == 'W' else st.session_state.partner_id if st.session_state.partner_direction == 'W' else '')).alias('Player_ID_W'),
-                    ])
-            
-            # Debug: Check boards_df before final join with roadsheets
-            print(f"Before final join with roadsheets - boards_df shape: {boards_df.shape}")
-            print(f"Before final join - df (roadsheets) shape: {df.shape}")
-            if boards_df.height > 0 and df.height > 0:
-                print(f"boards_df Board values: {sorted(boards_df['Board'].unique().to_list())}")
-                print(f"df (roadsheets) Board values: {sorted(df['Board'].unique().to_list())}")
-            
-            df = boards_df.join(df, on='Board', how='left')
-            print(f"After final join with roadsheets - df shape: {df.shape}")
-        else:
-            try:
-                df = mlBridgeFFLib.convert_ffdf_api_to_mldf(dfs)
-            except Exception as e:
-                st.error(str(e))
-                return True
-
-        if _finalize_mldf_for_report(df):
-            return True
-
-    print(f"=== change_game_state END: SUCCESS - player_id={st.session_state.player_id}, session_id={st.session_state.session_id} ===")
-    return False
+    try:
+        return _change_game_state_lancelot(player_id, session_id)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return _report_failure(f"Error preparing Lancelot report: {e}")
 
 
 def on_game_url_input_change() -> None:
@@ -2716,18 +1898,12 @@ def _apply_resolved_search_player(player_id: str, license_number: str, query: st
 
     st.session_state.pop("player_search_error", None)
     _clear_player_search_matches()
-    if is_lancelot_mode():
-        st.session_state.lancelot_player_id = str(player_id)
-        if license_number:
-            st.session_state.player_license_number = str(license_number)
-            st.session_state.player_id = str(license_number)
-        else:
-            st.session_state.player_id = str(player_id)
+    st.session_state.lancelot_player_id = str(player_id)
+    if license_number:
+        st.session_state.player_license_number = str(license_number)
+        st.session_state.player_id = str(license_number)
     else:
-        st.session_state.classic_player_id = str(player_id)
         st.session_state.player_id = str(player_id)
-        if license_number:
-            st.session_state.player_license_number = str(license_number)
     _clear_selected_session(clear_games=True)
     try:
         has_games = populate_game_urls_for_player(st.session_state.player_id)
@@ -2834,7 +2010,7 @@ def create_sidebar() -> None:
             on_change=player_search_input_on_change,
             placeholder=st.session_state.get('player_license_number', ''),
             key='player_search_input',
-            help="Digits-only license / Lancelot / Classic ID, or a fuzzy player name.",
+            help="Digits-only license or Lancelot id, or a fuzzy player name.",
         )
 
 
@@ -3152,12 +2328,8 @@ class FFBridgeApp(PostmortemBase):
         # Default before URL params are applied; URL ?player_id=... will override below.
         st.session_state.player_id = None
 
-        # Lancelot is the default identifier namespace. Never switch to Classic
-        # because of a transient health-probe result; URL ?api_source= and the
-        # sidebar remain the explicit ways to select Classic.
-        if 'api_source' not in st.session_state:
-            st.session_state.api_source = auto_detect_api_source()
-            print(f"Default API source: {st.session_state.api_source}")
+        # Classic is deprecated. A bookmarked ?api_source= cannot switch backends.
+        st.session_state.api_source = API_SOURCE_LANCELOT
 
         cache_dir = 'cache'
         pathlib.Path(cache_dir).mkdir(exist_ok=True, parents=True)
@@ -3180,9 +2352,7 @@ class FFBridgeApp(PostmortemBase):
         # not rewritten from 9500754 to 246273.
         url_pid = st.session_state.get('player_id')
         if url_pid:
-            resolved = resolve_url_player_id_param(str(url_pid))
-            if resolved != str(url_pid) and not is_lancelot_mode():
-                st.session_state.player_id = resolved
+            resolve_url_player_id_param(str(url_pid))
         
     def reset_game_data(self):
         """Reset FFBridge-specific game data."""
@@ -3430,16 +2600,10 @@ class FFBridgeApp(PostmortemBase):
                             or row.get('license_number')
                             or input_value
                         )
-                        if is_lancelot_mode():
-                            st.session_state.lancelot_player_id = str(lancelot_or_classic_id)
-                            st.session_state.player_id = str(license_number or lancelot_or_classic_id)
-                            if license_number:
-                                st.session_state.player_license_number = str(license_number)
-                        else:
-                            st.session_state.classic_player_id = str(lancelot_or_classic_id)
-                            st.session_state.player_id = str(lancelot_or_classic_id)
-                            if license_number:
-                                st.session_state.player_license_number = str(license_number)
+                        st.session_state.lancelot_player_id = str(lancelot_or_classic_id)
+                        st.session_state.player_id = str(license_number or lancelot_or_classic_id)
+                        if license_number:
+                            st.session_state.player_license_number = str(license_number)
                         
                         # Refresh live latest-game data, then populate the sidebar.
                         _clear_selected_session(clear_games=True)
@@ -3469,26 +2633,6 @@ class FFBridgeApp(PostmortemBase):
         
         # Modal dialog just updates the textbox - user must press Enter to generate report
 
-        # API source selector. Classic and Lancelot are different FFBridge
-        # backends with different id spaces; switching clears player/game state.
-        api_health = probe_api_sources()
-        st.sidebar.selectbox(
-            "API source",
-            options=[API_SOURCE_LANCELOT, API_SOURCE_CLASSIC],
-            index=[API_SOURCE_LANCELOT, API_SOURCE_CLASSIC].index(get_api_source()),
-            format_func=lambda v: API_SOURCE_LABELS[v],
-            on_change=api_source_on_change,
-            key='api_source_selectbox',
-            help="Choose which FFBridge API backend to use. Lancelot (default) powers the current ffbridge.fr website; Classic is the pre-2026 API.",
-        )
-        health_parts = []
-        for source in (API_SOURCE_LANCELOT, API_SOURCE_CLASSIC):
-            status = 'up' if api_health[source]['ok'] else f"unreachable ({api_health[source]['detail']})"
-            health_parts.append(f"{source.capitalize()}: {status}")
-        st.sidebar.caption(' | '.join(health_parts))
-        if not api_health[get_api_source()]['ok']:
-            st.sidebar.warning(f"The selected API source ({get_api_source()}) is currently unreachable.")
-
         # Player search with modal dialog
         # Initialize session state for text input if not exists (only use session state, not value= param)
         if 'player_search_input' not in st.session_state:
@@ -3516,7 +2660,7 @@ class FFBridgeApp(PostmortemBase):
             "FFBridge license number or name",
             key='player_search_input',
             placeholder="9500754 or Robert Salita",
-            help="Digits-only license / Lancelot / Classic ID, or a fuzzy player name.",
+            help="Digits-only license or Lancelot id, or a fuzzy player name.",
         )
             submitted = st.form_submit_button("Go", type="primary", use_container_width=True)
 
