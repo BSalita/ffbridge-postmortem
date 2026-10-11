@@ -172,6 +172,23 @@ class RankingTests(unittest.TestCase):
         self.assertIsNotNone(first["Rank_Diff_NS"])
         self.assertNotEqual(first["FFBridge_Global_Rank_NS"], 1)
 
+    def test_contract_type_words_become_the_trained_codes(self):
+        frame = pl.DataFrame(
+            {
+                "CT_N_S": ["Pass", "Partial", "Game", "SSlam", "GSlam"],
+                "HCP_N": [10, 11, 12, 13, 14],
+                "Dealer": ["N", "E", "S", "W", "N"],
+            }
+        )
+        aligned = predictions._align_features(
+            frame,
+            {"CT_N_S": "Float32", "HCP_N": "Float32", "Dealer": "Utf8"},
+            ["CT_N_S", "HCP_N", "Dealer"],
+        )
+        self.assertEqual(aligned["CT_N_S"].to_list(), [0.0, 1.0, 2.0, 3.0, 4.0])
+        self.assertEqual(aligned["HCP_N"].to_list(), [10, 11, 12, 13, 14])
+        self.assertEqual(aligned["Dealer"].to_list(), ["N", "E", "S", "W", "N"])
+
     def test_models_dir_skips_a_configured_path_without_checkpoints(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

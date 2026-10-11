@@ -49,6 +49,9 @@ BOARD_COLUMNS = (
     "Pct_NS_Pred",
     "Pct_Diff",
 )
+# Same ordered codes as ffbridge_prediction_data.CT_CODES. The postmortem
+# stores the words; the checkpoints were trained on the numbers.
+_CT_CODES = {"Pass": 0.0, "Partial": 1.0, "Game": 2.0, "SSlam": 3.0, "GSlam": 4.0}
 _PREDICTION_SQL_MARKERS = (
     "pct_ns_pred",
     "contract_pred",
@@ -110,6 +113,34 @@ def _dtype_from_schema(dtype_name: str) -> pl.DataType:
     return pl.Utf8
 
 
+def _align_features(
+    frame: pl.DataFrame,
+    feature_dtypes: Dict[str, Any],
+    required: List[str],
+) -> pl.DataFrame:
+    """Cast model inputs. Contract-type words become the trained numeric codes."""
+    aligned = frame
+    for column in required:
+        expected = _dtype_from_schema(str(feature_dtypes.get(column, "Float32")))
+        if column not in aligned.columns:
+            aligned = aligned.with_columns(pl.lit(None).cast(expected).alias(column))
+            continue
+        dtype = aligned.schema[column]
+        if expected in (pl.Float32, pl.Float64) and dtype in (pl.Utf8, pl.String):
+            aligned = aligned.with_columns(
+                pl.col(column)
+                .cast(pl.Utf8)
+                .replace_strict(_CT_CODES, default=None)
+                .cast(pl.Float32)
+                .fill_null(0.0)
+                .alias(column)
+            )
+            continue
+        if dtype != expected and expected == pl.Utf8:
+            aligned = aligned.with_columns(pl.col(column).cast(pl.Utf8, strict=False))
+    return aligned
+
+
 def _predict_targets(frame: pl.DataFrame) -> Tuple[pl.DataFrame, Optional[str]]:
     """Add model outputs. Missing checkpoints leave the prediction columns null."""
     directory = models_dir()
@@ -138,13 +169,7 @@ def _predict_targets(frame: pl.DataFrame) -> Tuple[pl.DataFrame, Optional[str]]:
         required = list(schema.get("numerical_feature_cols") or []) + list(
             schema.get("categorical_feature_cols") or []
         )
-        aligned = out
-        for column in required:
-            expected = _dtype_from_schema(str(feature_dtypes.get(column, "Float32")))
-            if column not in aligned.columns:
-                aligned = aligned.with_columns(pl.lit(None).cast(expected).alias(column))
-            elif aligned.schema[column] != expected and expected == pl.Utf8:
-                aligned = aligned.with_columns(pl.col(column).cast(pl.Utf8, strict=False))
+        aligned = _align_features(out, feature_dtypes, required)
         try:
             predicted = predict_model(
                 directory,
