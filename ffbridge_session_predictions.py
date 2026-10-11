@@ -103,7 +103,7 @@ def _elo_results_path() -> Optional[Path]:
         path
         for directory in _ELO_CACHE_DIRS
         if directory.is_dir()
-        for path in directory.glob("*.results.parquet")
+        for path in directory.glob("*Lancelot_API*.results.parquet")
     ]
     return max(found, key=lambda path: path.stat().st_mtime) if found else None
 
