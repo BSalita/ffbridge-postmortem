@@ -19,9 +19,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import polars as pl
 
-DEFAULT_MODELS_DIR = Path(
-    os.environ.get("FFBRIDGE_SAVED_MODELS", r"E:\bridge\data\ffbridge\SavedModels")
-)
+_HOST_MODELS_DIR = Path(r"E:\bridge\data\ffbridge\SavedModels")
+# postmortem_start.ps1 stages the host checkpoints onto the /data mount.
+_STAGED_MODELS_DIR = Path("/data/_wslc_host/ffbridge-SavedModels")
+_PUBLISHED_MODELS_DIR = Path("/data/ffbridge/SavedModels")
 TARGETS = ("Declarer_Direction", "Contract", "Declarer_Pct")
 RANKING_COLUMNS = (
     "Pair",
@@ -59,8 +60,28 @@ _PREDICTION_SQL_MARKERS = (
 )
 
 
+def _checkpoints_present(directory: Path) -> bool:
+    return any(
+        (directory / f"{_model_name(target)}_schema.json").is_file()
+        for target in TARGETS
+    )
+
+
 def models_dir() -> Path:
-    return DEFAULT_MODELS_DIR
+    """First directory that actually contains the club checkpoints.
+
+    A configured path that does not exist is skipped. The container cannot
+    see ``E:\\bridge\\data``, so the staged mount is checked as well.
+    """
+    configured = os.environ.get("FFBRIDGE_SAVED_MODELS")
+    candidates = []
+    if configured:
+        candidates.append(Path(configured))
+    candidates.extend((_STAGED_MODELS_DIR, _PUBLISHED_MODELS_DIR, _HOST_MODELS_DIR))
+    for directory in candidates:
+        if _checkpoints_present(directory):
+            return directory
+    return Path(configured) if configured else _HOST_MODELS_DIR
 
 
 def sql_needs_predictions(sql: str) -> bool:

@@ -1,3 +1,5 @@
+import os
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -121,6 +123,28 @@ class RankingTests(unittest.TestCase):
             )
         self.assertFalse(payload["predictions_available"])
         self.assertGreaterEqual(payload["row_count"], 1)
+
+    def test_models_dir_skips_a_configured_path_without_checkpoints(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            empty = root / "empty"
+            found = root / "found"
+            empty.mkdir()
+            found.mkdir()
+            (
+                found / "ffbridge_club_predicted_contract_torch_model_schema.json"
+            ).write_text("{}", encoding="utf-8")
+            with (
+                patch.dict(os.environ, {"FFBRIDGE_SAVED_MODELS": str(empty)}),
+                patch.object(
+                    predictions,
+                    "_STAGED_MODELS_DIR",
+                    found,
+                ),
+                patch.object(predictions, "_PUBLISHED_MODELS_DIR", root / "absent"),
+                patch.object(predictions, "_HOST_MODELS_DIR", root / "also-absent"),
+            ):
+                self.assertEqual(predictions.models_dir(), found)
 
 
 if __name__ == "__main__":

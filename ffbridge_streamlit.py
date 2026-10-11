@@ -1768,6 +1768,7 @@ def _attach_session_predictions() -> None:
     session_id = st.session_state.get("session_id")
     if (
         st.session_state.get("predictions_cached")
+        and st.session_state.get("predictions_available")
         and st.session_state.get("predictions_session_id") == str(session_id)
     ):
         return
@@ -1778,6 +1779,7 @@ def _attach_session_predictions() -> None:
     )
     st.session_state.df = predicted
     st.session_state.predictions_cached = True
+    st.session_state.predictions_available = bool(info.get("predictions_available"))
     st.session_state.predictions_session_id = str(session_id)
     get_session_duckdb_connection().register("self", predicted)
     warning = info.get("warning")
