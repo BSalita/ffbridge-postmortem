@@ -172,10 +172,10 @@ class RankingTests(unittest.TestCase):
         self.assertIsNotNone(first["Rank_Diff_NS"])
         self.assertNotEqual(first["FFBridge_Global_Rank_NS"], 1)
 
-    def test_same_prediction_at_every_table_does_not_rank_by_table(self):
-        # East-West tables 1-2 and North-South tables 1-2. The model score is a
-        # property of the deal, so the old average put every East-West pair
-        # ahead of every North-South pair and the places followed the table numbers.
+    def test_same_prediction_at_every_table_shares_a_place(self):
+        # The deal score is the same at every table. East-West receive the
+        # complement, so they share one place and North-South share the next.
+        # Neither direction is numbered by table, and the field is not all 1s.
         rows = []
         for board, pct in ((1, 0.42), (2, 0.40)):
             for table in (1, 2):
@@ -191,13 +191,12 @@ class RankingTests(unittest.TestCase):
                     "Pct_NS_Pred": pct,
                 })
         ranked = predictions.ranking_rows(pl.DataFrame(rows), None)
-        self.assertEqual(ranked.height, 4)
-        self.assertEqual(set(ranked["Club_Rank_Pred"].to_list()), {1})
         east = ranked.filter(pl.col("Orientation") == "EW").sort("Table")
         north = ranked.filter(pl.col("Orientation") == "NS").sort("Table")
         self.assertEqual(east["Global_Pct_Pred"].to_list(), [59.0, 59.0])
         self.assertEqual(north["Global_Pct_Pred"].to_list(), [41.0, 41.0])
-        self.assertNotEqual(north["Club_Rank_Pred"].to_list(), [3, 4])
+        self.assertEqual(east["Club_Rank_Pred"].to_list(), [1, 1])
+        self.assertEqual(north["Club_Rank_Pred"].to_list(), [3, 3])
 
     def test_a_higher_table_prediction_ranks_ahead_of_the_other_tables(self):
         boards = pl.DataFrame({
