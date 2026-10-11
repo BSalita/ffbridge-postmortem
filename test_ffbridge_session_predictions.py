@@ -238,6 +238,15 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(aligned["HCP_N"].to_list(), [10, 11, 12, 13, 14])
         self.assertEqual(aligned["Dealer"].to_list(), ["N", "E", "S", "W", "N"])
 
+    def test_missing_elo_uses_the_models_neutral_training_value(self):
+        aligned = predictions._align_features(
+            pl.DataFrame({"Elo_NS": [1500.0, None]}),
+            {"Elo_NS": "Float32"},
+            ["Elo_NS"],
+            {"Elo_NS": {"mean": 1425.0}},
+        )
+        self.assertEqual(aligned["Elo_NS"].to_list(), [1500.0, 1425.0])
+
     def test_models_dir_skips_a_configured_path_without_checkpoints(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -259,6 +268,37 @@ class RankingTests(unittest.TestCase):
                 patch.object(predictions, "_HOST_MODELS_DIR", root / "also-absent"),
             ):
                 self.assertEqual(predictions.models_dir(), found)
+
+    def test_attach_elo_features_uses_pre_session_player_and_pair_ratings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "elo.results.parquet"
+            pl.DataFrame(
+                {
+                    "tournament_id": ["123", "123"],
+                    "player1_id": ["1", "3"],
+                    "player2_id": ["2", "4"],
+                    "player1_scratch_elo_before": [1500.0, 1300.0],
+                    "player2_scratch_elo_before": [1400.0, 1200.0],
+                    "scratch_pair_elo": [1475.0, 1275.0],
+                }
+            ).write_parquet(path)
+            boards = pl.DataFrame(
+                {
+                    "Player_ID_N": ["1"],
+                    "Player_ID_S": ["2"],
+                    "Player_ID_E": ["3"],
+                    "Player_ID_W": ["4"],
+                }
+            )
+            with patch.object(predictions, "_elo_results_path", return_value=path):
+                attached = predictions._attach_elo_features(boards, "123")
+
+            self.assertEqual(attached["Elo_N"][0], 1500.0)
+            self.assertEqual(attached["Elo_S"][0], 1400.0)
+            self.assertEqual(attached["Elo_E"][0], 1300.0)
+            self.assertEqual(attached["Elo_W"][0], 1200.0)
+            self.assertEqual(attached["Elo_NS"][0], 1475.0)
+            self.assertEqual(attached["Elo_EW"][0], 1275.0)
 
 
 if __name__ == "__main__":

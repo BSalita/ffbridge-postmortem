@@ -25,6 +25,11 @@ _HOST_MODELS_DIR = Path(r"E:\bridge\data\ffbridge\SavedModels")
 # postmortem_start.ps1 stages the host checkpoints onto the /data mount.
 _STAGED_MODELS_DIR = Path("/data/_wslc_host/ffbridge-SavedModels")
 _PUBLISHED_MODELS_DIR = Path("/data/ffbridge/SavedModels")
+_ELO_CACHE_DIRS = (
+    Path("/data/ffbridge/elo_cache"),
+    Path(__file__).resolve().parent.parent / "data" / "ffbridge" / "elo_cache",
+    Path(r"E:\bridge\data\ffbridge\elo_cache"),
+)
 TARGETS = ("Declarer_Direction", "Contract", "Declarer_Pct")
 RANKING_COLUMNS = (
     "Pair",
@@ -89,6 +94,93 @@ def models_dir() -> Path:
     return Path(configured) if configured else _HOST_MODELS_DIR
 
 
+def _elo_results_path() -> Optional[Path]:
+    configured = os.environ.get("FFBRIDGE_ELO_RESULTS")
+    if configured:
+        path = Path(configured)
+        return path if path.is_file() else None
+    found = [
+        path
+        for directory in _ELO_CACHE_DIRS
+        if directory.is_dir()
+        for path in directory.glob("*.results.parquet")
+    ]
+    return max(found, key=lambda path: path.stat().st_mtime) if found else None
+
+
+def _id_token(column: str) -> pl.Expr:
+    return (
+        pl.col(column)
+        .cast(pl.Utf8, strict=False)
+        .fill_null("")
+        .str.strip_chars()
+        .str.replace(r"\.0$", "")
+    )
+
+
+def _attach_elo_features(frame: pl.DataFrame, session_id: Any) -> pl.DataFrame:
+    """Attach the pre-session seat and pair Elo used by the trained models."""
+    path = _elo_results_path()
+    if path is None:
+        raise FileNotFoundError("FFBridge Elo results parquet was not found")
+    required_ids = [f"Player_ID_{seat}" for seat in "NESW"]
+    missing = [name for name in required_ids if name not in frame.columns]
+    if missing:
+        raise ValueError(f"Postmortem is missing player ids required for Elo: {missing}")
+
+    results = (
+        pl.scan_parquet(path)
+        .filter(pl.col("tournament_id").cast(pl.Utf8) == str(session_id))
+        .select(
+            _id_token("player1_id").alias("p1"),
+            _id_token("player2_id").alias("p2"),
+            pl.col("player1_scratch_elo_before").cast(pl.Float32).alias("e1"),
+            pl.col("player2_scratch_elo_before").cast(pl.Float32).alias("e2"),
+            pl.col("scratch_pair_elo").cast(pl.Float32).alias("pair_elo"),
+        )
+        .collect()
+    )
+    if results.is_empty():
+        raise ValueError(f"FFBridge Elo has no pre-session ratings for session {session_id}")
+
+    players = (
+        pl.concat(
+            [
+                results.select(pl.col("p1").alias("id"), pl.col("e1").alias("elo")),
+                results.select(pl.col("p2").alias("id"), pl.col("e2").alias("elo")),
+            ]
+        )
+        .filter(pl.col("id") != "")
+        .group_by("id")
+        .agg(pl.col("elo").mean())
+    )
+    player_ratings = dict(players.iter_rows())
+    pairs = (
+        results.with_columns(_pair_key(pl.col("p1"), pl.col("p2")).alias("key"))
+        .group_by("key")
+        .agg(pl.col("pair_elo").mean())
+    )
+    pair_ratings = dict(pairs.iter_rows())
+    out = frame.with_columns(
+        *[
+            _id_token(f"Player_ID_{seat}")
+            .replace_strict(player_ratings, default=None)
+            .cast(pl.Float32)
+            .alias(f"Elo_{seat}")
+            for seat in "NESW"
+        ],
+        _pair_key(pl.col("Player_ID_N"), pl.col("Player_ID_S"))
+        .replace_strict(pair_ratings, default=None)
+        .cast(pl.Float32)
+        .alias("Elo_NS"),
+        _pair_key(pl.col("Player_ID_E"), pl.col("Player_ID_W"))
+        .replace_strict(pair_ratings, default=None)
+        .cast(pl.Float32)
+        .alias("Elo_EW"),
+    )
+    return out
+
+
 def sql_needs_predictions(sql: str) -> bool:
     lowered = sql.lower()
     return any(marker in lowered for marker in _PREDICTION_SQL_MARKERS)
@@ -119,6 +211,7 @@ def _align_features(
     frame: pl.DataFrame,
     feature_dtypes: Dict[str, Any],
     required: List[str],
+    scaling_params: Optional[Dict[str, Any]] = None,
 ) -> pl.DataFrame:
     """Cast model inputs. Contract-type words become the trained numeric codes."""
     aligned = frame
@@ -128,6 +221,18 @@ def _align_features(
             aligned = aligned.with_columns(pl.lit(None).cast(expected).alias(column))
             continue
         dtype = aligned.schema[column]
+        if column.startswith("Elo_") and expected in (pl.Float32, pl.Float64):
+            mean = (scaling_params or {}).get(column, {}).get("mean")
+            if mean is None:
+                raise ValueError(f"Model schema has no neutral value for {column}")
+            aligned = aligned.with_columns(
+                pl.col(column)
+                .cast(expected, strict=False)
+                .fill_null(float(mean))
+                .fill_nan(float(mean))
+                .alias(column)
+            )
+            continue
         if expected in (pl.Float32, pl.Float64) and dtype in (pl.Utf8, pl.String):
             aligned = aligned.with_columns(
                 pl.col(column)
@@ -143,7 +248,10 @@ def _align_features(
     return aligned
 
 
-def _predict_targets(frame: pl.DataFrame) -> Tuple[pl.DataFrame, Optional[str]]:
+def _predict_targets(
+    frame: pl.DataFrame,
+    session_id: Any = None,
+) -> Tuple[pl.DataFrame, Optional[str]]:
     """Add model outputs. Missing checkpoints leave the prediction columns null."""
     directory = models_dir()
     missing = [
@@ -158,6 +266,23 @@ def _predict_targets(frame: pl.DataFrame) -> Tuple[pl.DataFrame, Optional[str]]:
             f"({', '.join(missing)}). Rankings use published scores only."
         )
         return _null_prediction_columns(out), warning
+    schemas = {
+        target: json.loads(
+            (directory / f"{_model_name(target)}_schema.json").read_text(encoding="utf-8")
+        )
+        for target in TARGETS
+    }
+    requires_elo = any(
+        str(name).startswith("Elo_")
+        for schema in schemas.values()
+        for name in schema.get("numerical_feature_cols") or []
+    )
+    elo_columns = {f"Elo_{seat}" for seat in "NESW"} | {"Elo_NS", "Elo_EW"}
+    if requires_elo and not elo_columns.issubset(out.columns):
+        try:
+            out = _attach_elo_features(out, session_id)
+        except Exception as exc:
+            return _null_prediction_columns(out), f"Prediction Elo unavailable: {exc}"
     try:
         from mlBridge.mlBridgeAiLib import predict_model
     except Exception as exc:
@@ -165,13 +290,13 @@ def _predict_targets(frame: pl.DataFrame) -> Tuple[pl.DataFrame, Optional[str]]:
 
     warnings: List[str] = []
     for target in TARGETS:
-        schema_path = directory / f"{_model_name(target)}_schema.json"
-        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        schema = schemas[target]
         feature_dtypes = schema.get("feature_dtypes") or {}
+        scaling_params = schema.get("scaling_params") or {}
         required = list(schema.get("numerical_feature_cols") or []) + list(
             schema.get("categorical_feature_cols") or []
         )
-        aligned = _align_features(out, feature_dtypes, required)
+        aligned = _align_features(out, feature_dtypes, required, scaling_params)
         try:
             predicted = predict_model(
                 directory,
@@ -581,7 +706,7 @@ def apply_session_predictions(
     cache_dir: Path,
 ) -> Tuple[pl.DataFrame, Dict[str, Any]]:
     """Attach board predictions and broadcast pair ranks onto every board row."""
-    predicted, warning = _predict_targets(boards)
+    predicted, warning = _predict_targets(boards, session_id)
     if "Declarer_Direction" not in predicted.columns and "Declarer" in predicted.columns:
         predicted = predicted.with_columns(pl.col("Declarer").cast(pl.Utf8).alias("Declarer_Direction"))
     ranking = load_ranking(session_id, Path(cache_dir))
