@@ -227,6 +227,40 @@ def _first_present(frame: pl.DataFrame, names: Tuple[str, ...]) -> Optional[str]
     return None
 
 
+def _canonical_key(left: Any, right: Any) -> Optional[str]:
+    """Order-independent id pair. Empty when either player id is missing."""
+    def token(value: Any) -> str:
+        if value is None:
+            return ""
+        text = str(value).strip()
+        if text.endswith(".0"):
+            text = text[:-2]
+        return text
+
+    first, second = token(left), token(right)
+    if not first or not second:
+        return None
+    return first + "|" + second if first <= second else second + "|" + first
+
+
+def _pair_key(left: pl.Expr, right: pl.Expr) -> pl.Expr:
+    def token(expr: pl.Expr) -> pl.Expr:
+        return (
+            expr.cast(pl.Utf8, strict=False)
+            .fill_null("")
+            .str.strip_chars()
+            .str.replace(r"\.0$", "")
+        )
+
+    first, second = token(left), token(right)
+    combined = (
+        pl.when(first <= second)
+        .then(first + pl.lit("|") + second)
+        .otherwise(second + pl.lit("|") + first)
+    )
+    return pl.when((first == "") | (second == "")).then(pl.lit(None)).otherwise(combined)
+
+
 def _pair_label(section: pl.Expr, table: pl.Expr, left: pl.Expr, right: pl.Expr) -> pl.Expr:
     return (
         pl.coalesce([section.fill_null(""), pl.lit("")])
@@ -336,7 +370,11 @@ def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.Da
     for name in (*RANKING_COLUMNS, "Section", "Table", "Club"):
         if name not in ranked.columns:
             ranked = ranked.with_columns(pl.lit(None).alias(name))
-    ordered = [name for name in (*RANKING_COLUMNS, "Section", "Table", "Club") if name in ranked.columns]
+    ordered = [
+        name
+        for name in (*RANKING_COLUMNS, "Section", "Table", "Club", "Left_Id", "Right_Id")
+        if name in ranked.columns
+    ]
     return ranked.select(ordered).sort(
         ["Club_Rank", "FFBridge_Global_Rank"],
         nulls_last=True,
@@ -370,6 +408,10 @@ def _official_pairs(ranking: Optional[pl.DataFrame]) -> pl.DataFrame:
     )
     section = pl.col(section_col).cast(pl.Utf8) if section_col else pl.lit("")
     table = pl.col(table_col).cast(pl.Utf8)
+    id_left = _first_present(ranking, ("team_player1_id", "player1_id"))
+    id_right = _first_present(ranking, ("team_player2_id", "player2_id"))
+    left_id = pl.col(id_left).cast(pl.Utf8) if id_left else pl.lit(None).cast(pl.Utf8)
+    right_id = pl.col(id_right).cast(pl.Utf8) if id_right else pl.lit(None).cast(pl.Utf8)
     return ranking.select(
         _pair_label(section, table, left, right).alias("Pair"),
         pl.col(orientation_col).cast(pl.Utf8).alias("Orientation"),
@@ -382,6 +424,8 @@ def _official_pairs(ranking: Optional[pl.DataFrame]) -> pl.DataFrame:
         (pl.col(club_col).cast(pl.Utf8) if club_col else pl.lit("")).alias("Club"),
         section.alias("Section"),
         table.alias("Table"),
+        left_id.alias("Left_Id"),
+        right_id.alias("Right_Id"),
     )
 
 
@@ -399,16 +443,23 @@ def _predicted_pair_scores(boards: pl.DataFrame) -> pl.DataFrame:
         section = pl.col(section_col).cast(pl.Utf8) if section_col else pl.lit("")
         left = pl.col(name_a) if name_a in boards.columns else pl.lit("")
         right = pl.col(name_b) if name_b in boards.columns else pl.lit("")
+        id_a, id_b = ("Player_ID_N", "Player_ID_S") if orientation == "NS" else ("Player_ID_E", "Player_ID_W")
         pred = pct_expr if "Pct_NS_Pred" in boards.columns else pl.lit(None, dtype=pl.Float64)
+        pair_key = (
+            _pair_key(pl.col(id_a), pl.col(id_b))
+            if id_a in boards.columns and id_b in boards.columns
+            else pl.lit(None).cast(pl.Utf8)
+        )
         work = boards.with_columns(
             section.fill_null("").alias("Section"),
             pl.col(number_col).cast(pl.Utf8).alias("Table"),
             pred.alias("_pred"),
             left.alias("_left"),
             right.alias("_right"),
+            pair_key.alias("Pair_Key"),
         )
         piece = (
-            work.group_by(["Section", "Table"])
+            work.group_by(["Section", "Table", "Pair_Key"])
             .agg(
                 pl.col("_pred").mean().alias("_pred"),
                 pl.len().alias("Boards"),
@@ -420,7 +471,7 @@ def _predicted_pair_scores(boards: pl.DataFrame) -> pl.DataFrame:
                 _pair_label(pl.col("Section"), pl.col("Table"), pl.col("_left"), pl.col("_right")).alias("Pair"),
                 (pl.col("_pred") * 100.0).alias("Global_Pct_Pred"),
             )
-            .select("Pair", "Orientation", "Section", "Table", "Global_Pct_Pred", "Boards")
+            .select("Pair", "Orientation", "Section", "Table", "Pair_Key", "Global_Pct_Pred", "Boards")
         )
         frames.append(piece)
     if not frames:
@@ -431,19 +482,29 @@ def _predicted_pair_scores(boards: pl.DataFrame) -> pl.DataFrame:
 def _match_prediction(predicted: pl.DataFrame, official: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if predicted.is_empty():
         return None
-    matched = predicted.filter(
+    key = _canonical_key(official.get("Left_Id"), official.get("Right_Id"))
+    if key and "Pair_Key" in predicted.columns:
+        matched = predicted.filter(
+            (pl.col("Orientation") == official.get("Orientation"))
+            & (pl.col("Pair_Key") == key)
+        )
+        if not matched.is_empty():
+            return matched.to_dicts()[0]
+    same_table = predicted.filter(
         (pl.col("Orientation") == official.get("Orientation"))
         & (pl.col("Table") == str(official.get("Table")))
         & (pl.col("Section").fill_null("") == str(official.get("Section") or ""))
     )
-    if matched.is_empty():
-        matched = predicted.filter(
+    if same_table.is_empty():
+        same_table = predicted.filter(
             (pl.col("Orientation") == official.get("Orientation"))
             & (pl.col("Table") == str(official.get("Table")))
         )
-    if matched.is_empty():
+    # The same table number is used at every club. Attaching an arbitrary
+    # match would give another club's prediction to this pair.
+    if same_table.height != 1:
         return None
-    return matched.to_dicts()[0]
+    return same_table.to_dicts()[0]
 
 
 def board_prediction_rows(boards: pl.DataFrame) -> pl.DataFrame:
@@ -501,17 +562,45 @@ def apply_session_predictions(
 
 def _broadcast_ranks(boards: pl.DataFrame, ranks: pl.DataFrame) -> pl.DataFrame:
     out = boards
+    stale = [
+        f"{name}_{orientation}"
+        for orientation in ("NS", "EW")
+        for name in RANKING_COLUMNS
+        if name != "Orientation" and f"{name}_{orientation}" in out.columns
+    ]
+    if stale:
+        out = out.drop(stale)
     section_col = "section_name" if "section_name" in out.columns else (
         "Section_Name" if "Section_Name" in out.columns else None
     )
+    id_columns = {"NS": ("Player_ID_N", "Player_ID_S"), "EW": ("Player_ID_E", "Player_ID_W")}
     for orientation, number_col in (("NS", "Pair_Number_NS"), ("EW", "Pair_Number_EW")):
         if number_col not in out.columns or ranks.is_empty():
             continue
-        side = ranks.filter(pl.col("Orientation") == orientation).select(
+        value_columns = [
+            pl.col(name).alias(f"{name}_{orientation}")
+            for name in RANKING_COLUMNS
+            if name != "Orientation"
+        ]
+        side = ranks.filter(pl.col("Orientation") == orientation)
+        has_ids = "Left_Id" in side.columns and "Right_Id" in side.columns
+        id_a, id_b = id_columns[orientation]
+        if has_ids and id_a in out.columns and id_b in out.columns:
+            side = side.select(
+                _pair_key(pl.col("Left_Id"), pl.col("Right_Id")).alias("_pair_key"),
+                *value_columns,
+            )
+            out = out.with_columns(_pair_key(pl.col(id_a), pl.col(id_b)).alias("_pair_key"))
+            out = out.join(side, on="_pair_key", how="left").drop("_pair_key")
+            continue
+        side = side.select(
             pl.col("Section").alias("_section"),
             pl.col("Table").alias("_table"),
-            *[pl.col(name).alias(f"{name}_{orientation}") for name in RANKING_COLUMNS if name != "Orientation"],
+            *value_columns,
         )
+        counts = side.group_by(["_section", "_table"]).len()
+        unique = counts.filter(pl.col("len") == 1).select("_section", "_table")
+        side = side.join(unique, on=["_section", "_table"], how="inner")
         out = out.with_columns(
             (pl.col(section_col).cast(pl.Utf8) if section_col else pl.lit("")).alias("_section"),
             pl.col(number_col).cast(pl.Utf8).alias("_table"),

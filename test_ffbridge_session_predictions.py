@@ -124,6 +124,54 @@ class RankingTests(unittest.TestCase):
         self.assertFalse(payload["predictions_available"])
         self.assertGreaterEqual(payload["row_count"], 1)
 
+    def test_same_table_number_at_two_clubs_keeps_this_clubs_rank(self):
+        ranking = pl.DataFrame(
+            {
+                "sessionScore": [60.0, 50.0, 90.0, 40.0, 40.0, 10.0],
+                "rank": [2, 3, 1, 4, 5, 6],
+                "simultaneousId": ["A", "A", "B", "B", "A", "B"],
+                "orientation": ["NS", "NS", "NS", "NS", "EW", "EW"],
+                "section": ["A", "A", "A", "A", "A", "A"],
+                "tableNumber": [1, 2, 1, 2, 1, 1],
+                "team_player1_id": [1, 3, 5, 7, 11, 13],
+                "team_player2_id": [2, 4, 6, 8, 12, 14],
+                "team_player1_firstName": ["Ann", "Cara", "Other", "Other", "Ed", "Other"],
+                "team_player1_lastName": ["N", "N", "N", "N", "E", "E"],
+                "team_player2_firstName": ["Sue", "Dee", "Other", "Other", "Wes", "Other"],
+                "team_player2_lastName": ["S", "S", "S", "S", "W", "W"],
+            }
+        )
+        boards = pl.DataFrame(
+            {
+                "section_name": ["A", "A"],
+                "Section_Name": ["A", "A"],
+                "Pair_Number_NS": [1, 2],
+                "Pair_Number_EW": [1, 1],
+                "Player_ID_N": [1, 3],
+                "Player_ID_S": [2, 4],
+                "Player_ID_E": [11, 11],
+                "Player_ID_W": [12, 12],
+                "Player_Name_N": ["Ann N", "Cara N"],
+                "Player_Name_S": ["Sue S", "Dee S"],
+                "Player_Name_E": ["Ed E", "Ed E"],
+                "Player_Name_W": ["Wes W", "Wes W"],
+                "Pct_NS": [0.60, 0.50],
+                "Pct_NS_Pred": [0.55, 0.45],
+                "Board": [1, 2],
+            }
+        )
+        attached = predictions._broadcast_ranks(boards, predictions.ranking_rows(boards, ranking))
+        self.assertEqual(attached.height, boards.height)
+        first = attached.filter(pl.col("Player_ID_N") == 1).row(0, named=True)
+        second = attached.filter(pl.col("Player_ID_N") == 3).row(0, named=True)
+        self.assertEqual(first["Club_Rank_NS"], 1)
+        self.assertEqual(second["Club_Rank_NS"], 2)
+        self.assertEqual(first["FFBridge_Global_Rank_NS"], 2)
+        self.assertIsNotNone(first["Club_Rank_Pred_NS"])
+        self.assertIsNotNone(first["Our_Global_Rank_NS"])
+        self.assertIsNotNone(first["Rank_Diff_NS"])
+        self.assertNotEqual(first["FFBridge_Global_Rank_NS"], 1)
+
     def test_models_dir_skips_a_configured_path_without_checkpoints(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
