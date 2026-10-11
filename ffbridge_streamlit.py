@@ -1758,6 +1758,33 @@ def _report_failure(message: Any) -> bool:
     return True
 
 
+def _attach_session_predictions() -> None:
+    """Score the open session and register the predicted frame as DuckDB self."""
+    import ffbridge_session_predictions as session_predictions
+
+    df = st.session_state.get("df")
+    if df is None:
+        return
+    session_id = st.session_state.get("session_id")
+    if (
+        st.session_state.get("predictions_cached")
+        and st.session_state.get("predictions_session_id") == str(session_id)
+    ):
+        return
+    predicted, info = session_predictions.apply_session_predictions(
+        df,
+        session_id,
+        pm_create.DEFAULT_CACHE_DIR,
+    )
+    st.session_state.df = predicted
+    st.session_state.predictions_cached = True
+    st.session_state.predictions_session_id = str(session_id)
+    get_session_duckdb_connection().register("self", predicted)
+    warning = info.get("warning")
+    if warning:
+        st.sidebar.warning(warning)
+
+
 def _change_game_state_lancelot(player_id: str, session_id: Optional[int]) -> bool:
     """Lancelot branch of change_game_state. Returns True on error, False on success."""
     session_id = _normalize_session_id_arg(session_id)
@@ -1803,6 +1830,9 @@ def _change_game_state_lancelot(player_id: str, session_id: Optional[int]) -> bo
             debug_capture_df("Final Dataframe", df, source="ffbridge_postmortem_api")
         st.session_state.df = filter_dataframe(df)
         st.session_state.df_ready = True
+        st.session_state.button_title = "Summarize"
+        st.session_state.predictions_cached = False
+        st.session_state.pop("predictions_session_id", None)
         _ensure_game_results_url(st.session_state.df)
         con = get_session_duckdb_connection()
         con.register("self", st.session_state.df)
@@ -2739,6 +2769,18 @@ class FFBridgeApp(PostmortemBase):
             st.sidebar.markdown(f"[Roy René Result Page]({st.session_state.route_url})")
         # Download Personalized Report PDF button placeholder (below the link button)
         st.session_state.pdf_link = st.sidebar.empty()
+
+        if st.session_state.get("favorites") and st.session_state.get("df") is not None:
+            st.sidebar.markdown("---")
+            st.sidebar.write(
+                "Favorite prompts. Click a button, or ask a question in the box at the bottom."
+            )
+            for key, button in st.session_state.favorites["Buttons"].items():
+                if st.sidebar.button(button["title"], help=button.get("help"), key=key):
+                    st.session_state.sql_query_mode = False
+                    st.session_state.button_title = key
+                    if key == "AI_Predictions":
+                        _attach_session_predictions()
 
         # Other Morty websites
         st.sidebar.markdown("---")

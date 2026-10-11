@@ -203,7 +203,9 @@ def dataset_info() -> Dict[str, Any]:
             "is not in the historical archive yet. List playable sessions with "
             "ffbridge_postmortem_list_source_sessions. Check writer readiness "
             "without generating with ffbridge_postmortem_writer_health. Streamlit "
-            "(https://ffbridge.postmortem.chat) reads and writes the same cache."
+            "(https://ffbridge.postmortem.chat) reads and writes the same cache. "
+            "Session predictions are GET /postmortems/{player_id}/predictions/boards "
+            "and /postmortems/{player_id}/predictions/rankings."
         ),
     }
 
@@ -565,8 +567,15 @@ def process_sql_macros(sql: str, meta: Dict[str, Any]) -> str:
 
 def run_sql(df: pl.DataFrame, sql: str, meta: Dict[str, Any], limit: Optional[int] = None) -> Dict[str, Any]:
     """Run DuckDB SQL against the postmortem dataframe registered as 'self'."""
+    import ffbridge_session_predictions as session_predictions
+
     limit = max(1, min(limit or DEFAULT_SQL_ROW_LIMIT, MAX_SQL_ROW_LIMIT))
     sql = process_sql_macros(sql.strip().rstrip(";"), meta)
+    prediction_info = None
+    if session_predictions.sql_needs_predictions(sql):
+        df, prediction_info = session_predictions.apply_session_predictions(
+            df, meta.get("session_id"), CACHE_DIR
+        )
     # Same convenience as the app's ShowDataFrameTable: allow DuckDB's
     # FROM-first syntax by prepending the table when it is not referenced.
     if f"from {CON_REGISTER_NAME}" not in sql.lower():
@@ -580,13 +589,16 @@ def run_sql(df: pl.DataFrame, sql: str, meta: Dict[str, Any], limit: Optional[in
         con.close()
     truncated = result.height > limit
     result = result.head(limit)
-    return {
+    payload = {
         "sql": sql,
         "columns": result.columns,
         "rows": result.to_dicts(),
         "row_count": result.height,
         "truncated": truncated,
     }
+    if prediction_info and prediction_info.get("warning"):
+        payload["warning"] = prediction_info["warning"]
+    return payload
 
 
 def board_results(
@@ -615,6 +627,30 @@ def board_results(
         "rows": df.to_dicts(),
         "row_count": df.height,
     }
+
+
+def prediction_report(
+    player_id: str,
+    session_id: Optional[str],
+    view: str,
+    limit: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Board-by-board predictions or pair rankings for one session."""
+    import ffbridge_session_predictions as session_predictions
+
+    if view not in ("boards", "rankings"):
+        raise ValueError("view must be boards or rankings")
+    limit = max(1, min(limit or DEFAULT_SQL_ROW_LIMIT, MAX_SQL_ROW_LIMIT))
+    df, meta = load_postmortem(player_id, session_id)
+    payload = session_predictions.prediction_payload(
+        df,
+        meta.get("session_id"),
+        CACHE_DIR,
+        view=view,
+        limit=limit,
+    )
+    payload["meta"] = meta
+    return payload
 
 
 def hierarchical_board_results(

@@ -5,6 +5,10 @@ The MCP server and Streamlit app are HTTP clients of this API.
 
   python ffbridge_postmortem_api_server.py
   GET http://127.0.0.1:8517/docs
+
+Session predictions:
+  GET /postmortems/{player_id}/predictions/boards
+  GET /postmortems/{player_id}/predictions/rankings
 """
 
 from __future__ import annotations
@@ -37,7 +41,9 @@ app = FastAPI(
     title="FFBridge Postmortem API",
     description=(
         "Cached postmortem reads plus on-demand Lancelot generate "
-        "(same path Streamlit used to run in-process)."
+        "(same path Streamlit used to run in-process). "
+        "Predictions: /postmortems/{player_id}/predictions/boards and "
+        "/postmortems/{player_id}/predictions/rankings."
     ),
     version="1.0.0",
     lifespan=lifespan,
@@ -247,6 +253,26 @@ def postmortem_boards(
             pass
     df, meta = svc.load_postmortem(player_id, session_id)
     return svc.board_results(df, meta, only_my_boards=only_my_boards, columns=cols, limit=limit)
+
+
+@app.get("/postmortems/{player_id}/predictions/boards")
+def prediction_boards(
+    player_id: str,
+    session_id: Optional[str] = None,
+    limit: int = Query(svc.DEFAULT_SQL_ROW_LIMIT, ge=1, le=svc.MAX_SQL_ROW_LIMIT),
+) -> dict:
+    """Board-by-board contract, declarer, and percentage predictions."""
+    return svc.prediction_report(player_id, session_id, "boards", limit)
+
+
+@app.get("/postmortems/{player_id}/predictions/rankings")
+def prediction_rankings(
+    player_id: str,
+    session_id: Optional[str] = None,
+    limit: int = Query(svc.DEFAULT_SQL_ROW_LIMIT, ge=1, le=svc.MAX_SQL_ROW_LIMIT),
+) -> dict:
+    """Club rank, our global rank, FFBridge's global rank, and the difference."""
+    return svc.prediction_report(player_id, session_id, "rankings", limit)
 
 
 @app.get("/postmortems/{player_id}/sql")

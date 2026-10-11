@@ -79,8 +79,7 @@
 				"@Declarer_Direction_Predictions_Statistics_By_Predicted_Declarer",
 				"@Contract_Predictions_Statistics_By_Boards_We_Played",
 				"@Contract_Predictions_Statistics_By_Board",
-				"@Contract_Predictions_Statistics_By_Board_By_Contract",
-				"@Declarer_Probabilities_Statistics"
+				"@Contract_Predictions_Statistics_By_Board_By_Contract"
 			]
 		}
 	},
@@ -740,7 +739,7 @@
 			},
 			"Overall_Rankings_Predictions": {
 				"title": "Overall Rankings Predictions",
-				"help": "**Predicted final overall rankings (NS, EW). Predictions made before game starts.**",
+				"help": "**Club rank, our predicted global rank, FFBridge's published global rank, and the difference. A positive Rank_Diff means our model ranks the pair worse than FFBridge. Global_Pct is the published session percentage. Global_Pct_Pred and Pct_Diff compare that with the predicted percentage.**",
 				"prompts": [
 					{
 						"prompt": "",
@@ -748,7 +747,7 @@
 							{"Board Results Predictions": "@Board_Results_Predictions"},
 							{"Declarer Direction Predictions": "@Declarer_Direction_Predictions"}
 						],
-						"sql": "SELECT CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_NS, AVG(Pct_NS_Actual) AS Avg_Pct_NS_Actual, AVG(Pct_NS_Pred) AS Avg_Pct_NS_Pred, AVG(Pct_NS_Diff) AS Avg_Pct_NS_Diff FROM self GROUP BY Pair_NS ORDER BY Avg_Pct_NS_Actual DESC"
+						"sql": "SELECT DISTINCT CONCAT(Section_Name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair, Club_Rank_NS AS Club_Rank, Club_Rank_Pred_NS AS Club_Rank_Pred, Our_Global_Rank_NS AS Our_Global_Rank, FFBridge_Global_Rank_NS AS FFBridge_Global_Rank, Rank_Diff_NS AS Rank_Diff, Global_Pct_NS AS Global_Pct, Global_Pct_Pred_NS AS Global_Pct_Pred, Pct_Diff_NS AS Pct_Diff, Boards_NS AS Boards FROM self ORDER BY Club_Rank, Our_Global_Rank"
 					},
 					{
 						"prompt": "",
@@ -756,13 +755,13 @@
 							{"Board Results Predictions": "@Board_Results_Predictions"},
 							{"Declarer Direction Predictions": "@Declarer_Direction_Predictions"}
 						],
-						"sql": "SELECT CONCAT(section_name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_EW, AVG(Pct_EW_Actual) AS Avg_Pct_EW_Actual, AVG(Pct_EW_Pred) AS Avg_Pct_EW_Pred, AVG(Pct_EW_Diff) AS Avg_Pct_EW_Diff FROM self GROUP BY Pair_EW ORDER BY Avg_Pct_EW_Actual DESC"
+						"sql": "SELECT DISTINCT CONCAT(Section_Name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair, Club_Rank_EW AS Club_Rank, Club_Rank_Pred_EW AS Club_Rank_Pred, Our_Global_Rank_EW AS Our_Global_Rank, FFBridge_Global_Rank_EW AS FFBridge_Global_Rank, Rank_Diff_EW AS Rank_Diff, Global_Pct_EW AS Global_Pct, Global_Pct_Pred_EW AS Global_Pct_Pred, Pct_Diff_EW AS Pct_Diff, Boards_EW AS Boards FROM self ORDER BY Club_Rank, Our_Global_Rank"
 					}
 				]
 			},
 			"Board_Results_Predictions": {
 				"title": "Board Results Predictions",
-				"help": "**Predicted board results percentages (NS, EW). Predictions made before game starts.**",
+				"help": "**Every table on every board: contract, predicted contract, declarer, predicted declarer, North-South percentage, predicted percentage, and the difference.**",
 				"prompts": [
 					{
 						"prompt": "",
@@ -770,15 +769,7 @@
 							{"Board Results Predictions for Boards We Played": "@Board_Results_Predictions_Boards_We_Played"},
 							{"Contract Predictions Statistics Per Table": "@Contract_Predictions_Statistics_By_Board"}
 						],
-						"sql": "SELECT CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_NS, Board, Contract, Score_NS, Pct_NS_Actual, Pct_NS_Pred, Pct_NS_Diff, Declarer_Direction_Pred, Pair_Number_NS, Pair_Number_EW FROM self ORDER BY Board, Pair_NS"
-					},
-					{
-						"prompt": "",
-						"try_next": [
-							{"Board Results Predictions for Boards We Played": "@Board_Results_Predictions_Boards_We_Played"},
-							{"Contract Predictions Statistics Per Table": "@Contract_Predictions_Statistics_By_Board"}
-						],
-						"sql": "SELECT CONCAT(section_name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_EW, Board, Contract, Score_EW, Pct_EW_Actual, Pct_EW_Pred, Pct_EW_Diff, Declarer_Direction_Pred, Pair_Number_NS, Pair_Number_EW FROM self ORDER BY Board, Pair_EW"
+						"sql": "SELECT Board, CONCAT(Section_Name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_NS, CONCAT(Section_Name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_EW, Contract, Contract_Pred, Declarer_Direction, Declarer_Direction_Pred, Pct_NS, Pct_NS_Pred, Pct_Diff FROM self ORDER BY Board, Pair_NS"
 					}
 				]
 			},
@@ -794,7 +785,7 @@
 							{"Boards You Played": "@Boards_We_Played"},
 							{"Every score": "Show every score on board {Board}."}
 						],
-						"sql": "SELECT Board, Contract, Score, Declarer_Pct, Declarer_Pct_Pred, Declarer_Direction_Pred, Pair_Number_{Opponent_Pair_Direction}, boards_we_played FROM self WHERE boards_we_played=TRUE ORDER BY Board"
+						"sql": "SELECT Board, Contract, Contract_Pred, Declarer_Direction, Declarer_Direction_Pred, Pct_NS, Pct_NS_Pred, Pct_Diff FROM self WHERE Boards_We_Played = TRUE ORDER BY Board"
 					}
 				]
 			},
@@ -808,7 +799,7 @@
 							{"Declarer Direction Predictions Statistics Per Board": "@Declarer_Direction_Predictions_Statistics_By_Board"},
 							{"Declarer Direction Predictions Statistics Per Actual Declarer": "@Declarer_Direction_Predictions_Statistics_By_Actual_Declarer"}
 						],
-						"sql": "SELECT Board, Declarer_Direction_Pred AS Pred, Contract, Result, Score_NS, Par_NS, MP_NS, CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_NS, CONCAT(section_name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_EW FROM self ORDER BY Board, MP_NS DESC"
+						"sql": "SELECT Board, Declarer_Direction_Pred AS Pred, Contract, Result, Score_NS, MP_NS, CONCAT(Section_Name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_NS, CONCAT(Section_Name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_EW FROM self ORDER BY Board, MP_NS DESC"
 					}
 				]
 			},
@@ -822,7 +813,7 @@
 							{"Declarer Direction Predictions Statistics Per Actual Declarer": "@Declarer_Direction_Predictions_Statistics_By_Actual_Declarer"},
 							{"Declarer Direction Statistics Per Predicted Predicted Declarer": "@Declarer_Direction_Predictions_Statistics_By_Predicted_Declarer"}
 						],
-						"sql": "SELECT Board, ANY_VALUE(Par_NS) AS Par_NS, Declarer_Direction_Pred, COUNT() AS Board_Plays, SUM(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN 1 ELSE 0 END) AS Correct_Preds, Correct_Preds/Board_Plays AS Correct_Direction_Pct, SUM(CASE WHEN (Declarer_Direction IN ('N','S') AND Declarer_Direction_Pred IN ('N', 'S')) OR (Declarer_Direction IN ('E','W') AND Declarer_Direction_Pred IN ('E', 'W')) THEN 1 ELSE 0 END) AS Correct_Pair_Preds, Correct_Pair_Preds/Board_Plays AS Correct_Pair_Pct FROM self GROUP BY Board, Declarer_Direction_Pred ORDER BY Board"
+						"sql": "SELECT Board, Declarer_Direction_Pred, COUNT() AS Board_Plays, SUM(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN 1 ELSE 0 END) AS Correct_Preds, Correct_Preds/Board_Plays AS Correct_Direction_Pct, SUM(CASE WHEN (Declarer_Direction IN ('N','S') AND Declarer_Direction_Pred IN ('N', 'S')) OR (Declarer_Direction IN ('E','W') AND Declarer_Direction_Pred IN ('E', 'W')) THEN 1 ELSE 0 END) AS Correct_Pair_Preds, Correct_Pair_Preds/Board_Plays AS Correct_Pair_Pct FROM self GROUP BY Board, Declarer_Direction_Pred ORDER BY Board"
 					}
 				]
 			},
@@ -836,7 +827,7 @@
 							{"Declarer Direction Statistics Per Predicted Predicted Declarer": "@Declarer_Direction_Predictions_Statistics_By_Predicted_Declarer"},
 							{"Declarer Direction Predictions Statistics Per Board": "@Declarer_Direction_Predictions_Statistics_By_Board"}
 						],
-						"sql": "SELECT CONCAT(Declarer_ID, ' - ', Declarer_Name, ' - ', Declarer_Direction) AS Player, SUM(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN 1 ELSE 0 END) AS Correct_Preds, COUNT() AS Boards_Declared, STRING_AGG(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN Board END, ', ') AS Correctly_Pred_Boards, STRING_AGG(CASE WHEN Declarer_Direction <> Declarer_Direction_Pred THEN Board END, ', ') AS Declared_Not_Predicted, Correct_Preds/Boards_Declared AS Correct_Direction_Pct, SUM(CASE WHEN (Declarer_Direction IN ('N','S') AND Declarer_Direction_Pred IN ('N', 'S')) OR (Declarer_Direction IN ('E','W') AND Declarer_Direction_Pred IN ('E', 'W')) THEN 1 ELSE 0 END) AS Correct_Pair_Preds, Correct_Pair_Preds/Boards_Declared AS Correct_Pair_Pct FROM self GROUP BY Declarer_ID, Declarer_Name, Declarer_Direction ORDER BY Correct_Direction_Pct DESC, Boards_Declared DESC"
+						"sql": "SELECT Declarer_Direction AS Player, SUM(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN 1 ELSE 0 END) AS Correct_Preds, COUNT() AS Boards_Declared, STRING_AGG(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN CAST(Board AS VARCHAR) END, ', ') AS Correctly_Pred_Boards, STRING_AGG(CASE WHEN Declarer_Direction <> Declarer_Direction_Pred THEN CAST(Board AS VARCHAR) END, ', ') AS Declared_Not_Predicted, Correct_Preds/Boards_Declared AS Correct_Direction_Pct, SUM(CASE WHEN (Declarer_Direction IN ('N','S') AND Declarer_Direction_Pred IN ('N', 'S')) OR (Declarer_Direction IN ('E','W') AND Declarer_Direction_Pred IN ('E', 'W')) THEN 1 ELSE 0 END) AS Correct_Pair_Preds, Correct_Pair_Preds/Boards_Declared AS Correct_Pair_Pct FROM self GROUP BY Declarer_Direction ORDER BY Correct_Direction_Pct DESC, Boards_Declared DESC"
 					}
 				]
 			},
@@ -850,7 +841,7 @@
 						"try_next": [
 							{"Declarer Direction Predictions Statistics Per Actual Declarer": "@Declarer_Direction_Predictions_Statistics_By_Actual_Declarer"}
 						],
-						"sql": "SELECT CONCAT(Declarer_Number_Pred, ' - ', Declarer_Name_Pred, ' - ', Declarer_Direction_Pred) AS Player, SUM(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN 1 ELSE 0 END) AS Correct_Preds, COUNT() AS Pred_To_Declare, STRING_AGG(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN Board END, ', ') AS Correctly_Pred_Boards, STRING_AGG(CASE WHEN Declarer_Direction <> Declarer_Direction_Pred THEN Board END, ', ') AS Predicted_Not_Declared, Correct_Preds/Pred_To_Declare AS Correct_Direction_Pct, SUM(CASE WHEN (Declarer_Direction IN ('N','S') AND Declarer_Direction_Pred IN ('N', 'S')) OR (Declarer_Direction IN ('E','W') AND Declarer_Direction_Pred IN ('E', 'W')) THEN 1 ELSE 0 END) AS Correct_Pair_Preds, Correct_Pair_Preds/Pred_To_Declare AS Correct_Pair_Pct FROM self GROUP BY Declarer_Number_Pred, Declarer_Name_Pred, Declarer_Direction_Pred ORDER BY Correct_Direction_Pct DESC, Pred_To_Declare DESC"
+						"sql": "SELECT Declarer_Direction_Pred AS Player, SUM(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN 1 ELSE 0 END) AS Correct_Preds, COUNT() AS Pred_To_Declare, STRING_AGG(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN CAST(Board AS VARCHAR) END, ', ') AS Correctly_Pred_Boards, STRING_AGG(CASE WHEN Declarer_Direction <> Declarer_Direction_Pred THEN CAST(Board AS VARCHAR) END, ', ') AS Predicted_Not_Declared, Correct_Preds/Pred_To_Declare AS Correct_Direction_Pct, SUM(CASE WHEN (Declarer_Direction IN ('N','S') AND Declarer_Direction_Pred IN ('N', 'S')) OR (Declarer_Direction IN ('E','W') AND Declarer_Direction_Pred IN ('E', 'W')) THEN 1 ELSE 0 END) AS Correct_Pair_Preds, Correct_Pair_Preds/Pred_To_Declare AS Correct_Pair_Pct FROM self GROUP BY Declarer_Direction_Pred ORDER BY Correct_Direction_Pct DESC, Pred_To_Declare DESC"
 					}
 				]
 			},
@@ -865,7 +856,7 @@
 							{"Contract Predictions Statistics Per Table": "@Contract_Predictions_Statistics_By_Board"},
 							{"Contract Predictions Statistics Per Grouped Contract": "@Contract_Predictions_Statistics_By_Board_By_Contract"}
 						],
-						"sql": "SELECT Board, CASE WHEN Opponent_Pair_Direction='NS' THEN CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) ELSE CONCAT(section_name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) END AS Opponents, Contract, Contract_Pred FROM self WHERE Boards_We_Played = True ORDER BY Board, CONCAT(section_name, Pair_Number_NS)"
+						"sql": "SELECT Board, Contract, Contract_Pred FROM self WHERE Boards_We_Played = True ORDER BY Board"
 					}
 				]
 			},
@@ -879,7 +870,7 @@
 							{"Contract Predictions Statistics Per Grouped Contract": "@Contract_Predictions_Statistics_By_Board_By_Contract"},
 							{"Boards You Played": "@Boards_We_Played"}
 						],
-						"sql": "SELECT Board, CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' vs ', section_name, Pair_Number_EW, ' - ', Player_Name_E) AS NS_vs_EW, Contract, Contract_Pred FROM self ORDER BY Board, CONCAT(section_name, Pair_Number_NS)"
+						"sql": "SELECT Board, CONCAT(Section_Name, Pair_Number_NS, ' - ', Player_Name_N, ' vs ', Section_Name, Pair_Number_EW, ' - ', Player_Name_E) AS NS_vs_EW, Contract, Contract_Pred FROM self ORDER BY Board, Section_Name, Pair_Number_NS"
 					}
 				]
 			},

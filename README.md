@@ -35,6 +35,20 @@ This project provides a comprehensive toolkit for extracting, analyzing, and pos
 - Chat-based postmortem analysis with AI assistance
 - Support for both simultaneous and RRN tournaments
 - Real-time data visualization and statistics
+- Sidebar **AI Predictions** scores the open session and shows club rank, our predicted global rank, FFBridge's published global rank, and the difference
+
+### Prediction API
+
+The postmortem API on port 8517 (`python ffbridge_postmortem_api_server.py`) exposes the same predictions the sidebar uses.
+
+- `GET /postmortems/{player_id}/predictions/boards` — every table on every board: contract, predicted contract, declarer, predicted declarer, North-South percentage, predicted percentage, and the difference.
+- `GET /postmortems/{player_id}/predictions/rankings` — club rank, predicted club rank, our global rank, FFBridge's published global rank, `Rank_Diff` (our rank minus FFBridge's), published session percentage, predicted percentage, and their difference.
+
+Optional query parameters are `session_id` and `limit` (default 500, maximum 2000). Omit `session_id` to use the latest cached session for that player. DuckDB `GET /postmortems/{player_id}/sql` attaches the same columns when the query mentions them (`Pct_NS_Pred`, `Contract_Pred`, `Our_Global_Rank`, `FFBridge_Global_Rank`, and the other prediction markers).
+
+The MCP tools `ffbridge_postmortem_prediction_boards` and `ffbridge_postmortem_prediction_rankings` call those routes. Checkpoints live in `FFBRIDGE_SAVED_MODELS` or `E:\bridge\data\ffbridge\SavedModels`. When the checkpoints are missing, published club rank and FFBridge global rank are still returned and the prediction columns are null.
+
+A positive `Rank_Diff` means the model places the pair worse than FFBridge. `Pct_Diff` is the predicted North-South percentage minus the published board percentage. The predicted North-South percentage uses the predicted declarer: the declarer percentage when the model expects North or South, and its complement when the model expects East or West.
 
 ### 3. Authentication (`ffbridge_auth_playwright.py`)
 - Automated bearer token extraction using Playwright

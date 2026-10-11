@@ -263,6 +263,30 @@ def postmortem_boards(
     )
 
 
+def postmortem_prediction_boards(
+    player_id: str,
+    session_id: Optional[str] = None,
+    limit: int = 500,
+) -> Dict[str, Any]:
+    """Board-by-board contract, declarer, and percentage predictions."""
+    return _get_json(
+        f"/postmortems/{player_id}/predictions/boards",
+        {"session_id": session_id, "limit": limit},
+    )
+
+
+def postmortem_prediction_rankings(
+    player_id: str,
+    session_id: Optional[str] = None,
+    limit: int = 500,
+) -> Dict[str, Any]:
+    """Club rank, our global rank, FFBridge's global rank, and the difference."""
+    return _get_json(
+        f"/postmortems/{player_id}/predictions/rankings",
+        {"session_id": session_id, "limit": limit},
+    )
+
+
 def postmortem_sql(
     player_id: str,
     sql: str,
