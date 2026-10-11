@@ -172,6 +172,56 @@ class RankingTests(unittest.TestCase):
         self.assertIsNotNone(first["Rank_Diff_NS"])
         self.assertNotEqual(first["FFBridge_Global_Rank_NS"], 1)
 
+    def test_same_prediction_at_every_table_does_not_rank_by_table(self):
+        # East-West tables 1-2 and North-South tables 1-2. The model score is a
+        # property of the deal, so the old average put every East-West pair
+        # ahead of every North-South pair and the places followed the table numbers.
+        rows = []
+        for board, pct in ((1, 0.42), (2, 0.40)):
+            for table in (1, 2):
+                rows.append({
+                    "Board": board,
+                    "section_name": "A",
+                    "Pair_Number_NS": table,
+                    "Pair_Number_EW": table,
+                    "Player_ID_N": table,
+                    "Player_ID_S": table + 10,
+                    "Player_ID_E": table + 20,
+                    "Player_ID_W": table + 30,
+                    "Pct_NS_Pred": pct,
+                })
+        ranked = predictions.ranking_rows(pl.DataFrame(rows), None)
+        self.assertEqual(ranked.height, 4)
+        self.assertEqual(set(ranked["Club_Rank_Pred"].to_list()), {1})
+        east = ranked.filter(pl.col("Orientation") == "EW").sort("Table")
+        north = ranked.filter(pl.col("Orientation") == "NS").sort("Table")
+        self.assertEqual(east["Global_Pct_Pred"].to_list(), [59.0, 59.0])
+        self.assertEqual(north["Global_Pct_Pred"].to_list(), [41.0, 41.0])
+        self.assertNotEqual(north["Club_Rank_Pred"].to_list(), [3, 4])
+
+    def test_a_higher_table_prediction_ranks_ahead_of_the_other_tables(self):
+        boards = pl.DataFrame({
+            "Board": [1, 1],
+            "section_name": ["A", "A"],
+            "Pair_Number_NS": [1, 2],
+            "Pair_Number_EW": [1, 2],
+            "Player_ID_N": [1, 2],
+            "Player_ID_S": [11, 12],
+            "Player_ID_E": [21, 22],
+            "Player_ID_W": [31, 32],
+            "Pct_NS_Pred": [0.70, 0.30],
+        })
+        ranked = predictions.ranking_rows(boards, None)
+        def place(orientation: str, table: str) -> int:
+            return ranked.filter(
+                (pl.col("Orientation") == orientation) & (pl.col("Table") == table)
+            )["Club_Rank_Pred"][0]
+
+        self.assertEqual(place("NS", "1"), 1)
+        self.assertEqual(place("EW", "2"), 1)
+        self.assertEqual(place("NS", "2"), 3)
+        self.assertEqual(place("EW", "1"), 3)
+
     def test_contract_type_words_become_the_trained_codes(self):
         frame = pl.DataFrame(
             {

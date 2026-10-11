@@ -1,8 +1,11 @@
 """Session predictions and pair rankings for the FFBridge postmortem.
 
-Club rank is the place among pairs at the same club. Our global rank is where
-a pair's predicted session percentage would sit in the published national
-field. FFBridge's global rank is the official ``rank`` on the session ranking.
+Club rank is the place among pairs at the same club. Predicted club rank
+compares each pair with the other tables on the same boards. A model score
+that is identical at every table is a property of the deal, so those pairs
+tie instead of being numbered by table. Our global rank is where a pair's
+predicted session percentage would sit in the published national field.
+FFBridge's global rank is the official ``rank`` on the session ranking.
 ``Rank_Diff`` is our global rank minus that official rank.
 
 Board percentages use the predicted declarer. When the predicted declarer is
@@ -338,6 +341,7 @@ def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.Da
         for raw in official.to_dicts():
             pred = _match_prediction(predicted, raw)
             raw["Global_Pct_Pred"] = None if pred is None else pred.get("Global_Pct_Pred")
+            raw["Rank_Score"] = None if pred is None else pred.get("Rank_Score")
             raw["Boards"] = None if pred is None else pred.get("Boards")
             if pred is not None and pred.get("Pair"):
                 raw["Pair"] = pred["Pair"]
@@ -360,21 +364,22 @@ def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.Da
             club_field,
         )
         pred_score = raw.get("Global_Pct_Pred")
-        if pred_score is None:
+        rank_score = raw.get("Rank_Score")
+        if rank_score is None:
             raw["Club_Rank_Pred"] = None
+        else:
+            club_pred_field = [
+                float(item["Rank_Score"])
+                for item in club_groups.get(str(raw.get("Club")), [])
+                if item.get("Rank_Score") is not None
+            ]
+            raw["Club_Rank_Pred"] = _rank_against(float(rank_score), club_pred_field)
+        if pred_score is None:
             raw["Our_Global_Rank"] = None
             raw["Rank_Diff"] = None
             raw["Pct_Diff"] = None
             continue
         pred_score = float(pred_score)
-        club_pred_field = []
-        for item in club_groups.get(str(raw.get("Club")), []):
-            score = item.get("Global_Pct_Pred")
-            if score is None:
-                score = item.get("Global_Pct")
-            if score is not None:
-                club_pred_field.append(float(score))
-        raw["Club_Rank_Pred"] = _rank_against(pred_score, club_pred_field)
         national_pred_field = []
         for item in rows:
             if item is raw:
@@ -455,6 +460,22 @@ def _official_pairs(ranking: Optional[pl.DataFrame]) -> pl.DataFrame:
 
 
 def _predicted_pair_scores(boards: pl.DataFrame) -> pl.DataFrame:
+    """Session percentage, plus a rank score relative to the other tables.
+
+    ``Global_Pct_Pred`` is the model's expected percentage for the deals a
+    pair played. ``Rank_Score`` subtracts the board average first. When every
+    table receives the same prediction, that score is zero for North-South and
+    East-West, so club place is a tie rather than the table number.
+    """
+    ranked_boards = boards
+    if "Pct_NS_Pred" in boards.columns and "Board" in boards.columns:
+        section_col = "section_name" if "section_name" in boards.columns else (
+            "Section_Name" if "Section_Name" in boards.columns else None
+        )
+        board_keys = [section_col, "Board"] if section_col else ["Board"]
+        ranked_boards = boards.with_columns(
+            pl.col("Pct_NS_Pred").mean().over(board_keys).alias("_board_pred")
+        )
     frames = []
     for orientation, number_col, name_a, name_b, pct_expr in (
         ("NS", "Pair_Number_NS", "Player_Name_N", "Player_Name_S", pl.col("Pct_NS_Pred")),
@@ -469,16 +490,27 @@ def _predicted_pair_scores(boards: pl.DataFrame) -> pl.DataFrame:
         left = pl.col(name_a) if name_a in boards.columns else pl.lit("")
         right = pl.col(name_b) if name_b in boards.columns else pl.lit("")
         id_a, id_b = ("Player_ID_N", "Player_ID_S") if orientation == "NS" else ("Player_ID_E", "Player_ID_W")
-        pred = pct_expr if "Pct_NS_Pred" in boards.columns else pl.lit(None, dtype=pl.Float64)
+        has_pred = "Pct_NS_Pred" in ranked_boards.columns
+        pred = pct_expr if has_pred else pl.lit(None, dtype=pl.Float64)
+        # East-West's edge over the board average is the opposite of North-South's.
+        if has_pred and "_board_pred" in ranked_boards.columns:
+            rank_expr = (
+                pl.col("Pct_NS_Pred") - pl.col("_board_pred")
+                if orientation == "NS"
+                else pl.col("_board_pred") - pl.col("Pct_NS_Pred")
+            )
+        else:
+            rank_expr = pred
         pair_key = (
             _pair_key(pl.col(id_a), pl.col(id_b))
-            if id_a in boards.columns and id_b in boards.columns
+            if id_a in ranked_boards.columns and id_b in ranked_boards.columns
             else pl.lit(None).cast(pl.Utf8)
         )
-        work = boards.with_columns(
+        work = ranked_boards.with_columns(
             section.fill_null("").alias("Section"),
             pl.col(number_col).cast(pl.Utf8).alias("Table"),
             pred.alias("_pred"),
+            rank_expr.alias("_rank"),
             left.alias("_left"),
             right.alias("_right"),
             pair_key.alias("Pair_Key"),
@@ -487,6 +519,7 @@ def _predicted_pair_scores(boards: pl.DataFrame) -> pl.DataFrame:
             work.group_by(["Section", "Table", "Pair_Key"])
             .agg(
                 pl.col("_pred").mean().alias("_pred"),
+                pl.col("_rank").mean().round(6).alias("Rank_Score"),
                 pl.len().alias("Boards"),
                 pl.col("_left").drop_nulls().first().alias("_left"),
                 pl.col("_right").drop_nulls().first().alias("_right"),
@@ -496,7 +529,10 @@ def _predicted_pair_scores(boards: pl.DataFrame) -> pl.DataFrame:
                 _pair_label(pl.col("Section"), pl.col("Table"), pl.col("_left"), pl.col("_right")).alias("Pair"),
                 (pl.col("_pred") * 100.0).alias("Global_Pct_Pred"),
             )
-            .select("Pair", "Orientation", "Section", "Table", "Pair_Key", "Global_Pct_Pred", "Boards")
+            .select(
+                "Pair", "Orientation", "Section", "Table", "Pair_Key",
+                "Global_Pct_Pred", "Rank_Score", "Boards",
+            )
         )
         frames.append(piece)
     if not frames:
