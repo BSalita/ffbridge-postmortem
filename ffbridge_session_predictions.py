@@ -350,10 +350,44 @@ def _assign_ns_prediction(frame: pl.DataFrame) -> pl.DataFrame:
         .otherwise(0.5)
     )
     actual = pl.col("Pct_NS").cast(pl.Float64, strict=False) if "Pct_NS" in frame.columns else pl.lit(None)
-    return frame.with_columns(
+    assigned = frame.with_columns(
         ns_pred.alias("Pct_NS_Pred"),
         (ns_pred - actual).alias("Pct_Diff"),
     )
+    return _recenter_session_predictions(assigned)
+
+
+def _recenter_session_predictions(frame: pl.DataFrame) -> pl.DataFrame:
+    """Center the session's predicted NS field at 50%.
+
+    The declarer-direction and declarer-percentage models are independent, so
+    combining their outputs can introduce a directional bias that puts every
+    NS pair below every EW pair. Remove that bias before session percentages
+    and predicted club ranks are calculated. This must be a session-wide
+    shift: centering each board separately would erase all between-table
+    variation when a model gives the same prediction to every table.
+    """
+    if "Pct_NS_Pred" not in frame.columns or frame.is_empty():
+        return frame
+    centered = frame
+    # Clipping can move the mean away from 0.5. Reapplying the residual shift
+    # converges quickly while keeping every prediction in [0, 1].
+    for _ in range(8):
+        prediction = pl.col("Pct_NS_Pred")
+        mean = prediction.mean()
+        centered = centered.with_columns(
+            (prediction + (pl.lit(0.5) - mean))
+            .clip(0.0, 1.0)
+            .alias("Pct_NS_Pred")
+        )
+    if "Pct_NS" in centered.columns:
+        centered = centered.with_columns(
+            (
+                pl.col("Pct_NS_Pred")
+                - pl.col("Pct_NS").cast(pl.Float64, strict=False)
+            ).alias("Pct_Diff")
+        )
+    return centered
 
 
 def load_ranking(session_id: Any, cache_dir: Path) -> Optional[pl.DataFrame]:
@@ -651,6 +685,11 @@ def _match_prediction(predicted: pl.DataFrame, official: Dict[str, Any]) -> Opti
         )
         if not matched.is_empty():
             return matched.to_dicts()[0]
+        # The national ranking contains the same table numbers at many clubs.
+        # When player ids are available, a failed id match means this is not
+        # the club represented by the postmortem; table number must not attach
+        # that club's prediction to an unrelated pair elsewhere.
+        return None
     same_table = predicted.filter(
         (pl.col("Orientation") == official.get("Orientation"))
         & (pl.col("Table") == str(official.get("Table")))

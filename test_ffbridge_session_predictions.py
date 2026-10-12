@@ -161,6 +161,9 @@ class RankingTests(unittest.TestCase):
             }
         )
         attached = predictions._broadcast_ranks(boards, predictions.ranking_rows(boards, ranking))
+        ranked = predictions.ranking_rows(boards, ranking)
+        other_club = ranked.filter(pl.col("Club") == "B")
+        self.assertEqual(other_club["Global_Pct_Pred"].null_count(), other_club.height)
         self.assertEqual(attached.height, boards.height)
         first = attached.filter(pl.col("Player_ID_N") == 1).row(0, named=True)
         second = attached.filter(pl.col("Player_ID_N") == 3).row(0, named=True)
@@ -197,6 +200,43 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(north["Global_Pct_Pred"].to_list(), [41.0, 41.0])
         self.assertEqual(east["Club_Rank_Pred"].to_list(), [1, 1])
         self.assertEqual(north["Club_Rank_Pred"].to_list(), [3, 3])
+
+    def test_directional_bias_is_centered_before_club_ranking(self):
+        rows = []
+        for board in (1, 2):
+            for table in range(1, 14):
+                rows.append({
+                    "Board": board,
+                    "section_name": "A",
+                    "Pair_Number_NS": table,
+                    "Pair_Number_EW": table,
+                    "Player_ID_N": table,
+                    "Player_ID_S": table + 100,
+                    "Player_ID_E": table + 200,
+                    "Player_ID_W": table + 300,
+                    "Player_Name_N": f"N{table}",
+                    "Player_Name_S": f"S{table}",
+                    "Player_Name_E": f"E{table}",
+                    "Player_Name_W": f"W{table}",
+                    # This raw model bias would rank all 13 EW pairs ahead of
+                    # all 13 NS pairs without session-wide centering.
+                    "Pct_NS_Pred": 0.36 + board / 50 + table / 1000,
+                })
+        biased = pl.DataFrame(rows)
+        centered = predictions._recenter_session_predictions(biased)
+        self.assertAlmostEqual(centered["Pct_NS_Pred"].mean(), 0.5, places=10)
+        self.assertAlmostEqual(
+            centered["Pct_NS_Pred"].std(),
+            biased["Pct_NS_Pred"].std(),
+            places=10,
+        )
+
+        ranked = predictions.ranking_rows(centered, None)
+        ns_ranks = ranked.filter(pl.col("Orientation") == "NS")["Club_Rank_Pred"].to_list()
+        ew_ranks = ranked.filter(pl.col("Orientation") == "EW")["Club_Rank_Pred"].to_list()
+        self.assertLess(min(ns_ranks), max(ew_ranks))
+        self.assertLess(min(ew_ranks), max(ns_ranks))
+        self.assertLessEqual(abs(sum(ns_ranks) - sum(ew_ranks)), 1)
 
     def test_a_higher_table_prediction_ranks_ahead_of_the_other_tables(self):
         boards = pl.DataFrame({
