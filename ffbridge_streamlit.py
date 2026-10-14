@@ -1391,9 +1391,23 @@ def _usable_results_url(url: Any) -> Optional[str]:
     return text
 
 
+def _organizer_results_url(entry: Optional[Mapping[str, Any]]) -> Optional[str]:
+    """Bridge+ sheet for a session ffbridge.fr has not published yet."""
+    if not entry:
+        return None
+    route = _usable_results_url(entry.get("route_url"))
+    listed = _usable_results_url(entry.get("results_url") or entry.get("game_url"))
+    if entry.get("source") == "bridgeplus" or route:
+        return route or listed
+    return None
+
+
 def _session_results_url_from_entry(entry: Optional[Mapping[str, Any]]) -> Optional[str]:
     if not entry:
         return None
+    organizer = _organizer_results_url(entry)
+    if organizer:
+        return organizer
     return _usable_results_url(entry.get("results_url") or entry.get("game_url")) or (
         pm_create.ffbridge_results_page_url(
             session_id=entry.get("session_id") or st.session_state.get("session_id"),
@@ -1403,9 +1417,53 @@ def _session_results_url_from_entry(entry: Optional[Mapping[str, Any]]) -> Optio
     )
 
 
+def _selected_session_entry() -> Optional[Mapping[str, Any]]:
+    session_id = st.session_state.get("session_id")
+    player_id = st.session_state.get("player_id")
+    game_urls = st.session_state.get("game_urls_d") or {}
+    if player_id is None or session_id is None:
+        return None
+    player_games = game_urls.get(str(player_id)) or game_urls.get(player_id) or {}
+    try:
+        numeric_id = int(session_id)
+    except (TypeError, ValueError):
+        numeric_id = session_id
+    return (
+        player_games.get(numeric_id)
+        or player_games.get(session_id)
+        or player_games.get(str(session_id))
+    )
+
+
 def _ensure_game_results_url(df: Optional[pl.DataFrame] = None) -> Optional[str]:
-    """Resolve and store the public results page for the selected session."""
+    """Resolve and store the public results page for the selected session.
+
+    An unpublished Bridge+ session has no ffbridge.fr page. Its links use the
+    organizer sheet instead of a group id left over from another session.
+    """
+    entry = _selected_session_entry()
+    organizer = _organizer_results_url(entry)
+    unpublished = bool(
+        entry
+        and (entry.get("source") == "bridgeplus" or entry.get("route_url"))
+    )
+    if organizer:
+        st.session_state.game_url = organizer
+        st.session_state.route_url = _usable_results_url(entry.get("route_url")) or organizer
+        return organizer
+    if unpublished:
+        st.session_state.game_url = None
+        return None
+
     current = _usable_results_url(st.session_state.get("game_url"))
+    session_id = st.session_state.get("session_id")
+    if (
+        current
+        and session_id is not None
+        and "ffbridge.fr" in current
+        and f"/sessions/{session_id}" not in current
+    ):
+        current = None
     if current:
         st.session_state.game_url = current
         return current
@@ -1618,6 +1676,7 @@ def _populate_game_urls_for_player_lancelot(player_id: str) -> bool:
     game_urls: Dict[int, Dict[str, Any]] = {}
     for entry in listed['sessions']:
         session_id = int(entry['session_id'])
+        session_entry = {**entry, "session_id": session_id}
         game_urls[session_id] = {
             'description': entry.get('description'),
             'date': entry.get('date'),
@@ -1628,11 +1687,9 @@ def _populate_game_urls_for_player_lancelot(player_id: str) -> bool:
             'competition_label': entry.get('competition_label'),
             'session_label': entry.get('session_label'),
             'team_id': entry.get('team_id'),
-            'results_url': pm_create.ffbridge_results_page_url(
-                session_id=session_id,
-                group_id=entry.get('group_id'),
-                team_id=entry.get('team_id'),
-            ),
+            'source': entry.get('source'),
+            'route_url': entry.get('route_url'),
+            'results_url': _session_results_url_from_entry(session_entry),
         }
 
     try:

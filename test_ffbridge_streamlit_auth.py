@@ -211,6 +211,55 @@ class StreamlitLancelotRoutingTests(unittest.TestCase):
         rerun.assert_not_called()
         self.assertFalse(state["deferred_start_report"])
 
+    def test_unpublished_session_links_use_the_organizer_sheet(self):
+        route = (
+            "https://www.bridgeplus.com/nos-simultanes/resultats/"
+            "?p=route/S202719/5802079/A/212"
+        )
+        state = SessionState(lancelot_token_valid=True, game_urls_d={})
+        listed = {
+            "player_id": "246273",
+            "player_license_number": "9500754",
+            "sessions": [
+                {
+                    "session_id": "900202719",
+                    "description": "2026-10-13 Roy René Bridge+",
+                    "date": "2026-10-13",
+                    "source": "bridgeplus",
+                    "group_id": None,
+                    "route_url": route,
+                    "results_url": route,
+                }
+            ],
+        }
+        with (
+            patch.object(app.st, "session_state", state),
+            patch.object(app.pm_api, "list_source_sessions", return_value=listed),
+            patch.object(
+                app.pm_api,
+                "last_game",
+                return_value={"found": False, "game": None},
+            ),
+        ):
+            app._populate_game_urls_for_player_lancelot("9500754")
+        stored = state["game_urls_d"]["9500754"][900202719]
+        self.assertEqual(stored["results_url"], route)
+        self.assertEqual(stored["route_url"], route)
+
+        state["player_id"] = "9500754"
+        state["session_id"] = 900202719
+        state["group_id"] = "21333"
+        state["team_id"] = 15106224
+        state["game_url"] = (
+            "https://www.ffbridge.fr/competitions/results/groups/"
+            "21333/sessions/900202719/pairs/15106224"
+        )
+        with patch.object(app.st, "session_state", state):
+            url = app._ensure_game_results_url()
+        self.assertEqual(url, route)
+        self.assertEqual(state["game_url"], route)
+        self.assertEqual(state["route_url"], route)
+
     def test_results_url_is_rebuilt_from_session_group_when_meta_lacks_it(self):
         state = SessionState(
             session_id=300749,
