@@ -202,6 +202,38 @@ def _validate_schema_compatibility(
         )
 
 
+def _reference_schema(root: pathlib.Path) -> dict[str, pl.DataType] | None:
+    manifest = read_manifest(root)
+    if manifest.is_empty():
+        return None
+    reference_row = manifest.sort("archived_at").row(-1, named=True)
+    reference_path = root / reference_row["fragment_path"]
+    if not reference_path.is_file():
+        raise FileNotFoundError(
+            f"Schema reference fragment is missing: {reference_path}"
+        )
+    return pl.read_parquet_schema(reference_path)
+
+
+def _cast_to_reference(
+    frame: pl.DataFrame,
+    reference: Mapping[str, pl.DataType],
+) -> pl.DataFrame:
+    """Store the same physical values with the archive's column types.
+
+    A Bridge+ sheet leaves the unused seats null. Polars then infers Null and
+    List(Null), and wider score types, which the archive rejects.
+    """
+    expressions = [
+        pl.col(name).cast(dtype, strict=True)
+        for name, dtype in reference.items()
+        if name in frame.columns and frame.schema[name] != dtype
+    ]
+    if not expressions:
+        return frame
+    return frame.with_columns(expressions)
+
+
 def prepare_archive_session(
     frame: pl.DataFrame,
     session_id: Any,
@@ -213,6 +245,9 @@ def prepare_archive_session(
     started = time.perf_counter()
     root = resolve_archive_dir(archive_dir)
     canonical = canonicalize_frame(frame)
+    reference = _reference_schema(root)
+    if reference is not None:
+        canonical = _cast_to_reference(canonical, reference)
     session_text = str(session_id).strip()
     if not session_text:
         raise ValueError("session_id is required")

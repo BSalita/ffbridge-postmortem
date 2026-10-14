@@ -84,6 +84,47 @@ class ArchiveWriteTests(unittest.TestCase):
             self.assertEqual(stored["Lead"].null_count(), stored.height)
             self.assertEqual(archive.read_manifest(root).height, 2)
 
+    def test_null_and_wider_dtypes_are_stored_as_the_reference_schema(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            reference = _session_frame().with_columns(
+                pl.lit("HK").alias("Lead"),
+                pl.lit(579).cast(pl.Int64).alias("MP_Top"),
+                pl.Series("Score", [140, -140], dtype=pl.Int16),
+                pl.Series("Score_NS", [-140, 140], dtype=pl.Int16),
+                pl.Series("Score_EW", [140, -140], dtype=pl.Int16),
+                pl.concat_list(["Player_ID_N", "Player_ID_S"]).alias("Pair_IDs_NS"),
+                pl.concat_list(["Player_Name_N", "Player_Name_S"]).alias("Pair_Names_NS"),
+            )
+            archive.archive_session(reference, "100", archive_dir=root)
+            shifted = reference.with_columns(
+                pl.lit(None).alias("Lead"),
+                pl.lit(579.0).alias("MP_Top"),
+                pl.col("Score").cast(pl.Int32),
+                pl.col("Score_NS").cast(pl.Int32),
+                pl.col("Score_EW").cast(pl.Int32),
+                pl.lit(None).alias("Player_ID_N"),
+                pl.lit(None).alias("Player_ID_S"),
+                pl.lit(None).alias("Player_Name_N"),
+                pl.lit(None).alias("Player_Name_S"),
+            ).with_columns(
+                pl.concat_list(["Player_ID_N", "Player_ID_S"]).alias("Pair_IDs_NS"),
+                pl.concat_list(["Player_Name_N", "Player_Name_S"]).alias("Pair_Names_NS"),
+            )
+            archived = archive.archive_session(shifted, "101", archive_dir=root)
+            stored = pl.read_parquet(archived["archive_file"])
+            self.assertEqual(stored.schema["Lead"], pl.String)
+            self.assertEqual(stored.schema["MP_Top"], pl.Int64)
+            self.assertEqual(stored.schema["Score"], pl.Int16)
+            self.assertEqual(stored.schema["Score_NS"], pl.Int16)
+            self.assertEqual(stored.schema["Score_EW"], pl.Int16)
+            self.assertEqual(stored.schema["Player_ID_N"], pl.String)
+            self.assertEqual(stored.schema["Player_Name_S"], pl.String)
+            self.assertEqual(stored.schema["Pair_IDs_NS"], pl.List(pl.String))
+            self.assertEqual(stored.schema["Pair_Names_NS"], pl.List(pl.String))
+            self.assertEqual(stored["MP_Top"][0], 579)
+            self.assertEqual(archive.read_manifest(root).height, 2)
+
     def test_incompatible_schema_fails_before_manifest_update(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
