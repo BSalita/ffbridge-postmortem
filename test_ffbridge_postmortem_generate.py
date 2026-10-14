@@ -524,6 +524,7 @@ class OtherPlayerSessionTests(unittest.TestCase):
                     "ensure_lancelot_auth",
                     side_effect=AssertionError("index listing must not login"),
                 ),
+                patch.object(create.bridgeplus, "gap_session_entries", return_value=[]),
             ):
                 result = create.list_source_sessions(
                     "9500754",

@@ -53,6 +53,7 @@ _ensure_mlbridge_on_path()
 
 import polars as pl
 
+import ffbridge_bridgeplus_postmortem as bridgeplus
 import ffbridge_postmortem_archive as postmortem_archive
 import ffbridge_postmortem_normalized as postmortem_normalized
 import mlBridge.mlBridgeFFLib as mlBridgeFFLib
@@ -780,6 +781,27 @@ def list_source_sessions(
         row["cache_file"] = cache_file.name if cache_file.is_file() else None
         sessions.append(row)
     sessions = sessions_newest_first(sessions)
+    club_codes = [
+        str(row.get("organization_id") or "")
+        for row in sessions
+        if str(row.get("organization_id") or "").isdigit()
+    ]
+    if club_codes and resolved.license_number:
+        try:
+            gaps = bridgeplus.gap_session_entries(
+                player_id=resolved.lancelot_id,
+                license_number=resolved.license_number,
+                sessions=sessions,
+                date_from=date_from,
+                date_to=date_to,
+                cache_dir=directory,
+            )
+        except (requests.RequestException, ValueError, OSError) as exc:
+            _log(f"Bridge+ organizer check failed: {exc}")
+            gaps = []
+        known = {row["session_id"] for row in sessions}
+        sessions.extend(row for row in gaps if row["session_id"] not in known)
+        sessions = sessions_newest_first(sessions)
     return {
         "player_id": resolved.lancelot_id,
         "player_license_number": resolved.license_number,
@@ -1127,6 +1149,99 @@ def augment_and_cache_mldf(
     return df
 
 
+def _bridgeplus_meta(resolved: ResolvedPlayer, entry: Dict[str, Any]) -> LancelotSessionMeta:
+    direction = str(entry.get("pair_direction") or "EW")
+    return LancelotSessionMeta(
+        player_id=resolved.lancelot_id,
+        session_id=str(entry["session_id"]),
+        partner_id=entry.get("partner_license_number"),
+        player_license_number=resolved.license_number,
+        partner_license_number=entry.get("partner_license_number"),
+        player_name=str(entry.get("player_name") or ""),
+        partner_name=str(entry.get("partner_name") or ""),
+        group_id=entry.get("group_id"),
+        org_id=entry.get("organization_id"),
+        tournament_date=entry.get("date"),
+        organization_name=entry.get("organization_name"),
+        game_description=entry.get("description"),
+        team_id=entry.get("pair_number"),
+        pair_direction=direction,
+        opponent_pair_direction="NS" if direction == "EW" else "EW",
+        player_direction=str(entry.get("player_direction") or "E"),
+        partner_direction=str(entry.get("partner_direction") or "W"),
+        section_name=entry.get("section_name"),
+        team_number=entry.get("pair_number"),
+        game_url=str(entry.get("results_url") or entry.get("route_url") or ""),
+        route_url=entry.get("route_url"),
+    )
+
+
+def _create_bridgeplus_postmortem(
+    resolved: ResolvedPlayer,
+    game_entry: Dict[str, Any],
+    *,
+    directory: pathlib.Path,
+    cache_file: pathlib.Path,
+    force: bool,
+    sd_productions: int,
+    augment_progress: Any,
+    lock_func: Optional[Callable[..., Any]],
+    skip_build_if_cached: bool,
+    started: datetime,
+) -> Dict[str, Any]:
+    """Scrape the Bridge+ sheet once, then augment it like a Lancelot session."""
+    meta = _bridgeplus_meta(resolved, game_entry)
+    already_cached = skip_build_if_cached and cache_file.exists() and not force
+    if already_cached:
+        frame = pl.read_parquet(cache_file)
+    else:
+        built = bridgeplus.scrape_mldf(
+            {**game_entry, "player_id": resolved.lancelot_id},
+            cache_dir=directory,
+        )
+        frame = augment_and_cache_mldf(
+            built,
+            meta.session_id,
+            resolved.lancelot_id,
+            cache_dir=directory,
+            force=force,
+            sd_productions=sd_productions,
+            progress=augment_progress,
+            lock_func=lock_func,
+        )
+    archive_result = postmortem_archive.archive_session(
+        frame,
+        meta.session_id,
+        context=_archive_context(meta, game_entry),
+    )
+    hierarchical_result = _write_hierarchical_if_configured(
+        frame,
+        meta.session_id,
+        archive_result,
+        series_id=_entry_archive_context(game_entry).get("series_id"),
+    )
+    ended = datetime.now()
+    _log(
+        f"end create session={meta.session_id} status=ok source=bridgeplus "
+        f"elapsed {(ended - started).total_seconds():.1f}s"
+    )
+    status = "cached" if already_cached else "ok"
+    return {
+        "session_id": meta.session_id,
+        "player_id": resolved.lancelot_id,
+        "player_license_number": resolved.license_number,
+        "status": status,
+        "cache_file": cache_file.name,
+        "archive_file": archive_result["archive_file"],
+        "archive_revision": archive_result["revision"],
+        "hierarchical_archive": hierarchical_result,
+        "meta": meta,
+        "df": frame,
+        "ranking_df": pl.DataFrame(),
+        "scores_df": pl.DataFrame(),
+    }
+
+
 def create_lancelot_postmortem(
     player_id: str,
     session_id: Any,
@@ -1150,6 +1265,20 @@ def create_lancelot_postmortem(
         f"start create session={session_id} player={resolved.lancelot_id} "
         f"at {started.isoformat(timespec='seconds')}"
     )
+
+    if game_entry.get("source") == "bridgeplus":
+        return _create_bridgeplus_postmortem(
+            resolved,
+            game_entry,
+            directory=directory,
+            cache_file=cache_file,
+            force=force,
+            sd_productions=sd_productions,
+            augment_progress=augment_progress,
+            lock_func=lock_func,
+            skip_build_if_cached=skip_build_if_cached,
+            started=started,
+        )
 
     if skip_build_if_cached and cache_file.exists() and not force:
         meta, _, _ = lancelot_session_meta(
