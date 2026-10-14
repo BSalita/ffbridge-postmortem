@@ -1449,6 +1449,23 @@ def _selected_session_entry() -> Optional[Mapping[str, Any]]:
     )
 
 
+def _sidebar_result_links(
+    results_url: Optional[str],
+    route_url: Optional[str],
+) -> list[tuple[str, str]]:
+    """Sidebar result links. One organizer sheet is labeled Roy René only."""
+    results = _usable_results_url(results_url)
+    route = _usable_results_url(route_url)
+    if route and results == route:
+        return [("Roy René Result Page", route)]
+    links: list[tuple[str, str]] = []
+    if results:
+        links.append(("FFBridge Result Page", results))
+    if route:
+        links.append(("Roy René Result Page", route))
+    return links
+
+
 def _ensure_game_results_url(df: Optional[pl.DataFrame] = None) -> Optional[str]:
     """Resolve and store the public results page for the selected session.
 
@@ -2865,10 +2882,8 @@ class FFBridgeApp(PostmortemBase):
             st.sidebar.caption(f"Games found: {len(games)}")
 
         results_url = _ensure_game_results_url()
-        if results_url:
-            st.sidebar.markdown(f"[FFBridge Result Page]({results_url})")
-        if st.session_state.get('route_url'):
-            st.sidebar.markdown(f"[Roy René Result Page]({st.session_state.route_url})")
+        for label, url in _sidebar_result_links(results_url, st.session_state.get("route_url")):
+            st.sidebar.markdown(f"[{label}]({url})")
         # Download Personalized Report PDF button placeholder (below the link button)
         st.session_state.pdf_link = st.sidebar.empty()
 

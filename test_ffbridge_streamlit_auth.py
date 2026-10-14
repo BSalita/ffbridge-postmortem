@@ -259,6 +259,21 @@ class StreamlitLancelotRoutingTests(unittest.TestCase):
         self.assertEqual(url, route)
         self.assertEqual(state["game_url"], route)
         self.assertEqual(state["route_url"], route)
+        self.assertEqual(
+            app._sidebar_result_links(url, state["route_url"]),
+            [("Roy René Result Page", route)],
+        )
+        ffbridge_page = (
+            "https://www.ffbridge.fr/competitions/results/groups/"
+            "21333/sessions/300749/pairs/15106224"
+        )
+        self.assertEqual(
+            app._sidebar_result_links(ffbridge_page, route),
+            [
+                ("FFBridge Result Page", ffbridge_page),
+                ("Roy René Result Page", route),
+            ],
+        )
 
     def test_results_url_is_rebuilt_from_session_group_when_meta_lacks_it(self):
         state = SessionState(
