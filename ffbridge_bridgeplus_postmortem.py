@@ -407,16 +407,27 @@ def build_mldf(
                 "Player_Name_W": west_name,
             }
         )
+    # Match a Lancelot archive fragment. Unused seats are null, but an all-null
+    # column would otherwise be Null and make Pair_IDs/Pair_Names List(Null).
     return pl.DataFrame(rows).with_columns(
         pl.col("Board").cast(pl.Int64),
         pl.col("Result").cast(pl.Int16),
-        pl.col("Score_NS").cast(pl.Int32),
-        pl.col("Score_EW").cast(pl.Int32),
+        pl.col("Lead").cast(pl.String),
+        pl.col("Score_NS").cast(pl.Int16),
+        pl.col("Score_EW").cast(pl.Int16),
         pl.col("Pair_Number_NS").cast(pl.Int64),
         pl.col("Pair_Number_EW").cast(pl.Int64),
-        pl.col("MP_Top").cast(pl.Float64),
+        pl.col("MP_Top").cast(pl.Int64),
         pl.col("MP_NS").cast(pl.Float64),
         pl.col("MP_EW").cast(pl.Float64),
+        pl.col("Player_ID_N").cast(pl.String),
+        pl.col("Player_ID_E").cast(pl.String),
+        pl.col("Player_ID_S").cast(pl.String),
+        pl.col("Player_ID_W").cast(pl.String),
+        pl.col("Player_Name_N").cast(pl.String),
+        pl.col("Player_Name_E").cast(pl.String),
+        pl.col("Player_Name_S").cast(pl.String),
+        pl.col("Player_Name_W").cast(pl.String),
     )
 
 

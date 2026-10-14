@@ -1,6 +1,8 @@
 import unittest
 from datetime import date
 
+import polars as pl
+
 import ffbridge_bridgeplus_postmortem as bridgeplus
 
 
@@ -119,6 +121,23 @@ class SheetParserTests(unittest.TestCase):
         self.assertAlmostEqual(row["Pct_EW"], 0.6493)
         self.assertTrue(row["PBN"].startswith("N:72.QT873.Q52.AKJ"))
         self.assertEqual(sum(len(part) for part in row["PBN"][2:].replace(" ", ".").split(".")), 52)
+        self.assertEqual(frame.schema["Lead"], pl.String)
+        self.assertEqual(frame.schema["MP_Top"], pl.Int64)
+        self.assertEqual(frame.schema["Score_NS"], pl.Int16)
+        self.assertEqual(frame.schema["Score_EW"], pl.Int16)
+        self.assertEqual(frame.schema["Player_ID_N"], pl.String)
+        self.assertEqual(frame.schema["Player_Name_S"], pl.String)
+        prepared = frame.with_columns(
+            pl.when(pl.col("Declarer").is_in(["N", "S"]))
+            .then(pl.col("Score_NS"))
+            .otherwise(pl.col("Score_EW"))
+            .alias("Score"),
+            pl.concat_list(["Player_ID_N", "Player_ID_S"]).alias("Pair_IDs_NS"),
+            pl.concat_list(["Player_Name_N", "Player_Name_S"]).alias("Pair_Names_NS"),
+        )
+        self.assertEqual(prepared.schema["Score"], pl.Int16)
+        self.assertEqual(prepared.schema["Pair_IDs_NS"], pl.List(pl.String))
+        self.assertEqual(prepared.schema["Pair_Names_NS"], pl.List(pl.String))
 
 
 class GapSelectionTests(unittest.TestCase):
