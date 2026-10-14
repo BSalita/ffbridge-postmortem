@@ -314,6 +314,33 @@ class StreamlitLancelotRoutingTests(unittest.TestCase):
             )
         )
 
+    def test_newest_game_is_labeled_latest_and_written_that_way_in_the_url(self):
+        games = {
+            282792: {"date": "2026-06-01", "description": "2026-06-01 Ronde"},
+            282839: {"date": "2026-08-25", "description": "2026-08-25 Rondes de France"},
+        }
+        options = app._game_select_options(games)
+        self.assertEqual(
+            options,
+            [
+                "Latest, 2026-08-25 Rondes de France",
+                "282792, 2026-06-01 Ronde",
+            ],
+        )
+        self.assertEqual(app._session_id_from_game_option(options[0]), "latest")
+        self.assertEqual(app._session_id_from_game_option(options[1]), 282792)
+
+        state = SessionState(
+            player_id="9500754",
+            game_urls_d={"9500754": games},
+            session_id=282839,
+        )
+        with patch.object(app.st, "session_state", state):
+            self.assertEqual(app._serialize_session_id(282839), "latest")
+            self.assertEqual(app._serialize_session_id(282792), "282792")
+            self.assertIsNone(app._serialize_session_id(None))
+        self.assertIsNone(app.SIDEBAR_URL_PARAM_MAP["session_id"]["parser"]("latest"))
+
     def test_latest_session_is_newest_date_not_first_list_item(self):
         june_first = {
             282792: {"date": "2026-06-01", "description": "2026-06-01 Ronde"},

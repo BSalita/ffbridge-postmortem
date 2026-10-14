@@ -527,6 +527,20 @@ def ShowDataFrameTable(df: pl.DataFrame, key: str, query: str = 'SELECT * FROM s
 #
 # Add new sidebar options here to make them URL-syncable.
 
+def _serialize_session_id(value: Any) -> Optional[str]:
+    """Write session_id=latest when the open game is the most recent one."""
+    if value is None:
+        return None
+    try:
+        session_id = int(value)
+    except (TypeError, ValueError):
+        return str(value)
+    latest = _latest_session_id(_player_game_urls())
+    if latest is not None and latest == session_id:
+        return "latest"
+    return str(session_id)
+
+
 def _parse_bool_param(raw: str) -> bool:
     s = str(raw).strip().lower()
     if s in ('1', 'true', 't', 'yes', 'y', 'on'):
@@ -544,9 +558,9 @@ SIDEBAR_URL_PARAM_MAP: Dict[str, Dict[str, Callable[[Any], Any]]] = {
     },
     'session_id': {
         'state_key': 'session_id',
-        # 'latest' means most recent game (same as omitting session_id).
+        # 'latest' means the most recent game.
         'parser': lambda v: None if str(v).strip().lower() == 'latest' else int(v),
-        'serializer': lambda v: None if v is None else str(int(v)),
+        'serializer': _serialize_session_id,
     },
     'single_dummy_sample_count': {
         'state_key': 'single_dummy_sample_count',
@@ -1639,6 +1653,35 @@ def _latest_session_id(game_urls: Mapping[Any, Mapping[str, Any]]) -> Optional[i
     return next(iter(ordered))
 
 
+def _player_game_urls() -> Mapping[Any, Any]:
+    player_id = st.session_state.get("player_id")
+    game_urls = st.session_state.get("game_urls_d") or {}
+    if player_id is None:
+        return {}
+    return game_urls.get(str(player_id)) or game_urls.get(player_id) or {}
+
+
+def _game_select_options(games: Mapping[Any, Mapping[str, Any]]) -> list[str]:
+    """Label the newest game Latest. Older games stay id, description."""
+    games = _games_newest_first(games)
+    latest_id = next(iter(games), None)
+    options: list[str] = []
+    for session_id, entry in games.items():
+        description = entry.get("description")
+        if session_id == latest_id:
+            options.append(f"Latest, {description}" if description else "Latest")
+        else:
+            options.append(f"{session_id}, {description}")
+    return options
+
+
+def _session_id_from_game_option(selection: str) -> Any:
+    token = str(selection).split(",")[0].strip()
+    if token.lower() == "latest":
+        return "latest"
+    return int(token)
+
+
 def _clear_selected_session(*, clear_games: bool = False) -> None:
     """Drop a bookmarked or leftover session so the next load picks the newest game."""
     if clear_games:
@@ -2079,7 +2122,7 @@ def club_session_id_on_change() -> None:
     #st.session_state.tournament_session_ids_selectbox = None # clear tournament index whenever club index changes. todo: doesn't seem to update selectbox with new index.
     selection = st.session_state.club_session_ids_selectbox
     if selection is not None:
-        session_id = int(selection.split(',')[0]) # split selectbox item on commas. only want first split.
+        session_id = _session_id_from_game_option(selection)
         if change_game_state(st.session_state.player_id, session_id):
             st.session_state.session_id = None
         else:
@@ -2802,7 +2845,7 @@ class FFBridgeApp(PostmortemBase):
         if player_id_key is not None and player_id_key in st.session_state.game_urls_d:
             games = _games_newest_first(st.session_state.game_urls_d[player_id_key])
             st.session_state.game_urls_d[player_id_key] = games
-            options = [f"{k}, {v.get('description')}" for k, v in games.items()]
+            options = _game_select_options(games)
             current = st.session_state.get("session_id")
             current_index = next(
                 (i for i, key in enumerate(games) if str(key) == str(current)),
