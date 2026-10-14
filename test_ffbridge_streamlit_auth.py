@@ -259,6 +259,16 @@ class StreamlitLancelotRoutingTests(unittest.TestCase):
         self.assertEqual(url, route)
         self.assertEqual(state["game_url"], route)
         self.assertEqual(state["route_url"], route)
+        self.assertTrue(state["provisional_results"])
+        from mlBridge.mlBridgePostmortemLib import standard_report_title
+        state["player_name"] = "Robert SALITA"
+        state["player_license_number"] = "9500754"
+        with patch.object(app.st, "session_state", state):
+            self.assertEqual(
+                standard_report_title(),
+                "Provisional Results: Bridge Game Postmortem Report "
+                "Personalized for Robert SALITA (9500754)",
+            )
         self.assertEqual(
             app._sidebar_result_links(url, state["route_url"]),
             [("Roy René Result Page", route)],

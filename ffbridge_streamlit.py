@@ -1472,6 +1472,7 @@ def _ensure_game_results_url(df: Optional[pl.DataFrame] = None) -> Optional[str]
     An unpublished Bridge+ session has no ffbridge.fr page. Its links use the
     organizer sheet instead of a group id left over from another session.
     """
+    st.session_state.provisional_results = False
     entry = _selected_session_entry()
     organizer = _organizer_results_url(entry)
     unpublished = bool(
@@ -1481,9 +1482,11 @@ def _ensure_game_results_url(df: Optional[pl.DataFrame] = None) -> Optional[str]
     if organizer:
         st.session_state.game_url = organizer
         st.session_state.route_url = _usable_results_url(entry.get("route_url")) or organizer
+        st.session_state.provisional_results = True
         return organizer
     if unpublished:
         st.session_state.game_url = None
+        st.session_state.provisional_results = True
         return None
 
     current = _usable_results_url(st.session_state.get("game_url"))
