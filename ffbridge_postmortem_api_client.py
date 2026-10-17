@@ -43,6 +43,7 @@ def _request(
     path: str,
     params: Optional[Dict[str, Any]] = None,
     timeout_s: float = _TIMEOUT_S,
+    json_body: Optional[Dict[str, Any]] = None,
 ) -> requests.Response:
     url = f"{FFBRIDGE_POSTMORTEM_API_BASE_URL}{path}"
     try:
@@ -50,6 +51,7 @@ def _request(
             method,
             url,
             params={k: v for k, v in (params or {}).items() if v is not None},
+            json=json_body,
             timeout=timeout_s,
         )
     except requests.Timeout as exc:
@@ -314,3 +316,49 @@ def postmortem_schema(
 def postmortem_dataframe(player_id: str, session_id: Optional[str] = None) -> pl.DataFrame:
     resp = _request("GET", f"/postmortems/{player_id}/parquet", {"session_id": session_id})
     return pl.read_parquet(io.BytesIO(resp.content))
+
+
+def start_run_group(
+    player_id: str,
+    group: str,
+    statements: list,
+    session_id: Optional[str] = None,
+    group_alias: Optional[str] = None,
+    force: bool = False,
+    limit: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Start a favorite-group job. The response is a job id, not the rows.
+
+    Poll run_group_status until status is done or failed, then call
+    run_group_result. A cached true response is already done.
+    """
+    return _request(
+        "POST",
+        f"/postmortems/{player_id}/run-group",
+        json_body={
+            "session_id": session_id,
+            "group": group,
+            "group_alias": group_alias,
+            "statements": statements,
+            "force": force,
+            "limit": limit,
+        },
+    ).json()
+
+
+def run_group_status(job_id: str) -> Dict[str, Any]:
+    """queued, running, done, or failed, plus done/total, elapsed_s, and completed."""
+    return _get_json(f"/run-group/{job_id}")
+
+
+def run_group_result(
+    job_id: str,
+    offset: int = 0,
+    limit: Optional[int] = None,
+    title: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Finished favorites so far. offset and limit page by favorite; title selects one."""
+    return _get_json(
+        f"/run-group/{job_id}/result",
+        {"offset": offset, "limit": limit, "title": title},
+    )

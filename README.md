@@ -48,6 +48,25 @@ Optional query parameters are `session_id` and `limit` (default 500, maximum 200
 
 The MCP tools `ffbridge_postmortem_prediction_boards` and `ffbridge_postmortem_prediction_rankings` call those routes. Checkpoints live in `FFBRIDGE_SAVED_MODELS` or `E:\bridge\data\ffbridge\SavedModels`. When the checkpoints are missing, published club rank and FFBridge global rank are still returned and the prediction columns are null.
 
+### Group run
+
+A brief, full, or predictions postmortem runs as a job. The server loads the session once and runs every favorite, the same way the website does. Do not call `GET /postmortems/{player_id}/sql` once per favorite.
+
+MCP clients do not call these routes themselves. They call `ffbridge_postmortem_run_group_start`, then `ffbridge_postmortem_run_group_status`, then `ffbridge_postmortem_run_group_result`. `group` is `Summarize_Briefly`, `Summarize`, or `AI_Predictions`. Omit `session_id` on the MCP start tool for the player's latest published game. Do not call `ffbridge_postmortem_run_group`; that one call times out.
+
+`POST /postmortems/{player_id}/run-group` returns a `job_id` before the SQL runs. JSON body:
+
+- `session_id` (required), `group` (required button id), `statements` (required list of `{id, title, sql}`)
+- `group_alias` (optional display name), `force` (optional; default false), `limit` (optional row cap, max 2000)
+
+The response is `job_id`, `status` (`queued`), `cached`, `player_id`, `session_id`, `group`, `done`, `total`, and `elapsed_s`. The same player, session, group, and SQL returns the finished job with `cached: true` and does not run again. `force: true` starts a new job.
+
+`GET /run-group/{job_id}` is the poll. `status` is `queued`, `running`, `done`, or `failed`. `done` and `total` count favorites. `elapsed_s` is seconds since the job started. `completed` lists each finished favorite with `title`, `elapsed_s`, `row_count`, and `error`. Poll until `done` or `failed`. A client can read results as soon as `completed` is non-empty.
+
+`GET /run-group/{job_id}/result` returns finished favorites in group order, including while `status` is still `running`. `complete` is true once the job is `done` or `failed`. Query `offset` and `limit` page by favorite, not by row. Query `title` returns one favorite (title or id, case-insensitive). Each section has `columns`, `rows`, `row_count`, and `elapsed_s`. `next_offset` is the next page, or null when no further finished favorites are waiting. `results_file` on a finished job is `group_runs/<job_id>.json` under the postmortem cache. That path is on the server. Clients page with the result route instead of opening the file.
+
+Board-level statements should select `Result` (integer overtricks) as well as the score. The MCP start tool inserts `Result` into those statements. Aggregate statements that use `GROUP BY` are left unchanged.
+
 A positive `Rank_Diff` means the model places the pair worse than FFBridge. `Pct_Diff` is the predicted North-South percentage minus the published board percentage. The predicted North-South percentage uses the predicted declarer: the declarer percentage when the model expects North or South, and its complement when the model expects East or West.
 
 ### 3. Authentication (`ffbridge_auth_playwright.py`)

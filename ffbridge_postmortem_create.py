@@ -1903,14 +1903,24 @@ def _active_job_for_player(
     return max(active, key=lambda job: job.updated_at or job.started_at)
 
 
-def generate_health(cache_dir: Optional[pathlib.Path] = None) -> Dict[str, Any]:
+def generate_health(
+    cache_dir: Optional[pathlib.Path] = None,
+    *,
+    include_files: bool = True,
+) -> Dict[str, Any]:
     """Return current writer state plus separately labeled error history.
 
     ``last_error`` is populated only when the latest job failed. Historical
     failures remain available under ``most_recent_error`` with job and time.
+    ``include_files`` false uses the in-memory jobs only. /health uses that
+    so a group run cannot make the probe stat every cache and archive file.
     """
     directory = pathlib.Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
-    jobs = _load_jobs_from_store(directory)
+    if include_files:
+        jobs = _load_jobs_from_store(directory)
+    else:
+        with _jobs_lock:
+            jobs = list(_jobs.values())
     active = [job for job in jobs if job.status in _ACTIVE_JOB_STATUSES]
     running = [job for job in active if job.status in _RUNNING_JOB_STATUSES]
     queued = [job for job in active if job.status == "queued"]
@@ -1947,12 +1957,14 @@ def generate_health(cache_dir: Optional[pathlib.Path] = None) -> Dict[str, Any]:
         if latest_error
         else None
     )
-    parquet_files = list(directory.glob("df-*.parquet")) if directory.is_dir() else []
-    latest_parquet = (
-        max(parquet_files, key=lambda path: path.stat().st_mtime)
-        if parquet_files
-        else None
-    )
+    latest_parquet = None
+    if include_files and directory.is_dir():
+        parquet_files = list(directory.glob("df-*.parquet"))
+        latest_parquet = (
+            max(parquet_files, key=lambda path: path.stat().st_mtime)
+            if parquet_files
+            else None
+        )
     return {
         "process_id": _PROCESS_INSTANCE_ID,
         "jobs_running": len(running),

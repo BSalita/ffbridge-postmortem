@@ -101,6 +101,7 @@ class WriterHealthTests(unittest.TestCase):
             "GET",
             f"{api.FFBRIDGE_POSTMORTEM_API_BASE_URL}/health",
             params={},
+            json=None,
             timeout=1.5,
         )
 
@@ -153,7 +154,9 @@ class WriterHealthTests(unittest.TestCase):
         self.assertEqual(result["jobs_running"], 1)
         self.assertEqual(result["last_job_id"], "job-123")
         self.assertIsNone(result["last_error"])
-        generate_health.assert_called_once_with(api_server.svc.CACHE_DIR)
+        generate_health.assert_called_once_with(
+            api_server.svc.CACHE_DIR, include_files=False
+        )
         dataset_info.assert_not_called()
 
 

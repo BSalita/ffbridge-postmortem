@@ -9,6 +9,14 @@ The MCP server and Streamlit app are HTTP clients of this API.
 Session predictions:
   GET /postmortems/{player_id}/predictions/boards
   GET /postmortems/{player_id}/predictions/rankings
+
+Favorite-group jobs (what the website runs as one postmortem):
+  POST /postmortems/{player_id}/run-group
+  GET  /run-group/{job_id}
+  GET  /run-group/{job_id}/result
+MCP clients call ffbridge_postmortem_run_group_start, then
+ffbridge_postmortem_run_group_status, then
+ffbridge_postmortem_run_group_result. They do not call /sql once per favorite.
 """
 
 from __future__ import annotations
@@ -18,13 +26,13 @@ import io
 import os
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
-import ffbridge_postmortem_archive as archive
 import ffbridge_postmortem_create as create
+import ffbridge_postmortem_group_job as group_job
 import ffbridge_postmortem_service as svc
 
 FFBRIDGE_POSTMORTEM_API_PORT = int(os.environ.get("FFBRIDGE_POSTMORTEM_API_PORT", "8517"))
@@ -43,7 +51,13 @@ app = FastAPI(
         "Cached postmortem reads plus on-demand Lancelot generate "
         "(same path Streamlit used to run in-process). "
         "Predictions: /postmortems/{player_id}/predictions/boards and "
-        "/postmortems/{player_id}/predictions/rankings."
+        "/postmortems/{player_id}/predictions/rankings. "
+        "A brief, full, or predictions report is a job: "
+        "POST /postmortems/{player_id}/run-group, then "
+        "GET /run-group/{job_id}, then GET /run-group/{job_id}/result. "
+        "MCP clients use ffbridge_postmortem_run_group_start, "
+        "ffbridge_postmortem_run_group_status, and "
+        "ffbridge_postmortem_run_group_result."
     ),
     version="1.0.0",
     lifespan=lifespan,
@@ -83,19 +97,21 @@ async def unhandled_error_handler(request, exc: Exception) -> JSONResponse:
 
 @app.get("/health")
 def health() -> dict:
-    """Readiness and persisted job diagnostics without authentication or Lancelot calls."""
+    """Liveness. No archive scan and no cache directory listing.
+
+    A full postmortem runs on a background thread. This handler stays on the
+    event loop and reads in-memory job counters, so the 2s MCP health probe
+    still returns while favorites are executing.
+    """
     payload = {
         "ok": True,
         "sidecar_up": True,
         "status": "ok",
         "service": "ffbridge-postmortem-api",
         "detail": "ready",
-        "archive": archive.archive_info(),
-        "hierarchical_archive": svc.normalized.hierarchical_info(
-            svc.HIERARCHICAL_DIR
-        ),
+        "group_runs": group_job.live_counts(),
     }
-    payload.update(create.generate_health(svc.CACHE_DIR))
+    payload.update(create.generate_health(svc.CACHE_DIR, include_files=False))
     return payload
 
 
@@ -223,6 +239,66 @@ def generate(
 @app.get("/generate/{job_id}")
 def generate_status(job_id: str) -> dict:
     return svc.generate_status(job_id)
+
+
+@app.post("/postmortems/{player_id}/run-group")
+def start_group_run(player_id: str, body: dict = Body(...)) -> dict:
+    """Start every favorite in a group. Returns a job id before the SQL runs.
+
+    JSON body: session_id, group (Summarize_Briefly, Summarize, or
+    AI_Predictions), statements (list of {id, title, sql}), optional
+    group_alias, force, and limit (max 2000). The session frame is loaded
+    once. Poll GET /run-group/{job_id}. Read GET /run-group/{job_id}/result
+    for favorites as they finish. The same player, session, group, and SQL
+    returns the finished job with cached true. force true starts a new job.
+    MCP clients call ffbridge_postmortem_run_group_start instead of this route.
+    """
+    return group_job.start_run_group(
+        player_id,
+        str(body.get("session_id") or ""),
+        str(body.get("group") or ""),
+        body.get("statements") or [],
+        group_alias=body.get("group_alias"),
+        force=bool(body.get("force") or False),
+        limit=body.get("limit"),
+    )
+
+
+@app.get("/run-group/{job_id}")
+def group_run_status(job_id: str) -> dict:
+    """Status of a group run: queued, running, done, or failed.
+
+    done and total count favorites. elapsed_s is seconds since start.
+    completed lists each finished favorite with title, elapsed_s, row_count,
+    and error. Poll until done or failed. MCP clients call
+    ffbridge_postmortem_run_group_status.
+    """
+    return group_job.run_group_status(job_id)
+
+
+@app.get("/run-group/{job_id}/result")
+def group_run_result(
+    job_id: str,
+    offset: int = Query(0, ge=0, description="Favorite index to start at. Not a row index."),
+    limit: Optional[int] = Query(
+        None, ge=1, le=80, description="How many favorites to return. Omit for all finished favorites."
+    ),
+    title: Optional[str] = Query(
+        None, description="One favorite title or id. Case-insensitive."
+    ),
+) -> dict:
+    """Favorites finished so far, in group order, including while the job is running.
+
+    offset and limit page by favorite, not by row. title returns one favorite.
+    complete is true when status is done or failed. next_offset is the next
+    page, or null when nothing further is waiting. Each section has columns,
+    rows, row_count, and elapsed_s. results_file on a finished job is the
+    server cache name, not a path the client can open. MCP clients call
+    ffbridge_postmortem_run_group_result.
+    """
+    return group_job.run_group_result(
+        job_id, offset=offset, limit=limit, title=title
+    )
 
 
 @app.get("/postmortems/{player_id}/meta")

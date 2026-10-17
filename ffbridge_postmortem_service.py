@@ -205,8 +205,22 @@ def dataset_info() -> Dict[str, Any]:
             "without generating with ffbridge_postmortem_writer_health. Streamlit "
             "(https://ffbridge.postmortem.chat) reads and writes the same cache. "
             "Session predictions are GET /postmortems/{player_id}/predictions/boards "
-            "and /postmortems/{player_id}/predictions/rankings."
+            "and /postmortems/{player_id}/predictions/rankings. "
+            "A brief, full, or predictions report is POST /postmortems/{player_id}/run-group, "
+            "then GET /run-group/{job_id}, then GET /run-group/{job_id}/result. "
+            "MCP clients call ffbridge_postmortem_run_group_start, "
+            "ffbridge_postmortem_run_group_status, and "
+            "ffbridge_postmortem_run_group_result. Do not call /sql once per favorite."
         ),
+        "group_run": {
+            "start": "POST /postmortems/{player_id}/run-group",
+            "status": "GET /run-group/{job_id}",
+            "result": "GET /run-group/{job_id}/result",
+            "mcp_start": "ffbridge_postmortem_run_group_start",
+            "mcp_status": "ffbridge_postmortem_run_group_status",
+            "mcp_result": "ffbridge_postmortem_run_group_result",
+            "groups": "Summarize_Briefly, Summarize, AI_Predictions",
+        },
     }
 
 
@@ -565,21 +579,38 @@ def process_sql_macros(sql: str, meta: Dict[str, Any]) -> str:
     return sql
 
 
+def prepare_postmortem_sql(sql: str, meta: Dict[str, Any]) -> str:
+    """Substitute player macros and accept DuckDB's FROM-first form."""
+    prepared = process_sql_macros(sql.strip().rstrip(";"), meta)
+    if f"from {CON_REGISTER_NAME}" not in prepared.lower():
+        prepared = f"FROM {CON_REGISTER_NAME} " + prepared
+    return prepared
+
+
+def sql_result_payload(result: pl.DataFrame, sql: str, limit: int) -> Dict[str, Any]:
+    """JSON rows for one query. row_count is the number of rows returned."""
+    truncated = result.height > limit
+    shown = result.head(limit)
+    return {
+        "sql": sql,
+        "columns": list(shown.columns),
+        "rows": shown.to_dicts(),
+        "row_count": shown.height,
+        "truncated": truncated,
+    }
+
+
 def run_sql(df: pl.DataFrame, sql: str, meta: Dict[str, Any], limit: Optional[int] = None) -> Dict[str, Any]:
     """Run DuckDB SQL against the postmortem dataframe registered as 'self'."""
     import ffbridge_session_predictions as session_predictions
 
     limit = max(1, min(limit or DEFAULT_SQL_ROW_LIMIT, MAX_SQL_ROW_LIMIT))
-    sql = process_sql_macros(sql.strip().rstrip(";"), meta)
+    sql = prepare_postmortem_sql(sql, meta)
     prediction_info = None
     if session_predictions.sql_needs_predictions(sql):
         df, prediction_info = session_predictions.apply_session_predictions(
             df, meta.get("session_id"), CACHE_DIR
         )
-    # Same convenience as the app's ShowDataFrameTable: allow DuckDB's
-    # FROM-first syntax by prepending the table when it is not referenced.
-    if f"from {CON_REGISTER_NAME}" not in sql.lower():
-        sql = f"FROM {CON_REGISTER_NAME} " + sql
     # external access off: only the registered dataframe is queryable.
     con = duckdb.connect(config={"enable_external_access": "false"})
     try:
@@ -587,15 +618,7 @@ def run_sql(df: pl.DataFrame, sql: str, meta: Dict[str, Any], limit: Optional[in
         result = con.execute(sql).pl()
     finally:
         con.close()
-    truncated = result.height > limit
-    result = result.head(limit)
-    payload = {
-        "sql": sql,
-        "columns": result.columns,
-        "rows": result.to_dicts(),
-        "row_count": result.height,
-        "truncated": truncated,
-    }
+    payload = sql_result_payload(result, sql, limit)
     if prediction_info and prediction_info.get("warning"):
         payload["warning"] = prediction_info["warning"]
     return payload
