@@ -277,14 +277,14 @@
 				"i18n": {
 					"fr": {
 						"title": "Donnes jouées par votre paire",
-						"help": "**Donnes jouées par votre paire.**"
+						"help": "**Donnes jouées par notre paire.**"
 					}
 				}
 			},
 			"Our_Best_Boards": {
 				"title": "Best boards",
 				"row_click": "Show every score on board {Board}.",
-				"help": "**Showing {player1_name}'s best boards.**",
+				"help": "**Showing our partnership's best boards.**",
 				"prompts": [
 					{
 						"prompt": "Show board, pct, contract, score, Par, Par pct, sd pct. Show those boards I played and pct > .7. Sort by pct descending.",
@@ -308,14 +308,14 @@
 				"i18n": {
 					"fr": {
 						"title": "Meilleures donnes",
-						"help": "**Meilleures donnes de {player1_name}.**"
+						"help": "**Meilleures donnes de notre paire.**"
 					}
 				}
 			},
 			"Our_Worst_Boards": {
 				"title": "Worst boards",
 				"row_click": "Show every score on board {Board}.",
-				"help": "**Showing {player1_name}'s worst boards.**",
+				"help": "**Showing our partnership's worst boards.**",
 				"prompts": [
 					{
 						"prompt": "Show board, pct, contract, score, Par, Par pct, sd pct. Show those boards I played and pct < .3. Sort by pct ascending.",
@@ -342,7 +342,7 @@
 				"i18n": {
 					"fr": {
 						"title": "Plus mauvaises donnes",
-						"help": "**Plus mauvaises donnes de {player1_name}.**"
+						"help": "**Plus mauvaises donnes de notre paire.**"
 					}
 				}
 			},
@@ -373,7 +373,7 @@
 				"i18n": {
 					"fr": {
 						"title": "Donnes où j'ai battu le par",
-						"help": "**Donnes où votre paire a battu le par.**"
+						"help": "**Donnes où notre paire a battu le par.**"
 					}
 				}
 			},
@@ -401,7 +401,7 @@
 				"i18n": {
 					"fr": {
 						"title": "Donnes où j'ai égalé le par",
-						"help": "**Donnes où votre paire a égalé le par.**"
+						"help": "**Donnes où notre paire a égalé le par.**"
 					}
 				}
 			},
@@ -432,7 +432,7 @@
 				"i18n": {
 					"fr": {
 						"title": "Donnes où j'ai fait moins que le par",
-						"help": "**Donnes où votre paire a fait moins que le par.**"
+						"help": "**Donnes où notre paire a fait moins que le par.**"
 					}
 				}
 			},
@@ -608,7 +608,7 @@
 				"i18n": {
 					"fr": {
 						"title": "On nous a fait des cadeaux",
-						"help": "**Donnes que votre paire a déclarées et où les adversaires vous ont offert le contrat ou des levées.**"
+						"help": "**Donnes que notre paire a déclarées et où les adversaires ont offert le contrat ou des levées.**"
 					}
 				}
 			},
@@ -678,7 +678,7 @@
 				"i18n": {
 					"fr": {
 						"title": "On a puni les adversaires",
-						"help": "**Donnes où votre paire a mal enchéri ou mal joué, mais a tout de même bien marqué.**"
+						"help": "**Donnes où notre paire a mal enchéri ou mal joué, mais a tout de même bien marqué.**"
 					}
 				}
 			},
@@ -707,7 +707,7 @@
 				"i18n": {
 					"fr": {
 						"title": "On s'est fait punir",
-						"help": "**Donnes où votre paire a trébuché et a été punie.**"
+						"help": "**Donnes où notre paire a trébuché et a été punie.**"
 					}
 				}
 			},
@@ -738,7 +738,7 @@
 				"i18n": {
 					"fr": {
 						"title": "Nos erreurs",
-						"help": "**Donnes où votre paire s'est trompée en défense ou dans les enchères compétitives.**"
+						"help": "**Donnes où notre paire s'est trompée en défense ou dans les enchères compétitives.**"
 					}
 				}
 			},
@@ -766,7 +766,7 @@
 				"i18n": {
 					"fr": {
 						"title": "Nous avons sous-enchéri",
-						"help": "**Donnes que votre paire a déclarées, mais où le contrat ou le jeu a été raté.**"
+						"help": "**Donnes que notre paire a déclarées, mais où le contrat ou le jeu a été raté.**"
 					}
 				}
 			},
@@ -1019,7 +1019,7 @@
 				"i18n": {
 					"fr": {
 						"title": "Analyse d'espérance (EV) de nos donnes",
-						"help": "**Analyse d'espérance (EV) de nos donnes. EV_Pct_Max_Diff est une statistique d'expert : l'écart de pourcentage entre le résultat réel et le résultat probable. Les valeurs les plus hautes sont vos donnes les plus chanceuses.**"
+						"help": "**Analyse d'espérance (EV) de nos donnes. EV_Pct_Max_Diff est une statistique d'expert : l'écart de pourcentage entre le résultat réel et le résultat probable. Les valeurs les plus hautes sont nos donnes les plus chanceuses.**"
 					}
 				}
 			},
@@ -1043,7 +1043,7 @@
 				"i18n": {
 					"fr": {
 						"title": "Analyse d'espérance (EV) de toutes les donnes à toutes les tables, par couleur",
-						"help": "**Analyse d'espérance (EV) de toutes les donnes à toutes les tables, par couleur. EV_Pct_Max_Diff est une statistique d'expert : l'écart de pourcentage entre le résultat réel et le résultat probable. Les valeurs les plus hautes sont vos donnes les plus chanceuses.**"
+						"help": "**Analyse d'espérance (EV) de toutes les donnes à toutes les tables, par couleur. EV_Pct_Max_Diff est une statistique d'expert : l'écart de pourcentage entre le résultat réel et le résultat probable. Les valeurs les plus hautes sont nos donnes les plus chanceuses.**"
 					}
 				}
 			},
@@ -1145,7 +1145,7 @@
 				"i18n": {
 					"fr": {
 						"title": "Pourcentage par tour",
-						"help": "**Votre pourcentage de matchpoints par tour.**"
+						"help": "**Notre pourcentage de matchpoints par tour.**"
 					}
 				}
 			},
@@ -1199,7 +1199,7 @@
 				"i18n": {
 					"fr": {
 						"title": "Enchères uniques jouées par votre paire",
-						"help": "**Donnes jouées par votre paire, à votre table, avec des enchères uniques par couleur et type de contrat.**"
+						"help": "**Donnes jouées par notre paire, à notre table, avec des enchères uniques par couleur et type de contrat.**"
 					}
 				}
 			},
@@ -1228,7 +1228,7 @@
 				"i18n": {
 					"fr": {
 						"title": "Enchères uniques déclarées par votre paire",
-						"help": "**Donnes déclarées par votre paire avec des enchères uniques par couleur et type de contrat.**"
+						"help": "**Donnes déclarées par notre paire avec des enchères uniques par couleur et type de contrat.**"
 					}
 				}
 			},
