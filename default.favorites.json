@@ -98,7 +98,7 @@
 			},
 			"About": {
 				"title": "About",
-				"help": "**Showing info about the event, you and your partner.**",
+				"help": "**Showing info about the event, {player1_name} and {player2_name}.**",
 				"comment": "slash commands are dealt with internally.",
 				"prompts": [
 					{
@@ -129,7 +129,7 @@
 			"Our_Best_Boards": {
 				"title": "Best boards",
 				"row_click": "Show every score on board {Board}.",
-				"help": "**Showing your best boards.**",
+				"help": "**Showing {player1_name}'s best boards.**",
 				"prompts": [
 					{
 						"prompt": "Show board, pct, contract, score, Par, Par pct, sd pct. Show those boards I played and pct > .7. Sort by pct descending.",
@@ -146,7 +146,7 @@
 			"Our_Worst_Boards": {
 				"title": "Worst boards",
 				"row_click": "Show every score on board {Board}.",
-				"help": "**Showing your worst boards.**",
+				"help": "**Showing {player1_name}'s worst boards.**",
 				"prompts": [
 					{
 						"prompt": "Show board, pct, contract, score, Par, Par pct, sd pct. Show those boards I played and pct < .3. Sort by pct ascending.",
@@ -214,7 +214,7 @@
 			"Boards_We_Underperformed_DD": {
 				"title": "Boards We Underperformed Double Dummy (DD)",
 				"row_click": "Show all four hands for board {Board}, with Dealer_Direction, Vul, Par, Contract, Declarer_Name, Result, Score, Pct, DD_Score, and EV.",
-				"help": "**Showing boards we played where our side took fewer tricks than double dummy, whether we declared or defended.**",
+				"help": "**Showing boards our partnership played where our side took fewer tricks than double dummy, whether our partnership declared or defended.**",
 				"prompts": [
 					{
 						"prompt": "Show board, contract, declarer, tricks, DD tricks, tricks short of DD, score, Par, pct. Show every board we played where we failed to take DD tricks, regardless of who declared.",
@@ -231,7 +231,7 @@
 			"Boards_I_Underperformed_DD": {
 				"title": "Boards I Underperformed Double Dummy (DD)",
 				"row_click": "Show every score on board {Board}.",
-				"help": "**Showing boards you declared which underperformed double dummy (DD).**",
+				"help": "**Showing boards {player1_name} declared which underperformed double dummy (DD).**",
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, Par, pct, Par pct, sd pct, tricks, DD tricks. Show those boards I declared and tricks < DD tricks.",
@@ -248,7 +248,7 @@
 			"Boards_Partner_Underperformed_DD": {
 				"title": "Boards Partner Underperformed Double Dummy (DD)",
 				"row_click": "Show every score on board {Board}.",
-				"help": "**Showing boards your partner declared which underperformed double dummy (DD).**",
+				"help": "**Showing boards {player2_name} declared which underperformed double dummy (DD).**",
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, Par, pct, Par pct, sd pct, tricks, DD tricks. Show those boards partner declared and tricks < DD tricks.",
@@ -280,7 +280,7 @@
 			"Boards_We_Underperformed_EV": {
 				"title": "Boards Your Partnership Underperformed Expected Value (EV)",
 				"row_click": "Show every score on board {Board}.",
-				"help": "**Showing boards we declared which underperformed Expected Value (EV).**",
+				"help": "**Showing boards our partnership declared which underperformed Expected Value (EV).**",
 				"prompts": [
 					{
 						"try_next": [
@@ -435,7 +435,7 @@
 			"Boards_I_Declared": {
 				"title": "Boards I Declared",
 				"row_click": "@Boards_Partner_Declared",
-				"help": "**Showing boards which you declared.**",
+				"help": "**Showing boards which {player1_name} declared.**",
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, Par, pct, Par pct, sd pct, DD score, tricks, DD tricks. Show those boards I declared.",
@@ -450,7 +450,7 @@
 			"Boards_Partner_Declared": {
 				"title": "Boards Partner Declared",
 				"row_click": "@Boards_I_Declared",
-				"help": "**Showing boards your partner declared.**",
+				"help": "**Showing boards which {player2_name} declared.**",
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, Par, pct, Par pct, sd pct, DD score, tricks, DD tricks. Show those boards partner declared.",
@@ -776,7 +776,7 @@
 			"Board_Results_Predictions_Boards_We_Played": {
 				"title": "Board Results Predictions for Boards We Played",
 				"row_click": "Show every score on board {Board}.",
-				"help": "**Predicted board results percentages. Only boards we played. Predictions made before game starts.**",
+				"help": "**Predicted board results percentages. Only boards our partnership played. Predictions made before game starts.**",
 				"prompts": [
 					{
 						"prompt": "",
@@ -847,7 +847,7 @@
 			},
 			"Contract_Predictions_Statistics_By_Boards_We_Played": {
 				"title": "Contract Predictions Statistics for Boards We Played",
-				"help": "**Statistics on contract predictions for boards we played. Experimental. Predictions made before game starts.**",
+				"help": "**Statistics on contract predictions for boards our partnership played. Experimental. Predictions made before game starts.**",
 				"comment": "Need to implement par score, actual contract dd score, predicted contract dd score. Maybe SD scores too.",
 				"prompts": [
 					{
