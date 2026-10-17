@@ -2039,7 +2039,18 @@ def _player_search_matches_from_df(search_df: pl.DataFrame, query: str) -> List[
 def _clear_player_search_matches() -> None:
     st.session_state.pop("player_search_matches", None)
     st.session_state.pop("player_search_match_selection", None)
+    st.session_state.pop("player_search_query", None)
     st.session_state.pop("show_player_modal", None)
+
+
+def _name_search_has_multiple_matches() -> bool:
+    """True only after a non-numeric name search that returned several people."""
+    matches = st.session_state.get("player_search_matches") or []
+    query = (st.session_state.get("player_search_input") or "").strip()
+    searched = (st.session_state.get("player_search_query") or "").strip()
+    if len(matches) <= 1 or not query or query.isdigit():
+        return False
+    return query == searched
 
 
 def _apply_resolved_search_player(player_id: str, license_number: str, query: str) -> None:
@@ -2114,6 +2125,10 @@ def player_search_input_on_change_with_query(query: str) -> None:
         if len(matches) == 1:
             _display, player_id, license_number, _name = matches[0]
             _apply_resolved_search_player(player_id, license_number, query)
+            return
+
+        if query.strip().isdigit():
+            _clear_player_search_matches()
             return
 
         st.session_state.player_search_matches = matches
@@ -2807,29 +2822,56 @@ class FFBridgeApp(PostmortemBase):
         # Use a form so Enter and the Go button submit the current textbox value reliably.
         # (Outside a form, Streamlit may not commit text_input into session_state until Enter/blur,
         # which can make the Go button appear "disabled".)
+        # Name matches stay in this same form, between the search box and Go.
+        matches = st.session_state.get('player_search_matches') or []
+        show_match_selectbox = _name_search_has_multiple_matches()
         with st.sidebar.form(key="player_search_form", clear_on_submit=False):
             st.text_input(
-            "FFBridge license number or name",
-            key='player_search_input',
-            placeholder="9500754 or Robert Salita",
-            help="Digits-only license or Lancelot id, or a fuzzy player name.",
-        )
+                "FFBridge license number or name",
+                key='player_search_input',
+                placeholder="9500754 or Robert Salita",
+                help="Digits-only license or Lancelot id, or a fuzzy player name.",
+            )
+            if show_match_selectbox:
+                st.selectbox(
+                    f"Matching players ({len(matches)})",
+                    options=[match[0] for match in matches],
+                    index=None,
+                    placeholder="Select the player",
+                    key="player_search_match_selection",
+                    help="Several people matched. Pick one, then click Go.",
+                )
             submitted = st.form_submit_button("Go", type="primary", use_container_width=True)
 
         if submitted:
             input_value = (st.session_state.get('player_search_input') or '').strip()
-            if input_value.isdigit():
+            selected = st.session_state.get('player_search_match_selection')
+            same_query = input_value == (st.session_state.get('player_search_query') or '').strip()
+            if not input_value:
+                _clear_player_search_matches()
+            elif (
+                show_match_selectbox
+                and selected
+                and same_query
+                and any(match[0] == selected for match in matches)
+            ):
+                player_search_match_change()
+                if st.session_state.get('insert_player_search_value'):
+                    st.rerun()
+            elif input_value.isdigit():
                 # Numeric input - store for report generation (handled at top of this function)
+                _clear_player_search_matches()
                 st.session_state.process_go_button_input = input_value
                 st.rerun()
-            else:
+            elif input_value:
                 # Non-numeric input - resolve a unique name or show a selectbox
-                if input_value:
-                    player_search_input_on_change_with_query(input_value)
-                    # If a name resolved to a license number, rerun so the textbox
-                    # (already instantiated this render) picks up the inserted value.
-                    if st.session_state.get('insert_player_search_value'):
-                        st.rerun()
+                player_search_input_on_change_with_query(input_value)
+                # If a name resolved to a license number, rerun so the textbox
+                # (already instantiated this render) picks up the inserted value.
+                if st.session_state.get('insert_player_search_value'):
+                    st.rerun()
+                if len(st.session_state.get('player_search_matches') or []) > 1:
+                    st.rerun()
         
         # Display any search error in the sidebar
         if hasattr(st.session_state, 'player_search_error'):
@@ -2840,16 +2882,6 @@ class FFBridgeApp(PostmortemBase):
             _display, player_id, license_number, _name = matches[0]
             _apply_resolved_search_player(player_id, license_number, _display)
             st.rerun()
-        elif len(matches) > 1:
-            st.sidebar.selectbox(
-                f"Matching players ({len(matches)})",
-                options=[match[0] for match in matches],
-                index=None,
-                placeholder="Select the player",
-                on_change=player_search_match_change,
-                key="player_search_match_selection",
-                help="Several people matched. Pick one to generate the report.",
-            )
         
         # If a player is selected but games haven't been loaded yet, try to populate them
         if (st.session_state.player_id is not None and
