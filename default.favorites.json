@@ -44,7 +44,14 @@
 				"@Declarer_Rankings",
 				"@Successful_Sacrifices",
 				"@Scoring_Errors"
-			]
+			],
+			"i18n": {
+				"fr": {
+					"title": "**Résumé**",
+					"chip": "Postmortem complet",
+					"help": "Résumer les résultats de la partie"
+				}
+			}
 		},
 		"Summarize_Briefly": {
 			"title": "Summarize Briefly",
@@ -63,7 +70,14 @@
 				"@Our_Mistakes",
 				"@Par_Rankings",
 				"@Pct_Per_Round"
-			]
+			],
+			"i18n": {
+				"fr": {
+					"title": "Résumé bref",
+					"chip": "Postmortem bref",
+					"help": "Résumer les résultats de la partie. Statistiques pour experts seulement."
+				}
+			}
 		},
 		"AI_Predictions": {
 			"title": "AI Predictions",
@@ -80,7 +94,121 @@
 				"@Contract_Predictions_Statistics_By_Boards_We_Played",
 				"@Contract_Predictions_Statistics_By_Board",
 				"@Contract_Predictions_Statistics_By_Board_By_Contract"
-			]
+			],
+			"i18n": {
+				"fr": {
+					"title": "Prédictions IA",
+					"help": "Afficher les prédictions de l'IA"
+				}
+			}
+		}
+	},
+	"Chrome": {
+		"report_title": "Bridge Game Postmortem Report",
+		"provisional_prefix": "Provisional Results: {title}",
+		"personalized_for": "Personalized for {name}",
+		"personalized_for_license": "Personalized for {name} ({license})",
+		"created_by": "Created by {url}",
+		"on_date": "on {date}",
+		"event_id": "(event id {session_id})",
+		"bridge_game": "Bridge Game",
+		"results_page": "Results Page: {url}",
+		"your_pair": "Your pair was {pair_id}",
+		"in_section": "in section {section}",
+		"you_played": "You played {direction}",
+		"your_partner": "Your partner was {name}",
+		"your_partner_license": "Your partner was {name} ({license})",
+		"who_played": "who played {direction}",
+		"creating_report": "Creating personalized report...",
+		"go_to_top": "Go to top of report",
+		"download_pdf": "Download Personalized Report PDF",
+		"pdf_title": "Bridge Game Postmortem Report Personalized for {player}",
+		"pdf_downloaded": "Personalized report downloaded.",
+		"no_favorites": "No favorites configuration found. Cannot generate report.",
+		"report_error": "Error generating report from favorites: {error}",
+		"preparing_report": "Preparing Bridge Game Postmortem Report...",
+		"sidebar_title": "FFBridge Postmortem",
+		"language": "Language",
+		"license_label": "FFBridge license number or name",
+		"license_placeholder": "9500754 or Robert Salita",
+		"license_help": "Digits-only license or Lancelot id, or a fuzzy player name.",
+		"matching_players": "Matching players ({count})",
+		"select_player": "Select the player",
+		"select_player_help": "Several people matched. Pick one, then click Go.",
+		"go": "Go",
+		"choose_game": "Choose a club game.",
+		"games_found": "Games found: {count}",
+		"favorite_prompts": "Favorite prompts. Click a button, or ask a question in the box at the bottom.",
+		"other_sites": "Other Morty websites",
+		"ffbridge_result_page": "FFBridge Result Page",
+		"roy_rene_result_page": "Roy René Result Page",
+		"license_not_found": "License number '{license}' not found.",
+		"no_games_for_license": "No games found for license number '{license}'.",
+		"multiple_players": "Multiple players found for license '{license}'. This is unexpected.",
+		"license_lookup_error": "Error looking up license {license}: {error}",
+		"games_load_error": "Error loading games for player: {error}",
+		"no_games_for_player": "No games found for player '{query}'.",
+		"player_not_found": "No player found matching '{query}'. Please check the name or license number and try again.",
+		"no_games_for_id": "No games found for player ID '{player_id}'.",
+		"intro_1": "Hi. I'm Morty. Your friendly postmortem chatbot. I only want to chat about ffbridge pair matchpoint games using a Mitchell movement and not shuffled.",
+		"intro_2": "I'm optimized for large screen devices such as a notebook or monitor. Do not use a smartphone.",
+		"intro_3": "To start our postmortem chat, I'll need the a player number of your ffbridge game. It will be the subject of our chat.",
+		"intro_4": "Enter the player number in the left sidebar or just re-enter the default player number. Press the enter key to begin.",
+		"intro_5": "I'm just a Proof of Concept so don't double me.",
+		"i18n": {
+			"fr": {
+				"report_title": "Rapport de postmortem de la partie",
+				"provisional_prefix": "Résultats provisoires : {title}",
+				"personalized_for": "Personnalisé pour {name}",
+				"personalized_for_license": "Personnalisé pour {name} ({license})",
+				"created_by": "Créé par {url}",
+				"on_date": "le {date}",
+				"event_id": "(séance {session_id})",
+				"bridge_game": "Partie de bridge",
+				"results_page": "Page des résultats : {url}",
+				"your_pair": "Votre paire était {pair_id}",
+				"in_section": "en section {section}",
+				"you_played": "Vous jouiez {direction}",
+				"your_partner": "Votre partenaire était {name}",
+				"your_partner_license": "Votre partenaire était {name} ({license})",
+				"who_played": "qui jouait {direction}",
+				"creating_report": "Création du rapport personnalisé...",
+				"go_to_top": "Haut du rapport",
+				"download_pdf": "Télécharger le rapport personnalisé (PDF)",
+				"pdf_title": "Rapport de postmortem de la partie personnalisé pour {player}",
+				"pdf_downloaded": "Rapport personnalisé téléchargé.",
+				"no_favorites": "Configuration des favoris introuvable. Impossible de générer le rapport.",
+				"report_error": "Erreur lors de la génération du rapport à partir des favoris : {error}",
+				"preparing_report": "Préparation du rapport de postmortem...",
+				"sidebar_title": "Postmortem FFBridge",
+				"language": "Langue",
+				"license_label": "Numéro de licence ou nom FFBridge",
+				"license_placeholder": "9500754 ou Robert Salita",
+				"license_help": "Licence ou identifiant Lancelot en chiffres, ou un nom de joueur approximatif.",
+				"matching_players": "Joueurs correspondants ({count})",
+				"select_player": "Choisissez le joueur",
+				"select_player_help": "Plusieurs personnes correspondent. Choisissez-en une, puis cliquez sur Valider.",
+				"go": "Valider",
+				"choose_game": "Choisissez une partie de club.",
+				"games_found": "Parties trouvées : {count}",
+				"favorite_prompts": "Analyses favorites. Cliquez sur un bouton, ou posez une question dans la zone en bas.",
+				"other_sites": "Autres sites Morty",
+				"ffbridge_result_page": "Page de résultats FFBridge",
+				"roy_rene_result_page": "Page de résultats Roy René",
+				"license_not_found": "Numéro de licence « {license} » introuvable.",
+				"no_games_for_license": "Aucune partie trouvée pour le numéro de licence « {license} ».",
+				"multiple_players": "Plusieurs joueurs trouvés pour la licence « {license} ». Ce n'est pas prévu.",
+				"license_lookup_error": "Erreur lors de la recherche de la licence {license} : {error}",
+				"games_load_error": "Erreur lors du chargement des parties du joueur : {error}",
+				"no_games_for_player": "Aucune partie trouvée pour le joueur « {query} ».",
+				"player_not_found": "Aucun joueur ne correspond à « {query} ». Vérifiez le nom ou le numéro de licence et réessayez.",
+				"no_games_for_id": "Aucune partie trouvée pour le joueur « {player_id} ».",
+				"intro_1": "Bonjour. Je suis Morty, votre assistant de postmortem. Je ne parle que des tournois par paires en matchpoints de la FFBridge, en mouvement Mitchell et non brassés.",
+				"intro_2": "Je suis prévu pour un grand écran, ordinateur portable ou moniteur. N'utilisez pas un smartphone.",
+				"intro_3": "Pour commencer le postmortem, il me faut le numéro de joueur de votre partie FFBridge. Ce sera le sujet de notre échange.",
+				"intro_4": "Saisissez le numéro de joueur dans la barre de gauche, ou ressaisissez le numéro par défaut. Appuyez sur Entrée pour commencer.",
+				"intro_5": "Je ne suis qu'une preuve de concept, alors ne me contrez pas."
+			}
 		}
 	},
 	"SelectBoxes": {
@@ -94,7 +222,12 @@
 						"prompt": "",
 						"sql": ""
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Choisir une analyse"
+					}
+				}
 			},
 			"About": {
 				"title": "About",
@@ -105,7 +238,13 @@
 						"prompt": "/about",
 						"sql": ""
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "À propos",
+						"help": "**Informations sur l'événement, {player1_name} et {player2_name}.**"
+					}
+				}
 			},
 			"Boards_We_Played": {
 				"title": "Boards Your Partnership Played",
@@ -116,15 +255,31 @@
 					{
 						"prompt": "Show board, contract, score, Par, pct, Par pct, sd pct, DD score, tricks, DD tricks. Boards_We_Played=True",
 						"try_next": [
-							{"Worst boards": "@Our_Worst_Boards"},
-							{"Best boards": "@Our_Best_Boards"},
-							{"Boards I Declared": "@Boards_I_Declared"},
-							{"We Got Gifts": "@We_Got_Gifts"},
-							{"Every score": "Show every score on board {Board}."}
+							{
+								"Worst boards": "@Our_Worst_Boards"
+							},
+							{
+								"Best boards": "@Our_Best_Boards"
+							},
+							{
+								"Boards I Declared": "@Boards_I_Declared"
+							},
+							{
+								"We Got Gifts": "@We_Got_Gifts"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
 						],
 						"sql": "SELECT Board, PBN, Dealer, Vul, Contract, Score_{Pair_Direction}, Par_{Pair_Direction}, Pct_{Pair_Direction}, Par_Pct_{Pair_Direction}, EV_Pct_Max_{Pair_Direction}, DD_Score_{Pair_Direction}, Tricks, DD_Tricks, AVG(Pct_{Pair_Direction}) OVER (ORDER BY Board ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as Running_Avg_Pct FROM self WHERE Boards_We_Played = True ORDER BY Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Donnes jouées par votre paire",
+						"help": "**Donnes jouées par votre paire.**"
+					}
+				}
 			},
 			"Our_Best_Boards": {
 				"title": "Best boards",
@@ -134,14 +289,28 @@
 					{
 						"prompt": "Show board, pct, contract, score, Par, Par pct, sd pct. Show those boards I played and pct > .7. Sort by pct descending.",
 						"try_next": [
-							{"Worst boards": "@Our_Worst_Boards"},
-							{"Boards I beat Par": "@Boards_We_Beat_Par"},
-							{"Boards We Declared": "@Boards_We_Declared"},
-							{"Every score": "Show every score on board {Board}."}
+							{
+								"Worst boards": "@Our_Worst_Boards"
+							},
+							{
+								"Boards I beat Par": "@Boards_We_Beat_Par"
+							},
+							{
+								"Boards We Declared": "@Boards_We_Declared"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
 						],
 						"sql": "SELECT Board, Pct_{Pair_Direction}, Contract, Score_{Pair_Direction}, Par_{Pair_Direction}, Par_Pct_{Pair_Direction}, EV_Pct_Max_{Pair_Direction} FROM self WHERE Boards_I_Played = True AND Pct_{Pair_Direction} > .7 ORDER BY Pct_{Pair_Direction} DESC"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Meilleures donnes",
+						"help": "**Meilleures donnes de {player1_name}.**"
+					}
+				}
 			},
 			"Our_Worst_Boards": {
 				"title": "Worst boards",
@@ -151,15 +320,31 @@
 					{
 						"prompt": "Show board, pct, contract, score, Par, Par pct, sd pct. Show those boards I played and pct < .3. Sort by pct ascending.",
 						"try_next": [
-							{"Best boards": "@Our_Best_Boards"},
-							{"Boards I underperformed Par": "@Boards_We_Underperformed_Par"},
-							{"Our Mistakes": "@Our_Mistakes"},
-							{"We Got Gifts": "@We_Got_Gifts"},
-							{"Every score": "Show every score on board {Board}."}
+							{
+								"Best boards": "@Our_Best_Boards"
+							},
+							{
+								"Boards I underperformed Par": "@Boards_We_Underperformed_Par"
+							},
+							{
+								"Our Mistakes": "@Our_Mistakes"
+							},
+							{
+								"We Got Gifts": "@We_Got_Gifts"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
 						],
 						"sql": "SELECT Board, Pct_{Pair_Direction}, Contract, Score_{Pair_Direction}, Par_{Pair_Direction}, Par_Pct_{Pair_Direction}, EV_Pct_Max_{Pair_Direction} FROM self WHERE Boards_I_Played = True AND Pct_{Pair_Direction} < .3 ORDER BY Pct_{Pair_Direction}"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Plus mauvaises donnes",
+						"help": "**Plus mauvaises donnes de {player1_name}.**"
+					}
+				}
 			},
 			"Boards_We_Beat_Par": {
 				"title": "Boards I beat Par",
@@ -169,14 +354,28 @@
 					{
 						"prompt": "Show board, contract, score, Par, pct, Par pct, sd pct. Show those boards I played and score > Par.",
 						"try_next": [
-							{"Boards I equaled Par": "@Boards_We_Equaled_Par"},
-							{"Boards I underperformed Par": "@Boards_We_Underperformed_Par"},
-							{"Best boards": "@Our_Best_Boards"},
-							{"Every score": "Show every score on board {Board}."}
+							{
+								"Boards I equaled Par": "@Boards_We_Equaled_Par"
+							},
+							{
+								"Boards I underperformed Par": "@Boards_We_Underperformed_Par"
+							},
+							{
+								"Best boards": "@Our_Best_Boards"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
 						],
 						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Par_{Pair_Direction}, Pct_{Pair_Direction}, Par_Pct_{Pair_Direction}, EV_Pct_Max_{Pair_Direction} FROM self WHERE Boards_I_Played = True AND Score_{Pair_Direction} > Par_{Pair_Direction} ORDER BY Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Donnes où j'ai battu le par",
+						"help": "**Donnes où votre paire a battu le par.**"
+					}
+				}
 			},
 			"Boards_We_Equaled_Par": {
 				"title": "Boards I equaled Par",
@@ -186,13 +385,25 @@
 					{
 						"prompt": "Show board, contract, score, Par, pct, Par pct, sd pct. Show those boards I played and score = Par.",
 						"try_next": [
-							{"Boards I beat Par": "@Boards_We_Beat_Par"},
-							{"Boards I underperformed Par": "@Boards_We_Underperformed_Par"},
-							{"Every score": "Show every score on board {Board}."}
+							{
+								"Boards I beat Par": "@Boards_We_Beat_Par"
+							},
+							{
+								"Boards I underperformed Par": "@Boards_We_Underperformed_Par"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
 						],
 						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Par_{Pair_Direction}, Pct_{Pair_Direction}, Par_Pct_{Pair_Direction}, EV_Pct_Max_{Pair_Direction} FROM self WHERE Boards_I_Played = True AND Score_{Pair_Direction} = Par_{Pair_Direction} ORDER BY Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Donnes où j'ai égalé le par",
+						"help": "**Donnes où votre paire a égalé le par.**"
+					}
+				}
 			},
 			"Boards_We_Underperformed_Par": {
 				"title": "Boards I underperformed Par",
@@ -202,14 +413,28 @@
 					{
 						"prompt": "Show board, contract, score, Par, pct, Par pct, sd pct. Show those boards I played and score < Par.",
 						"try_next": [
-							{"Boards I beat Par": "@Boards_We_Beat_Par"},
-							{"Boards We Underperformed Double Dummy (DD)": "@Boards_We_Underperformed_DD"},
-							{"Our Mistakes": "@Our_Mistakes"},
-							{"Every score": "Show every score on board {Board}."}
+							{
+								"Boards I beat Par": "@Boards_We_Beat_Par"
+							},
+							{
+								"Boards We Underperformed Double Dummy (DD)": "@Boards_We_Underperformed_DD"
+							},
+							{
+								"Our Mistakes": "@Our_Mistakes"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
 						],
 						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Par_{Pair_Direction}, Pct_{Pair_Direction}, Par_Pct_{Pair_Direction}, EV_Pct_Max_{Pair_Direction} FROM self WHERE Boards_I_Played = True AND Score_{Pair_Direction} < Par_{Pair_Direction} ORDER BY Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Donnes où j'ai fait moins que le par",
+						"help": "**Donnes où votre paire a fait moins que le par.**"
+					}
+				}
 			},
 			"Boards_We_Underperformed_DD": {
 				"title": "Boards We Underperformed Double Dummy (DD)",
@@ -219,14 +444,28 @@
 					{
 						"prompt": "Show board, contract, declarer, tricks, DD tricks, tricks short of DD, score, Par, pct. Show every board we played where we failed to take DD tricks, regardless of who declared.",
 						"try_next": [
-							{"Boards I Underperformed Double Dummy (DD)": "@Boards_I_Underperformed_DD"},
-							{"Boards Partner Underperformed Double Dummy (DD)": "@Boards_Partner_Underperformed_DD"},
-							{"Boards I underperformed Par": "@Boards_We_Underperformed_Par"},
-							{"Declarer's boards": "Show all boards that {Declarer_Name} declared in session {session_id}."}
+							{
+								"Boards I Underperformed Double Dummy (DD)": "@Boards_I_Underperformed_DD"
+							},
+							{
+								"Boards Partner Underperformed Double Dummy (DD)": "@Boards_Partner_Underperformed_DD"
+							},
+							{
+								"Boards I underperformed Par": "@Boards_We_Underperformed_Par"
+							},
+							{
+								"Declarer's boards": "Show all boards that {Declarer_Name} declared in session {session_id}."
+							}
 						],
 						"sql": "SELECT Board, Contract, Declarer_Name, Tricks, DD_Tricks, CASE WHEN Boards_We_Declared THEN DD_Tricks - Tricks ELSE Tricks - DD_Tricks END AS Tricks_Short_Of_DD, Score_{Pair_Direction}, Par_{Pair_Direction}, Pct_{Pair_Direction}, Par_Pct_{Pair_Direction}, EV_Pct_Max_{Pair_Direction} FROM self WHERE Boards_We_Played = True AND Tricks IS NOT NULL AND DD_Tricks IS NOT NULL AND ((Boards_We_Declared = True AND Tricks < DD_Tricks) OR (Boards_We_Declared = False AND Tricks > DD_Tricks)) ORDER BY Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Donnes où nous avons fait moins que le double mort (DD)",
+						"help": "**Donnes jouées par notre paire où notre camp a réalisé moins de levées que le double mort, que notre paire ait déclaré ou défendu.**"
+					}
+				}
 			},
 			"Boards_I_Underperformed_DD": {
 				"title": "Boards I Underperformed Double Dummy (DD)",
@@ -236,14 +475,28 @@
 					{
 						"prompt": "Show board, contract, score, Par, pct, Par pct, sd pct, tricks, DD tricks. Show those boards I declared and tricks < DD tricks.",
 						"try_next": [
-							{"Boards Partner Underperformed Double Dummy (DD)": "@Boards_Partner_Underperformed_DD"},
-							{"Boards I Declared": "@Boards_I_Declared"},
-							{"Our Mistakes": "@Our_Mistakes"},
-							{"Every score": "Show every score on board {Board}."}
+							{
+								"Boards Partner Underperformed Double Dummy (DD)": "@Boards_Partner_Underperformed_DD"
+							},
+							{
+								"Boards I Declared": "@Boards_I_Declared"
+							},
+							{
+								"Our Mistakes": "@Our_Mistakes"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
 						],
 						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Par_{Pair_Direction}, Pct_{Pair_Direction}, Par_Pct_{Pair_Direction}, EV_Pct_Max_{Pair_Direction}, Tricks, DD_Tricks FROM self WHERE Boards_I_Declared = True AND Tricks < DD_Tricks ORDER BY Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Donnes où j'ai fait moins que le double mort (DD)",
+						"help": "**Donnes déclarées par {player1_name} où le résultat est inférieur au double mort (DD).**"
+					}
+				}
 			},
 			"Boards_Partner_Underperformed_DD": {
 				"title": "Boards Partner Underperformed Double Dummy (DD)",
@@ -253,13 +506,25 @@
 					{
 						"prompt": "Show board, contract, score, Par, pct, Par pct, sd pct, tricks, DD tricks. Show those boards partner declared and tricks < DD tricks.",
 						"try_next": [
-							{"Boards I Underperformed Double Dummy (DD)": "@Boards_I_Underperformed_DD"},
-							{"Boards Partner Declared": "@Boards_Partner_Declared"},
-							{"Every score": "Show every score on board {Board}."}
+							{
+								"Boards I Underperformed Double Dummy (DD)": "@Boards_I_Underperformed_DD"
+							},
+							{
+								"Boards Partner Declared": "@Boards_Partner_Declared"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
 						],
 						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Par_{Pair_Direction}, Pct_{Pair_Direction}, Par_Pct_{Pair_Direction}, EV_Pct_Max_{Pair_Direction}, Tricks, DD_Tricks FROM self WHERE Boards_Partner_Declared = True AND Tricks < DD_Tricks ORDER BY Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Donnes où le partenaire a fait moins que le double mort (DD)",
+						"help": "**Donnes déclarées par {player2_name} et inférieures au double mort (DD).**"
+					}
+				}
 			},
 			"Boards_We_Underperformed_Par_Pct": {
 				"title": "Boards Your Partnership Underperformed Par Pct",
@@ -269,13 +534,25 @@
 					{
 						"prompt": "Show board, contract, score, Par, pct, Par pct, sd pct, tricks, DD tricks. Show those boards we played and pct < Par pct.",
 						"try_next": [
-							{"Boards I underperformed Par": "@Boards_We_Underperformed_Par"},
-							{"Boards Your Partnership Underperformed Expected Value (EV)": "@Boards_We_Underperformed_EV"},
-							{"Every score": "Show every score on board {Board}."}
+							{
+								"Boards I underperformed Par": "@Boards_We_Underperformed_Par"
+							},
+							{
+								"Boards Your Partnership Underperformed Expected Value (EV)": "@Boards_We_Underperformed_EV"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
 						],
 						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Par_{Pair_Direction}, Pct_{Pair_Direction}, Par_Pct_{Pair_Direction}, EV_Pct_Max_{Pair_Direction}, Tricks, DD_Tricks FROM self WHERE Boards_We_Played = True AND Pct_{Pair_Direction} < Par_Pct_{Pair_Direction} ORDER BY Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Donnes où votre paire a fait moins que le pourcentage du par",
+						"help": "**Donnes dont le pourcentage est inférieur à celui du par.**"
+					}
+				}
 			},
 			"Boards_We_Underperformed_EV": {
 				"title": "Boards Your Partnership Underperformed Expected Value (EV)",
@@ -284,13 +561,25 @@
 				"prompts": [
 					{
 						"try_next": [
-							{"Expected Value (EV) Analysis of Our Boards": "@Expected_Value_Our_Boards"},
-							{"Boards I underperformed Par": "@Boards_We_Underperformed_Par"},
-							{"Every score": "Show every score on board {Board}."}
+							{
+								"Expected Value (EV) Analysis of Our Boards": "@Expected_Value_Our_Boards"
+							},
+							{
+								"Boards I underperformed Par": "@Boards_We_Underperformed_Par"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
 						],
 						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Par_{Pair_Direction}, Pct_{Pair_Direction}, Par_Pct_{Pair_Direction}, EV_Max_Col, EV_Max_{Pair_Direction}, EV_Pct_Max_{Pair_Direction}, EV_Max_Diff_{Pair_Direction}, EV_Pct_Max_Diff_{Pair_Direction}, DD_Pct_Max_Diff_{Pair_Direction}, DD_EV_Pct_Max_Diff_{Pair_Direction} FROM self WHERE Boards_We_Declared = True AND (Score_{Pair_Direction} < EV_Score_Declarer OR Score_{Pair_Direction} < EV_Max_Declarer) ORDER BY Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Donnes où votre paire a fait moins que l'espérance (EV)",
+						"help": "**Donnes déclarées par notre paire et dont le résultat est inférieur à l'espérance (EV).**"
+					}
+				}
 			},
 			"We_Got_Gifts": {
 				"title": "We Got Gifts",
@@ -300,14 +589,28 @@
 					{
 						"prompt": "Show board, contract, score, pct, Par, tricks, dd tricks, sd score, sd score max, sd contract max. Show those boards we declared and score > Par and score > sd score.",
 						"try_next": [
-							{"Rank after removing gifted boards": "@Rankings_Without_Gifts"},
-							{"We Fixed Opponents": "@We_Fixed_Opponents"},
-							{"We Got Fixed": "@We_Got_Fixed"},
-							{"Every score": "Show every score on board {Board}."}
+							{
+								"Rank after removing gifted boards": "@Rankings_Without_Gifts"
+							},
+							{
+								"We Fixed Opponents": "@We_Fixed_Opponents"
+							},
+							{
+								"We Got Fixed": "@We_Got_Fixed"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
 						],
 						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Pct_{Pair_Direction}, Par_{Pair_Direction}, Tricks, DD_Tricks, EV_Max_{Pair_Direction}, EV_Max_Col FROM self WHERE Boards_We_Declared = True AND Score_{Pair_Direction} > Par_{Pair_Direction} AND Score_{Pair_Direction} > EV_Max_{Pair_Direction} ORDER BY Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "On nous a fait des cadeaux",
+						"help": "**Donnes que votre paire a déclarées et où les adversaires vous ont offert le contrat ou des levées.**"
+					}
+				}
 			},
 			"Rankings_Without_Gifts": {
 				"title": "Rank after removing gifted boards",
@@ -316,22 +619,40 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"We Got Gifts": "@We_Got_Gifts"},
-							{"Rank Pairs by Par Success": "@Par_Rankings"},
-							{"Pct per Round": "@Pct_Per_Round"}
+							{
+								"We Got Gifts": "@We_Got_Gifts"
+							},
+							{
+								"Rank Pairs by Par Success": "@Par_Rankings"
+							},
+							{
+								"Pct per Round": "@Pct_Per_Round"
+							}
 						],
 						"sql": "SELECT CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_NS, AVG(CASE WHEN Score_NS <= Par_NS OR Score_NS <= EV_Max_NS THEN Pct_NS ELSE NULL END) AS Avg_Pct_NS, COUNT(CASE WHEN Score_NS <= Par_NS OR Score_NS <= EV_Max_NS THEN 1 ELSE NULL END) AS Board_Count, STRING_AGG(CASE WHEN Score_NS > Par_NS AND Score_NS > EV_Max_NS THEN Board END, ', ') AS Gifted_Boards_Removed FROM self GROUP BY Pair_NS ORDER BY Avg_Pct_NS DESC, Board_Count DESC"
 					},
 					{
 						"prompt": "",
 						"try_next": [
-							{"We Got Gifts": "@We_Got_Gifts"},
-							{"Rank Pairs by Par Success": "@Par_Rankings"},
-							{"Pct per Round": "@Pct_Per_Round"}
+							{
+								"We Got Gifts": "@We_Got_Gifts"
+							},
+							{
+								"Rank Pairs by Par Success": "@Par_Rankings"
+							},
+							{
+								"Pct per Round": "@Pct_Per_Round"
+							}
 						],
 						"sql": "SELECT CONCAT(section_name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_EW, AVG(CASE WHEN Score_EW <= Par_EW OR Score_EW <= EV_Max_EW THEN Pct_EW ELSE NULL END) AS Avg_Pct_EW, COUNT(CASE WHEN Score_EW <= Par_EW OR Score_EW <= EV_Max_EW THEN 1 ELSE NULL END) AS Board_Count, STRING_AGG(CASE WHEN Score_EW > Par_EW AND Score_EW > EV_Max_EW THEN Board END, ', ') AS Gifted_Boards_Removed FROM self GROUP BY Pair_EW ORDER BY Avg_Pct_EW DESC, Board_Count DESC"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Classement sans les donnes cadeaux",
+						"help": "**Classement des paires après retrait des donnes cadeaux (NS, EW).**"
+					}
+				}
 			},
 			"We_Fixed_Opponents": {
 				"title": "We Fixed Opponents",
@@ -341,13 +662,25 @@
 					{
 						"prompt": "Show board, contract, score, pct, Par, tricks, dd tricks, sd score, sd score max, sd contract max. Show those boards we played and score < Par and pct > .70.",
 						"try_next": [
-							{"We Got Fixed": "@We_Got_Fixed"},
-							{"We Got Gifts": "@We_Got_Gifts"},
-							{"Every score": "Show every score on board {Board}."}
+							{
+								"We Got Fixed": "@We_Got_Fixed"
+							},
+							{
+								"We Got Gifts": "@We_Got_Gifts"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
 						],
 						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Pct_{Pair_Direction}, Par_{Pair_Direction}, Tricks, DD_Tricks, EV_Max_{Pair_Direction}, EV_Max_Col FROM self WHERE Boards_We_Played = True AND Score_{Pair_Direction} < Par_{Pair_Direction} AND Pct_{Pair_Direction} > .70 ORDER BY Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "On a puni les adversaires",
+						"help": "**Donnes où votre paire a mal enchéri ou mal joué, mais a tout de même bien marqué.**"
+					}
+				}
 			},
 			"We_Got_Fixed": {
 				"title": "We Got Fixed",
@@ -358,13 +691,25 @@
 					{
 						"prompt": "Show board, contract, score, pct, Par, tricks, dd tricks, sd score, sd score max, sd contract max. Show those boards we played and score < Par and pct < .30.",
 						"try_next": [
-							{"We Fixed Opponents": "@We_Fixed_Opponents"},
-							{"Our Mistakes": "@Our_Mistakes"},
-							{"Every score": "Show every score on board {Board}."}
+							{
+								"We Fixed Opponents": "@We_Fixed_Opponents"
+							},
+							{
+								"Our Mistakes": "@Our_Mistakes"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
 						],
 						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Pct_{Pair_Direction}, Par_{Pair_Direction}, Tricks, DD_Tricks, EV_Max_{Pair_Direction}, EV_Max_Col FROM self WHERE Boards_We_Played = True AND Score_{Pair_Direction} < Par_{Pair_Direction} AND Pct_{Pair_Direction} < 0.30 ORDER BY Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "On s'est fait punir",
+						"help": "**Donnes où votre paire a trébuché et a été punie.**"
+					}
+				}
 			},
 			"Our_Mistakes": {
 				"title": "Our Mistakes",
@@ -374,14 +719,28 @@
 					{
 						"prompt": "Show board, contract, pct, score, tricks, dd tricks, Par, sd score, sd score max, sd contract max. Show those boards opponent declared and score < Par and score < sd score.",
 						"try_next": [
-							{"We Underbid": "@We_Underbid"},
-							{"Opponent Underbid": "@Opponent_Underbid"},
-							{"Worst boards": "@Our_Worst_Boards"},
-							{"Every score": "Show every score on board {Board}."}
+							{
+								"We Underbid": "@We_Underbid"
+							},
+							{
+								"Opponent Underbid": "@Opponent_Underbid"
+							},
+							{
+								"Worst boards": "@Our_Worst_Boards"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
 						],
 						"sql": "SELECT Board, Contract, Pct_{Pair_Direction}, Score_{Pair_Direction}, Tricks, DD_Tricks, Par_{Pair_Direction}, EV_Max_{Pair_Direction}, EV_Max_Col FROM self WHERE Boards_Opponent_Declared = True AND Score_{Pair_Direction} < Par_{Pair_Direction} AND Score_{Pair_Direction} < EV_Max_{Pair_Direction} ORDER BY Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Nos erreurs",
+						"help": "**Donnes où votre paire s'est trompée en défense ou dans les enchères compétitives.**"
+					}
+				}
 			},
 			"We_Underbid": {
 				"title": "We Underbid",
@@ -391,13 +750,25 @@
 					{
 						"prompt": "Show board, contract, pct, score, tricks, dd tricks, Par, sd score, sd score max, sd contract max. Show those boards we declared and score > 0 and score < Par and score < sd score.",
 						"try_next": [
-							{"Opponent Underbid": "@Opponent_Underbid"},
-							{"Our Mistakes": "@Our_Mistakes"},
-							{"Every score": "Show every score on board {Board}."}
+							{
+								"Opponent Underbid": "@Opponent_Underbid"
+							},
+							{
+								"Our Mistakes": "@Our_Mistakes"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
 						],
 						"sql": "SELECT Board, Contract, Pct_{Pair_Direction}, Score_{Pair_Direction}, Tricks, DD_Tricks, Par_{Pair_Direction}, EV_Max_{Pair_Direction}, EV_Max_Col FROM self WHERE Boards_We_Declared = True AND Score_{Pair_Direction} > 0 AND Score_{Pair_Direction} < Par_{Pair_Direction} AND Score_{Pair_Direction} < EV_Max_{Pair_Direction} ORDER BY Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Nous avons sous-enchéri",
+						"help": "**Donnes que votre paire a déclarées, mais où le contrat ou le jeu a été raté.**"
+					}
+				}
 			},
 			"Opponent_Underbid": {
 				"title": "Opponent Underbid",
@@ -407,13 +778,25 @@
 					{
 						"prompt": "Show board, contract, score, Par, sd score, sd score max, sd contract max. Show those boards opponent declared and score > 0 and score < Par and score < sd score.",
 						"try_next": [
-							{"We Underbid": "@We_Underbid"},
-							{"We Got Gifts": "@We_Got_Gifts"},
-							{"Every score": "Show every score on board {Board}."}
+							{
+								"We Underbid": "@We_Underbid"
+							},
+							{
+								"We Got Gifts": "@We_Got_Gifts"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
 						],
 						"sql": "SELECT Board, Contract, Score_{Opponent_Pair_Direction}, Par_{Opponent_Pair_Direction}, EV_Max_{Opponent_Pair_Direction}, EV_Max_Col FROM self WHERE Boards_Opponent_Declared = True AND Score_{Opponent_Pair_Direction} > 0 AND Score_{Opponent_Pair_Direction} < Par_{Opponent_Pair_Direction} AND Score_{Opponent_Pair_Direction} < EV_Max_{Opponent_Pair_Direction} ORDER BY Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "L'adversaire a sous-enchéri",
+						"help": "**Donnes où l'adversaire a sous-enchéri, a atteint un contrat inférieur ou aurait dû contrer punitif. Donnes présentées du point de vue des adversaires.**"
+					}
+				}
 			},
 			"Boards_We_Declared": {
 				"title": "Boards We Declared",
@@ -423,14 +806,28 @@
 					{
 						"prompt": "Show board, contract, declarer, score, Par, pct, Par pct, sd pct, DD score, tricks, DD tricks. Show those boards we declared.",
 						"try_next": [
-							{"Boards I Declared": "@Boards_I_Declared"},
-							{"Boards Partner Declared": "@Boards_Partner_Declared"},
-							{"Boards We Underperformed Double Dummy (DD)": "@Boards_We_Underperformed_DD"},
-							{"Declarer's boards": "Show all boards that {Declarer_Name} declared in session {session_id}."}
+							{
+								"Boards I Declared": "@Boards_I_Declared"
+							},
+							{
+								"Boards Partner Declared": "@Boards_Partner_Declared"
+							},
+							{
+								"Boards We Underperformed Double Dummy (DD)": "@Boards_We_Underperformed_DD"
+							},
+							{
+								"Declarer's boards": "Show all boards that {Declarer_Name} declared in session {session_id}."
+							}
 						],
 						"sql": "SELECT Board, Contract, Declarer_Name, Score_{Pair_Direction}, Par_{Pair_Direction}, Pct_{Pair_Direction}, Par_Pct_{Pair_Direction}, EV_Pct_Max_{Pair_Direction}, DD_Score_{Pair_Direction}, Tricks, DD_Tricks FROM self WHERE Boards_We_Declared = True ORDER BY Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Donnes que nous avons déclarées",
+						"help": "**Donnes déclarées par notre paire.**"
+					}
+				}
 			},
 			"Boards_I_Declared": {
 				"title": "Boards I Declared",
@@ -440,12 +837,22 @@
 					{
 						"prompt": "Show board, contract, score, Par, pct, Par pct, sd pct, DD score, tricks, DD tricks. Show those boards I declared.",
 						"try_next": [
-							{"Boards Partner Declared": "@Boards_Partner_Declared"},
-							{"Boards We Declared": "@Boards_We_Declared"}
+							{
+								"Boards Partner Declared": "@Boards_Partner_Declared"
+							},
+							{
+								"Boards We Declared": "@Boards_We_Declared"
+							}
 						],
 						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Par_{Pair_Direction}, Pct_{Pair_Direction}, Par_Pct_{Pair_Direction}, EV_Pct_Max_{Pair_Direction}, DD_Score_{Pair_Direction}, Tricks, DD_Tricks FROM self WHERE Boards_I_Declared = True ORDER BY Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Donnes que j'ai déclarées",
+						"help": "**Donnes déclarées par {player1_name}.**"
+					}
+				}
 			},
 			"Boards_Partner_Declared": {
 				"title": "Boards Partner Declared",
@@ -455,12 +862,22 @@
 					{
 						"prompt": "Show board, contract, score, Par, pct, Par pct, sd pct, DD score, tricks, DD tricks. Show those boards partner declared.",
 						"try_next": [
-							{"Boards I Declared": "@Boards_I_Declared"},
-							{"Boards We Declared": "@Boards_We_Declared"}
+							{
+								"Boards I Declared": "@Boards_I_Declared"
+							},
+							{
+								"Boards We Declared": "@Boards_We_Declared"
+							}
 						],
 						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Par_{Pair_Direction}, Pct_{Pair_Direction}, Par_Pct_{Pair_Direction}, EV_Pct_Max_{Pair_Direction}, DD_Score_{Pair_Direction}, Tricks, DD_Tricks FROM self WHERE Boards_Partner_Declared = True ORDER BY Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Donnes déclarées par le partenaire",
+						"help": "**Donnes déclarées par {player2_name}.**"
+					}
+				}
 			},
 			"Actual_Score_Pcts": {
 				"title": "Actual Score Pcts",
@@ -469,12 +886,22 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"Double Dummy (DD) Score Pcts for Contract": "@DD_Score_Pcts"},
-							{"Par Score Pcts in Par Strain": "@Par_Score_Pcts"}
+							{
+								"Double Dummy (DD) Score Pcts for Contract": "@DD_Score_Pcts"
+							},
+							{
+								"Par Score Pcts in Par Strain": "@Par_Score_Pcts"
+							}
 						],
 						"sql": "SELECT AVG(CASE WHEN Our_Boards THEN Pct_{Pair_Direction} ELSE NULL END) AS Avg_Of_All_Our_Boards, AVG(CASE WHEN Boards_We_Declared THEN Pct_{Pair_Direction} ELSE NULL END) AS Avg_Of_Boards_We_Declared, AVG(CASE WHEN Boards_I_Declared THEN Pct_{Pair_Direction} ELSE NULL END) AS Avg_Of_Boards_I_Declared, AVG(CASE WHEN Boards_Partner_Declared THEN Pct_{Pair_Direction} ELSE NULL END) AS Avg_Of_Boards_Partner_Declared FROM self"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Pourcentages du score réel",
+						"help": "**Pourcentage moyen réel du contrat.**"
+					}
+				}
 			},
 			"DD_Score_Pcts": {
 				"title": "Double Dummy (DD) Score Pcts for Contract",
@@ -483,12 +910,22 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"Par Score Pcts in Par Strain": "@Par_Score_Pcts"},
-							{"Expected Value (EV) Pcts in Contract's Strain": "@EV_Pcts"}
+							{
+								"Par Score Pcts in Par Strain": "@Par_Score_Pcts"
+							},
+							{
+								"Expected Value (EV) Pcts in Contract's Strain": "@EV_Pcts"
+							}
 						],
 						"sql": "SELECT AVG(CASE WHEN Boards_We_Declared THEN DD_Score_Pct_{Pair_Direction} ELSE NULL END) AS Avg_DD_Pct_Of_Boards_We_Declared, AVG(CASE WHEN Boards_I_Declared THEN DD_Score_Pct_{Pair_Direction} ELSE NULL END) AS Avg_DD_Pct_Of_Boards_I_Declared, AVG(CASE WHEN Boards_Partner_Declared THEN DD_Score_Pct_{Pair_Direction} ELSE NULL END) AS Avg_DD_Pct_Of_Boards_Partner_Declared FROM self"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Pourcentages double mort (DD) du contrat",
+						"help": "**Pourcentages moyens du score double mort (DD) du contrat.**"
+					}
+				}
 			},
 			"Par_Score_Pcts": {
 				"title": "Par Score Pcts in Par Strain",
@@ -497,12 +934,22 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"Expected Value (EV) Pcts in Contract's Strain": "@EV_Pcts"},
-							{"Boards I beat Par": "@Boards_We_Beat_Par"}
+							{
+								"Expected Value (EV) Pcts in Contract's Strain": "@EV_Pcts"
+							},
+							{
+								"Boards I beat Par": "@Boards_We_Beat_Par"
+							}
 						],
 						"sql": "SELECT AVG(CASE WHEN Boards_We_Declared THEN Par_Pct_{Pair_Direction} ELSE NULL END) AS Avg_Par_Pct_Of_Boards_We_Declared, AVG(CASE WHEN Boards_I_Declared THEN Par_Pct_{Pair_Direction} ELSE NULL END) AS Avg_Par_Pct_Of_Boards_I_Declared, AVG(CASE WHEN Boards_Partner_Declared THEN Par_Pct_{Pair_Direction} ELSE NULL END) AS Avg_Par_Pct_Of_Boards_Partner_Declared FROM self"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Pourcentages du par dans la couleur du par",
+						"help": "**Pourcentages moyens du score du par dans la couleur du par.**"
+					}
+				}
 			},
 			"EV_Pcts": {
 				"title": "Expected Value (EV) Pcts in Contract's Strain",
@@ -511,12 +958,22 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"Expected Value (EV) Pcts Optimal Contract": "@EV_Max_Pcts"},
-							{"Expected Value (EV) Analysis of Our Boards": "@Expected_Value_Our_Boards"}
+							{
+								"Expected Value (EV) Pcts Optimal Contract": "@EV_Max_Pcts"
+							},
+							{
+								"Expected Value (EV) Analysis of Our Boards": "@Expected_Value_Our_Boards"
+							}
 						],
 						"sql": "SELECT AVG(CASE WHEN Boards_We_Declared THEN EV_Score_Pct_{Pair_Direction} ELSE NULL END) AS Avg_EV_Pct_Of_Boards_We_Declared, AVG(CASE WHEN Boards_I_Declared THEN EV_Score_Pct_{Pair_Direction} ELSE NULL END) AS Avg_EV_Pct_Of_Boards_I_Declared, AVG(CASE WHEN Boards_Partner_Declared THEN EV_Score_Pct_{Pair_Direction} ELSE NULL END) AS Avg_EV_Pct_Of_Boards_Partner_Declared FROM self"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Pourcentages d'espérance (EV) dans la couleur du contrat",
+						"help": "**Pourcentages moyens du score d'espérance (EV) dans la couleur du contrat.**"
+					}
+				}
 			},
 			"EV_Max_Pcts": {
 				"title": "Expected Value (EV) Pcts Optimal Contract",
@@ -525,12 +982,22 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"Expected Value (EV) Pcts in Contract's Strain": "@EV_Pcts"},
-							{"Expected Value (EV) Analysis of All Boards at All Tables By Strain": "@Expected_Value_All_Boards"}
+							{
+								"Expected Value (EV) Pcts in Contract's Strain": "@EV_Pcts"
+							},
+							{
+								"Expected Value (EV) Analysis of All Boards at All Tables By Strain": "@Expected_Value_All_Boards"
+							}
 						],
 						"sql": "SELECT AVG(CASE WHEN Boards_We_Declared THEN EV_Pct_Max_{Pair_Direction} ELSE NULL END) AS Avg_EV_Pct_Max_Of_Boards_We_Declared, AVG(CASE WHEN Boards_I_Declared THEN EV_Pct_Max_{Pair_Direction} ELSE NULL END) AS Avg_EV_Pct_Max_Of_Boards_I_Declared, AVG(CASE WHEN Boards_Partner_Declared THEN EV_Pct_Max_{Pair_Direction} ELSE NULL END) AS Avg_EV_Pct_Max_Of_Boards_Partner_Declared FROM self"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Pourcentages d'espérance (EV) du contrat optimal",
+						"help": "**Pourcentages moyens du score d'espérance (EV) du contrat optimal.**"
+					}
+				}
 			},
 			"Expected_Value_Our_Boards": {
 				"title": "Expected Value (EV) Analysis of Our Boards",
@@ -539,12 +1006,22 @@
 					{
 						"prompt": "Show board, ev max pct diff, contract, score, Par, pct, Par pct, sd pct, dd tricks, sd Par pct diff, sd score, sd probs taking_* sort by sd pct diff descending. Show those boards we played.",
 						"try_next": [
-							{"Expected Value (EV) Analysis of All Boards at All Tables By Strain": "@Expected_Value_All_Boards"},
-							{"Boards Your Partnership Underperformed Expected Value (EV)": "@Boards_We_Underperformed_EV"}
+							{
+								"Expected Value (EV) Analysis of All Boards at All Tables By Strain": "@Expected_Value_All_Boards"
+							},
+							{
+								"Boards Your Partnership Underperformed Expected Value (EV)": "@Boards_We_Underperformed_EV"
+							}
 						],
 						"sql": "SELECT Board, EV_Pct_Max_Diff_{Pair_Direction}, Contract, Score_{Pair_Direction}, Par_{Pair_Direction}, Pct_{Pair_Direction}, Par_Pct_{Pair_Direction}, section_name, Pair_Number_NS, Pair_Number_EW, EV_Pct_Max_{Pair_Direction}, DD_Tricks, EV_Max_{Pair_Direction}, Prob_Taking_0, Prob_Taking_1, Prob_Taking_2, Prob_Taking_3, Prob_Taking_4, Prob_Taking_5, Prob_Taking_6, Prob_Taking_7, Prob_Taking_8, Prob_Taking_9, Prob_Taking_10, Prob_Taking_11, Prob_Taking_12, Prob_Taking_13 FROM self WHERE Boards_We_Played = True ORDER BY EV_Pct_Max_Diff_{Pair_Direction} DESC"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Analyse d'espérance (EV) de nos donnes",
+						"help": "**Analyse d'espérance (EV) de nos donnes. EV_Pct_Max_Diff est une statistique d'expert : l'écart de pourcentage entre le résultat réel et le résultat probable. Les valeurs les plus hautes sont vos donnes les plus chanceuses.**"
+					}
+				}
 			},
 			"Expected_Value_All_Boards": {
 				"title": "Expected Value (EV) Analysis of All Boards at All Tables By Strain",
@@ -553,12 +1030,22 @@
 					{
 						"prompt": "Show board, bidsuit, contract, score, pct, section_name, pair_number_ns, pair_number_ew, sd score, sd pct diff, sd pct, dd tricks, sd probs taking_* sort by board, bidsuit, sd pct diff descending.",
 						"try_next": [
-							{"Frequency of Contracts of All Boards at All Tables": "@Frequency_of_Contracts"},
-							{"Expected Value (EV) Analysis of Our Boards": "@Expected_Value_Our_Boards"}
+							{
+								"Frequency of Contracts of All Boards at All Tables": "@Frequency_of_Contracts"
+							},
+							{
+								"Expected Value (EV) Analysis of Our Boards": "@Expected_Value_Our_Boards"
+							}
 						],
 						"sql": "SELECT Board, BidSuit, Contract, Score_{Pair_Direction}, Pct_{Pair_Direction}, section_name, Pair_Number_NS, Pair_Number_EW, EV_Max_{Pair_Direction}, EV_Pct_Max_{Pair_Direction}, EV_Pct_Max_Diff_{Pair_Direction}, DD_Pct_Max_Diff_{Pair_Direction}, DD_EV_Pct_Max_Diff_{Pair_Direction}, DD_Tricks, Prob_Taking_0, Prob_Taking_1, Prob_Taking_2, Prob_Taking_3, Prob_Taking_4, Prob_Taking_5, Prob_Taking_6, Prob_Taking_7, Prob_Taking_8, Prob_Taking_9, Prob_Taking_10, Prob_Taking_11, Prob_Taking_12, Prob_Taking_13 FROM self WHERE Pair_Number_{Pair_Direction} IS NOT NULL ORDER BY Board, BidSuit, EV_Pct_Max_Diff_{Pair_Direction} DESC"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Analyse d'espérance (EV) de toutes les donnes à toutes les tables, par couleur",
+						"help": "**Analyse d'espérance (EV) de toutes les donnes à toutes les tables, par couleur. EV_Pct_Max_Diff est une statistique d'expert : l'écart de pourcentage entre le résultat réel et le résultat probable. Les valeurs les plus hautes sont vos donnes les plus chanceuses.**"
+					}
+				}
 			},
 			"Frequency_of_Contracts": {
 				"title": "Frequency of Contracts of All Boards at All Tables",
@@ -567,12 +1054,22 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"Unique Bids of All Boards at All Tables": "@Unique_Bids_All_Boards"},
-							{"Expected Value (EV) Analysis of All Boards at All Tables By Strain": "@Expected_Value_All_Boards"}
+							{
+								"Unique Bids of All Boards at All Tables": "@Unique_Bids_All_Boards"
+							},
+							{
+								"Expected Value (EV) Analysis of All Boards at All Tables By Strain": "@Expected_Value_All_Boards"
+							}
 						],
 						"sql": "SELECT Board, COUNT(Contract) AS Freq_Contract, Contract, ANY_VALUE(Par_{Pair_Direction}) AS Par_{Pair_Direction}, ANY_VALUE(Par_Pct_{Pair_Direction}) AS Par_Pct_{Pair_Direction}, ANY_VALUE(EV_Max_{Pair_Direction}) AS EV_Max_{Pair_Direction}, ANY_VALUE(EV_Pct_Max_Diff_{Pair_Direction}) AS EV_Pct_Max_Diff_{Pair_Direction}, ANY_VALUE(EV_Pct_Max_{Pair_Direction}) AS EV_Pct_Max_{Pair_Direction}, ANY_VALUE(DD_Tricks) AS DD_Tricks, ANY_VALUE(Prob_Taking_0) AS Prob_Taking_0, ANY_VALUE(Prob_Taking_1) AS Prob_Taking_1, ANY_VALUE(Prob_Taking_2) AS Prob_Taking_2, ANY_VALUE(Prob_Taking_3) AS Prob_Taking_3, ANY_VALUE(Prob_Taking_4) AS Prob_Taking_4, ANY_VALUE(Prob_Taking_5) AS Prob_Taking_5, ANY_VALUE(Prob_Taking_6) AS Prob_Taking_6, ANY_VALUE(Prob_Taking_7) AS Prob_Taking_7, ANY_VALUE(Prob_Taking_8) AS Prob_Taking_8, ANY_VALUE(Prob_Taking_9) AS Prob_Taking_9, ANY_VALUE(Prob_Taking_10) AS Prob_Taking_10, ANY_VALUE(Prob_Taking_11) AS Prob_Taking_11, ANY_VALUE(Prob_Taking_12) AS Prob_Taking_12, ANY_VALUE(Prob_Taking_13) AS Prob_Taking_13 FROM self GROUP BY Board, Contract ORDER BY Board, Contract"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Fréquence des contrats de toutes les donnes à toutes les tables",
+						"help": "**Fréquence des contrats de toutes les donnes à toutes les tables.**"
+					}
+				}
 			},
 			"Wrong_Side": {
 				"title": "Boards Played from Wrong Side",
@@ -583,13 +1080,25 @@
 					{
 						"prompt": "Show board, contract, result, score, Par, pct, Par pct, sd pct, dd tricks, dd tricks dummy. Show those boards we played and dd tricks < dd tricks dummy.",
 						"try_next": [
-							{"Boards We Declared": "@Boards_We_Declared"},
-							{"Boards Your Partnership Played": "@Boards_We_Played"},
-							{"Every score": "Show every score on board {Board}."}
+							{
+								"Boards We Declared": "@Boards_We_Declared"
+							},
+							{
+								"Boards Your Partnership Played": "@Boards_We_Played"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
 						],
 						"sql": "SELECT Board, Contract, Result, Score_{Pair_Direction}, Par_{Pair_Direction}, Pct_{Pair_Direction}, Par_Pct_{Pair_Direction}, EV_Pct_Max_{Pair_Direction}, DD_Tricks, DD_Tricks_Dummy FROM self WHERE Boards_We_Played = True AND DD_Tricks < DD_Tricks_Dummy ORDER BY Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Donnes jouées du mauvais côté",
+						"help": "**Donnes jouées du mauvais côté (levées DD du déclarant < levées DD du mort).**"
+					}
+				}
 			},
 			"Hand_Evaluation_Metrics": {
 				"title": "Hand Evaluation Metrics",
@@ -598,12 +1107,22 @@
 					{
 						"prompt": "Show distinct board and all directions of HCP, QT, DP.",
 						"try_next": [
-							{"Boards Your Partnership Played": "@Boards_We_Played"},
-							{"Frequency of Contracts of All Boards at All Tables": "@Frequency_of_Contracts"}
+							{
+								"Boards Your Partnership Played": "@Boards_We_Played"
+							},
+							{
+								"Frequency of Contracts of All Boards at All Tables": "@Frequency_of_Contracts"
+							}
 						],
 						"sql": "SELECT DISTINCT Board, HCP_{Pair_Direction}, HCP_{Opponent_Pair_Direction}, QT_{Pair_Direction}, QT_{Opponent_Pair_Direction}, DP_{Pair_Direction}, DP_{Opponent_Pair_Direction} FROM self ORDER BY Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Métriques d'évaluation de la main",
+						"help": "**Métriques d'évaluation de la main, comme les HCP, les QT (levées rapides) et les DP (points de distribution).**"
+					}
+				}
 			},
 			"Pct_Per_Round": {
 				"title": "Pct per Round",
@@ -613,12 +1132,22 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"Boards Your Partnership Played": "@Boards_We_Played"},
-							{"Rank Pairs by Par Success": "@Par_Rankings"}
+							{
+								"Boards Your Partnership Played": "@Boards_We_Played"
+							},
+							{
+								"Rank Pairs by Par Success": "@Par_Rankings"
+							}
 						],
 						"sql": "SELECT CONCAT(section_name, Pair_Number_{Opponent_Pair_Direction}, ' - ', (SELECT STRING_AGG(value.unnest, ' - ') FROM UNNEST(Pair_Names_{Opponent_Pair_Direction}) as value)) as Opponents, AVG(Pct_{Pair_Direction}) AS Avg_Pct_{Pair_Direction}, STRING_AGG(Board, ', ') AS Boards, STRING_AGG(ROUND(Pct_{Pair_Direction},2), ', ') AS Pcts_{Pair_Direction} FROM self WHERE Boards_We_Played = True GROUP BY section_name, Pair_Number_{Opponent_Pair_Direction}, Pair_Names_{Opponent_Pair_Direction} ORDER BY section_name, Pair_Number_{Opponent_Pair_Direction}"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Pourcentage par tour",
+						"help": "**Votre pourcentage de matchpoints par tour.**"
+					}
+				}
 			},
 			"Unique_Bids_All_Boards": {
 				"title": "Unique Bids of All Boards at All Tables",
@@ -628,12 +1157,22 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"Unique Bids Your Partnership Played": "@Unique_Bids_We_Played"},
-							{"Unique Bids Your Partnership Declared": "@Unique_Bids_We_Declared"}
+							{
+								"Unique Bids Your Partnership Played": "@Unique_Bids_We_Played"
+							},
+							{
+								"Unique Bids Your Partnership Declared": "@Unique_Bids_We_Declared"
+							}
 						],
 						"sql": "SELECT x.Board, x.BidSuit, x.ContractType, y.Contract, y.Pct_{Pair_Direction}, y.section_name, y.Pair_Number_NS, y.Pair_Number_EW FROM ((SELECT Board, BidSuit, ContractType FROM self GROUP BY Board, BidSuit, ContractType HAVING COUNT(*) = 1) AS x LEFT JOIN (SELECT * FROM self) AS y ON (x.Board, x.BidSuit, x.ContractType) = (y.Board, y.BidSuit, y.ContractType)) ORDER BY x.Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Enchères uniques de toutes les donnes à toutes les tables",
+						"help": "**Toutes les donnes à toutes les tables ayant des enchères uniques par couleur et type de contrat.**"
+					}
+				}
 			},
 			"Unique_Bids_We_Played": {
 				"title": "Unique Bids Your Partnership Played",
@@ -644,13 +1183,25 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"Unique Bids Your Partnership Declared": "@Unique_Bids_We_Declared"},
-							{"Unique Bids of All Boards at All Tables": "@Unique_Bids_All_Boards"},
-							{"Every score": "Show every score on board {Board}."}
+							{
+								"Unique Bids Your Partnership Declared": "@Unique_Bids_We_Declared"
+							},
+							{
+								"Unique Bids of All Boards at All Tables": "@Unique_Bids_All_Boards"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
 						],
 						"sql": "SELECT x.Board, x.BidSuit, x.ContractType, y.Contract, y.Pct_{Pair_Direction}, y.section_name, y.Pair_Number_NS, y.Pair_Number_EW, y.Boards_I_Played FROM ((SELECT Board, BidSuit, ContractType FROM self GROUP BY Board, BidSuit, ContractType HAVING COUNT(*) = 1) AS x LEFT JOIN (SELECT * FROM self) AS y ON (x.Board, x.BidSuit, x.ContractType) = (y.Board, y.BidSuit, y.ContractType)) WHERE y.Boards_I_Played=TRUE ORDER BY x.Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Enchères uniques jouées par votre paire",
+						"help": "**Donnes jouées par votre paire, à votre table, avec des enchères uniques par couleur et type de contrat.**"
+					}
+				}
 			},
 			"Unique_Bids_We_Declared": {
 				"title": "Unique Bids Your Partnership Declared",
@@ -661,13 +1212,25 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"Unique Bids Your Partnership Played": "@Unique_Bids_We_Played"},
-							{"Boards We Declared": "@Boards_We_Declared"},
-							{"Every score": "Show every score on board {Board}."}
+							{
+								"Unique Bids Your Partnership Played": "@Unique_Bids_We_Played"
+							},
+							{
+								"Boards We Declared": "@Boards_We_Declared"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
 						],
 						"sql": "SELECT x.Board, x.BidSuit, x.ContractType, y.Contract, y.Pct_{Pair_Direction}, y.section_name, y.Pair_Number_NS, y.Pair_Number_EW, y.Boards_We_Declared FROM ((SELECT Board, BidSuit, ContractType FROM self GROUP BY Board, BidSuit, ContractType HAVING COUNT(*) = 1) AS x LEFT JOIN (SELECT * FROM self) AS y ON (x.Board, x.BidSuit, x.ContractType) = (y.Board, y.BidSuit, y.ContractType)) WHERE y.Boards_We_Declared=TRUE ORDER BY x.Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Enchères uniques déclarées par votre paire",
+						"help": "**Donnes déclarées par votre paire avec des enchères uniques par couleur et type de contrat.**"
+					}
+				}
 			},
 			"Par_Rankings": {
 				"title": "Rank Pairs by Par Success",
@@ -676,20 +1239,34 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"Rank Declarers by Pct": "@Declarer_Rankings"},
-							{"Boards I beat Par": "@Boards_We_Beat_Par"}
+							{
+								"Rank Declarers by Pct": "@Declarer_Rankings"
+							},
+							{
+								"Boards I beat Par": "@Boards_We_Beat_Par"
+							}
 						],
 						"sql": "SELECT CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_NS, COUNT(Score_NS) AS Count, COUNT(CASE WHEN Score_NS>=Par_NS THEN 1 ELSE NULL END) AS Count_GE, AVG(Pct_NS) AS Pct, STRING_AGG(CASE WHEN Score_NS>Par_NS THEN Board END, ', ') AS Boards_GT, COUNT(CASE WHEN Score_NS=Par_NS THEN 1 ELSE NULL END) AS Count_EQ, STRING_AGG(CASE WHEN Score_NS=Par_NS THEN Board END, ', ') AS Boards_EQ, STRING_AGG(CASE WHEN Score_NS < Par_NS THEN Board END, ', ') AS Boards_LT FROM self GROUP BY Pair_NS ORDER BY Count_GE DESC, Count_EQ"
 					},
 					{
 						"prompt": "",
 						"try_next": [
-							{"Rank Declarers by Pct": "@Declarer_Rankings"},
-							{"Boards I beat Par": "@Boards_We_Beat_Par"}
+							{
+								"Rank Declarers by Pct": "@Declarer_Rankings"
+							},
+							{
+								"Boards I beat Par": "@Boards_We_Beat_Par"
+							}
 						],
 						"sql": "SELECT CONCAT(section_name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_EW, COUNT(Score_EW) AS Count, COUNT(CASE WHEN Score_EW>=Par_EW THEN 1 ELSE NULL END) AS Count_GE, AVG(Pct_EW) AS Pct, COUNT(CASE WHEN Score_EW=Par_EW THEN 1 ELSE NULL END) AS Count_EQ, STRING_AGG(CASE WHEN Score_EW>Par_EW THEN Board END, ', ') AS Boards_GT, STRING_AGG(CASE WHEN Score_EW=Par_EW THEN Board END, ', ') AS Boards_EQ, STRING_AGG(CASE WHEN Score_EW < Par_EW THEN Board END, ', ') AS Boards_LT FROM self GROUP BY Pair_EW ORDER BY Count_GE DESC, Count_EQ"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Classement des paires selon le par",
+						"help": "**Classement des paires (NS, EW) ayant le plus de scores supérieurs ou égaux au par.**"
+					}
+				}
 			},
 			"Declarer_Rankings": {
 				"title": "Rank Declarers by Pct",
@@ -698,12 +1275,22 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"Rank Pairs by Par Success": "@Par_Rankings"},
-							{"Boards I Declared": "@Boards_I_Declared"}
+							{
+								"Rank Pairs by Par Success": "@Par_Rankings"
+							},
+							{
+								"Boards I Declared": "@Boards_I_Declared"
+							}
 						],
 						"sql": "SELECT Declarer_Name AS Name, CASE WHEN Declarer_Direction IN ('N', 'S') THEN AVG(Pct_NS) ELSE AVG(Pct_EW) END AS Avg_Pct, COUNT(*) AS Count, Declarer_ID AS Declarer, Declarer_Direction AS Direction, AVG(CAST(Tricks > DD_Tricks AS INT)) AS Pct_GT_DD, AVG(CAST(Tricks = DD_Tricks AS INT)) AS Pct_EQ_DD, AVG(CAST(Score_Declarer > Par_Declarer AS INT)) AS Pct_GT_Par, AVG(CAST(Score_Declarer = Par_Declarer AS INT)) AS Pct_EQ_Par, AVG(CAST(Par_Declarer = DD_Score_Max_Declarer AS INT)) AS Is_Par_Suit, AVG(CAST(Par_Declarer = DD_Score_Declarer AS INT)) AS Is_Par_Contract, SUM(CAST(DD_Score_Declarer = Par_Declarer AND DD_Score_Declarer < 0 AS INT)) AS Sacrifices FROM self GROUP BY Declarer_ID, Declarer_Name, Declarer_Direction HAVING COUNT(*) >= 4 ORDER BY Avg_Pct DESC"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Classement des déclarants par pourcentage",
+						"help": "**Classement des déclarants par pourcentage moyen, parmi ceux qui ont joué au moins 4 donnes.**"
+					}
+				}
 			},
 			"Successful_Sacrifices": {
 				"title": "Successful Sacrifices",
@@ -714,13 +1301,25 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"Boards We Declared": "@Boards_We_Declared"},
-							{"Boards We Underperformed Double Dummy (DD)": "@Boards_We_Underperformed_DD"},
-							{"Every score": "Show every score on board {Board}."}
+							{
+								"Boards We Declared": "@Boards_We_Declared"
+							},
+							{
+								"Boards We Underperformed Double Dummy (DD)": "@Boards_We_Underperformed_DD"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
 						],
 						"sql": "SELECT  Board, Declarer_ID, Declarer_Name, Contract, Par_Declarer, DD_Score_Declarer, CAST(DD_Score_Declarer = Par_Declarer AND DD_Score_Declarer < 0 AS INT) AS Sacrifice FROM self WHERE Sacrifice > 0 ORDER BY Board, Declarer_ID DESC"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Sacrifices réussis",
+						"help": "**Sacrifices réussis, déterminés avec le double mort et le score du par.**"
+					}
+				}
 			},
 			"Scoring_Errors": {
 				"title": "Showing Scoring Errors, Adjustments, or Missing Contracts",
@@ -730,12 +1329,22 @@
 						"failed prompt": "show board, contract, score_declarer, computed_score_declarer, score_ns, score_ew when score_declarer <> computed_score_declarer or score_ns <> -score_ew sort by board.",
 						"prompt": "",
 						"try_next": [
-							{"Boards Your Partnership Played": "@Boards_We_Played"},
-							{"Our Mistakes": "@Our_Mistakes"}
+							{
+								"Boards Your Partnership Played": "@Boards_We_Played"
+							},
+							{
+								"Our Mistakes": "@Our_Mistakes"
+							}
 						],
 						"sql": "SELECT CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_NS, CONCAT(section_name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_EW, Board, Contract, Score_Declarer, Computed_Score_Declarer, Score_NS, Score_EW, Result FROM self WHERE Contract IS NULL OR Score_Declarer IS NULL OR Score_Declarer <> Computed_Score_Declarer OR Score_NS <> -Score_EW ORDER BY Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Erreurs de marque, ajustements ou contrats manquants",
+						"help": "**Erreurs de marque, scores ajustés ou contrats manquants.**"
+					}
+				}
 			},
 			"Overall_Rankings_Predictions": {
 				"title": "Overall Rankings Predictions",
@@ -744,20 +1353,34 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"Board Results Predictions": "@Board_Results_Predictions"},
-							{"Declarer Direction Predictions": "@Declarer_Direction_Predictions"}
+							{
+								"Board Results Predictions": "@Board_Results_Predictions"
+							},
+							{
+								"Declarer Direction Predictions": "@Declarer_Direction_Predictions"
+							}
 						],
 						"sql": "SELECT DISTINCT CONCAT(Section_Name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair, Club_Rank_NS AS Club_Rank, Club_Rank_Pred_NS AS Club_Rank_Pred, Our_Global_Rank_NS AS Our_Global_Rank, FFBridge_Global_Rank_NS AS FFBridge_Global_Rank, Rank_Diff_NS AS Rank_Diff, Global_Pct_NS AS Global_Pct, Global_Pct_Pred_NS AS Global_Pct_Pred, Pct_Diff_NS AS Pct_Diff, Boards_NS AS Boards FROM self ORDER BY Club_Rank, Our_Global_Rank"
 					},
 					{
 						"prompt": "",
 						"try_next": [
-							{"Board Results Predictions": "@Board_Results_Predictions"},
-							{"Declarer Direction Predictions": "@Declarer_Direction_Predictions"}
+							{
+								"Board Results Predictions": "@Board_Results_Predictions"
+							},
+							{
+								"Declarer Direction Predictions": "@Declarer_Direction_Predictions"
+							}
 						],
 						"sql": "SELECT DISTINCT CONCAT(Section_Name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair, Club_Rank_EW AS Club_Rank, Club_Rank_Pred_EW AS Club_Rank_Pred, Our_Global_Rank_EW AS Our_Global_Rank, FFBridge_Global_Rank_EW AS FFBridge_Global_Rank, Rank_Diff_EW AS Rank_Diff, Global_Pct_EW AS Global_Pct, Global_Pct_Pred_EW AS Global_Pct_Pred, Pct_Diff_EW AS Pct_Diff, Boards_EW AS Boards FROM self ORDER BY Club_Rank, Our_Global_Rank"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Prédictions du classement général",
+						"help": "**Classement au club, notre classement mondial prédit, le classement mondial publié par la FFBridge, et l'écart. Un Rank_Diff positif signifie que notre modèle classe la paire plus mal que la FFBridge. Global_Pct est le pourcentage publié de la séance. Global_Pct_Pred et Pct_Diff comparent ce pourcentage au pourcentage prédit.**"
+					}
+				}
 			},
 			"Board_Results_Predictions": {
 				"title": "Board Results Predictions",
@@ -766,12 +1389,22 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"Board Results Predictions for Boards We Played": "@Board_Results_Predictions_Boards_We_Played"},
-							{"Contract Predictions Statistics Per Table": "@Contract_Predictions_Statistics_By_Board"}
+							{
+								"Board Results Predictions for Boards We Played": "@Board_Results_Predictions_Boards_We_Played"
+							},
+							{
+								"Contract Predictions Statistics Per Table": "@Contract_Predictions_Statistics_By_Board"
+							}
 						],
 						"sql": "SELECT Board, CONCAT(Section_Name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_NS, CONCAT(Section_Name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_EW, Contract, Contract_Pred, Declarer_Direction, Declarer_Direction_Pred, Pct_NS, Pct_NS_Pred, Pct_Diff FROM self ORDER BY Board, Pair_NS"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Prédictions des résultats de donne",
+						"help": "**Chaque table, chaque donne : contrat, contrat prédit, déclarant, déclarant prédit, pourcentage Nord-Sud, pourcentage prédit, et l'écart.**"
+					}
+				}
 			},
 			"Board_Results_Predictions_Boards_We_Played": {
 				"title": "Board Results Predictions for Boards We Played",
@@ -781,13 +1414,25 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"Board Results Predictions": "@Board_Results_Predictions"},
-							{"Boards Your Partnership Played": "@Boards_We_Played"},
-							{"Every score": "Show every score on board {Board}."}
+							{
+								"Board Results Predictions": "@Board_Results_Predictions"
+							},
+							{
+								"Boards Your Partnership Played": "@Boards_We_Played"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
 						],
 						"sql": "SELECT Board, Contract, Contract_Pred, Declarer_Direction, Declarer_Direction_Pred, Pct_NS, Pct_NS_Pred, Pct_Diff FROM self WHERE Boards_We_Played = TRUE ORDER BY Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Prédictions des résultats des donnes que nous avons jouées",
+						"help": "**Pourcentages prédits des résultats de donne. Seulement les donnes jouées par notre paire. Prédictions faites avant le début de la partie.**"
+					}
+				}
 			},
 			"Declarer_Direction_Predictions": {
 				"title": "Declarer Direction Predictions",
@@ -796,12 +1441,22 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"Declarer Direction Predictions Statistics Per Board": "@Declarer_Direction_Predictions_Statistics_By_Board"},
-							{"Declarer Direction Predictions Statistics Per Actual Declarer": "@Declarer_Direction_Predictions_Statistics_By_Actual_Declarer"}
+							{
+								"Declarer Direction Predictions Statistics Per Board": "@Declarer_Direction_Predictions_Statistics_By_Board"
+							},
+							{
+								"Declarer Direction Predictions Statistics Per Actual Declarer": "@Declarer_Direction_Predictions_Statistics_By_Actual_Declarer"
+							}
 						],
 						"sql": "SELECT Board, Declarer_Direction_Pred AS Pred, Contract, Result, Score_NS, MP_NS, CONCAT(Section_Name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_NS, CONCAT(Section_Name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_EW FROM self ORDER BY Board, MP_NS DESC"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Prédictions de la direction du déclarant",
+						"help": "**Direction prédite du déclarant par donne et résultat. Prédictions faites avant le début de la partie.**"
+					}
+				}
 			},
 			"Declarer_Direction_Predictions_Statistics_By_Board": {
 				"title": "Declarer Direction Predictions Statistics Per Board",
@@ -810,12 +1465,22 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"Declarer Direction Predictions Statistics Per Actual Declarer": "@Declarer_Direction_Predictions_Statistics_By_Actual_Declarer"},
-							{"Declarer Direction Statistics Per Predicted Predicted Declarer": "@Declarer_Direction_Predictions_Statistics_By_Predicted_Declarer"}
+							{
+								"Declarer Direction Predictions Statistics Per Actual Declarer": "@Declarer_Direction_Predictions_Statistics_By_Actual_Declarer"
+							},
+							{
+								"Declarer Direction Statistics Per Predicted Predicted Declarer": "@Declarer_Direction_Predictions_Statistics_By_Predicted_Declarer"
+							}
 						],
 						"sql": "SELECT Board, Declarer_Direction_Pred, COUNT() AS Board_Plays, SUM(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN 1 ELSE 0 END) AS Correct_Preds, Correct_Preds/Board_Plays AS Correct_Direction_Pct, SUM(CASE WHEN (Declarer_Direction IN ('N','S') AND Declarer_Direction_Pred IN ('N', 'S')) OR (Declarer_Direction IN ('E','W') AND Declarer_Direction_Pred IN ('E', 'W')) THEN 1 ELSE 0 END) AS Correct_Pair_Preds, Correct_Pair_Preds/Board_Plays AS Correct_Pair_Pct FROM self GROUP BY Board, Declarer_Direction_Pred ORDER BY Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Statistiques des prédictions de direction du déclarant par donne",
+						"help": "**Statistiques des prédictions de direction du déclarant par numéro de donne. Prédictions faites avant le début de la partie.**"
+					}
+				}
 			},
 			"Declarer_Direction_Predictions_Statistics_By_Actual_Declarer": {
 				"title": "Declarer Direction Predictions Statistics Per Actual Declarer",
@@ -824,12 +1489,22 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"Declarer Direction Statistics Per Predicted Predicted Declarer": "@Declarer_Direction_Predictions_Statistics_By_Predicted_Declarer"},
-							{"Declarer Direction Predictions Statistics Per Board": "@Declarer_Direction_Predictions_Statistics_By_Board"}
+							{
+								"Declarer Direction Statistics Per Predicted Predicted Declarer": "@Declarer_Direction_Predictions_Statistics_By_Predicted_Declarer"
+							},
+							{
+								"Declarer Direction Predictions Statistics Per Board": "@Declarer_Direction_Predictions_Statistics_By_Board"
+							}
 						],
 						"sql": "SELECT Declarer_Direction AS Player, SUM(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN 1 ELSE 0 END) AS Correct_Preds, COUNT() AS Boards_Declared, STRING_AGG(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN CAST(Board AS VARCHAR) END, ', ') AS Correctly_Pred_Boards, STRING_AGG(CASE WHEN Declarer_Direction <> Declarer_Direction_Pred THEN CAST(Board AS VARCHAR) END, ', ') AS Declared_Not_Predicted, Correct_Preds/Boards_Declared AS Correct_Direction_Pct, SUM(CASE WHEN (Declarer_Direction IN ('N','S') AND Declarer_Direction_Pred IN ('N', 'S')) OR (Declarer_Direction IN ('E','W') AND Declarer_Direction_Pred IN ('E', 'W')) THEN 1 ELSE 0 END) AS Correct_Pair_Preds, Correct_Pair_Preds/Boards_Declared AS Correct_Pair_Pct FROM self GROUP BY Declarer_Direction ORDER BY Correct_Direction_Pct DESC, Boards_Declared DESC"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Statistiques des prédictions de direction du déclarant par déclarant réel",
+						"help": "**Statistiques des prédictions de direction du déclarant par déclarant réel. Prédictions faites avant le début de la partie.**"
+					}
+				}
 			},
 			"Declarer_Direction_Predictions_Statistics_By_Predicted_Declarer": {
 				"title": "Declarer Direction Statistics Per Predicted Predicted Declarer",
@@ -839,11 +1514,19 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"Declarer Direction Predictions Statistics Per Actual Declarer": "@Declarer_Direction_Predictions_Statistics_By_Actual_Declarer"}
+							{
+								"Declarer Direction Predictions Statistics Per Actual Declarer": "@Declarer_Direction_Predictions_Statistics_By_Actual_Declarer"
+							}
 						],
 						"sql": "SELECT Declarer_Direction_Pred AS Player, SUM(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN 1 ELSE 0 END) AS Correct_Preds, COUNT() AS Pred_To_Declare, STRING_AGG(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN CAST(Board AS VARCHAR) END, ', ') AS Correctly_Pred_Boards, STRING_AGG(CASE WHEN Declarer_Direction <> Declarer_Direction_Pred THEN CAST(Board AS VARCHAR) END, ', ') AS Predicted_Not_Declared, Correct_Preds/Pred_To_Declare AS Correct_Direction_Pct, SUM(CASE WHEN (Declarer_Direction IN ('N','S') AND Declarer_Direction_Pred IN ('N', 'S')) OR (Declarer_Direction IN ('E','W') AND Declarer_Direction_Pred IN ('E', 'W')) THEN 1 ELSE 0 END) AS Correct_Pair_Preds, Correct_Pair_Preds/Pred_To_Declare AS Correct_Pair_Pct FROM self GROUP BY Declarer_Direction_Pred ORDER BY Correct_Direction_Pct DESC, Pred_To_Declare DESC"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Statistiques des prédictions de direction du déclarant par déclarant prédit",
+						"help": "**Statistiques des prédictions de direction du déclarant par déclarant prédit. Prédictions faites avant le début de la partie.**"
+					}
+				}
 			},
 			"Contract_Predictions_Statistics_By_Boards_We_Played": {
 				"title": "Contract Predictions Statistics for Boards We Played",
@@ -853,12 +1536,22 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"Contract Predictions Statistics Per Table": "@Contract_Predictions_Statistics_By_Board"},
-							{"Contract Predictions Statistics Per Grouped Contract": "@Contract_Predictions_Statistics_By_Board_By_Contract"}
+							{
+								"Contract Predictions Statistics Per Table": "@Contract_Predictions_Statistics_By_Board"
+							},
+							{
+								"Contract Predictions Statistics Per Grouped Contract": "@Contract_Predictions_Statistics_By_Board_By_Contract"
+							}
 						],
 						"sql": "SELECT Board, Contract, Contract_Pred FROM self WHERE Boards_We_Played = True ORDER BY Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Statistiques des prédictions de contrat pour les donnes que nous avons jouées",
+						"help": "**Statistiques des prédictions de contrat pour les donnes jouées par notre paire. Expérimental. Prédictions faites avant le début de la partie.**"
+					}
+				}
 			},
 			"Contract_Predictions_Statistics_By_Board": {
 				"title": "Contract Predictions Statistics Per Table",
@@ -867,12 +1560,22 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"Contract Predictions Statistics Per Grouped Contract": "@Contract_Predictions_Statistics_By_Board_By_Contract"},
-							{"Boards Your Partnership Played": "@Boards_We_Played"}
+							{
+								"Contract Predictions Statistics Per Grouped Contract": "@Contract_Predictions_Statistics_By_Board_By_Contract"
+							},
+							{
+								"Boards Your Partnership Played": "@Boards_We_Played"
+							}
 						],
 						"sql": "SELECT Board, CONCAT(Section_Name, Pair_Number_NS, ' - ', Player_Name_N, ' vs ', Section_Name, Pair_Number_EW, ' - ', Player_Name_E) AS NS_vs_EW, Contract, Contract_Pred FROM self ORDER BY Board, Section_Name, Pair_Number_NS"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Statistiques des prédictions de contrat par table",
+						"help": "**Statistiques des prédictions de contrat par donne jouée. Expérimental. Prédictions faites avant le début de la partie.**"
+					}
+				}
 			},
 			"Contract_Predictions_Statistics_By_Board_By_Contract": {
 				"title": "Contract Predictions Statistics Per Grouped Contract",
@@ -881,12 +1584,22 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"Contract Predictions Statistics Per Table": "@Contract_Predictions_Statistics_By_Board"},
-							{"Frequency of Contracts of All Boards at All Tables": "@Frequency_of_Contracts"}
+							{
+								"Contract Predictions Statistics Per Table": "@Contract_Predictions_Statistics_By_Board"
+							},
+							{
+								"Frequency of Contracts of All Boards at All Tables": "@Frequency_of_Contracts"
+							}
 						],
 						"sql": "SELECT Board, Contract, Contract_Pred, COUNT() AS Board_Plays, SUM(CASE WHEN Contract = Contract_Pred THEN 1 ELSE 0 END) AS Correct_Preds, Correct_Preds/Board_Plays AS Correct_Contract_Pct FROM self GROUP BY Board, Contract, Contract_Pred ORDER BY Board"
 					}
-				]
+				],
+				"i18n": {
+					"fr": {
+						"title": "Statistiques des prédictions de contrat par contrat regroupé",
+						"help": "**Statistiques des prédictions de contrat par numéro de donne, regroupées par contrat. Expérimental. Prédictions faites avant le début de la partie.**"
+					}
+				}
 			}
 		}
 	},
