@@ -165,7 +165,12 @@ import time
 from mlBridge.mlBridgeAugmentLib import (
     AllAugmentations,
 )
-from mlBridge.mlBridgePostmortemLib import PostmortemBase
+from mlBridge.mlBridgePostmortemLib import (
+    PostmortemBase,
+    chrome_text,
+    language_from_accept_language,
+    localized_field,
+)
 #import mlBridgeEndplayLib
 import ffbridge_postmortem_create as pm_create
 import ffbridge_postmortem_api_client as pm_api
@@ -541,6 +546,69 @@ def _serialize_session_id(value: Any) -> Optional[str]:
     return str(session_id)
 
 
+def _parse_language_param(raw: str) -> str:
+    value = str(raw).strip().lower()
+    if value not in ("en", "fr"):
+        raise ValueError(f"invalid language URL param value: {raw!r}")
+    return value
+
+
+def accept_language_header() -> Optional[str]:
+    """Browser Accept-Language from the Streamlit request, when the runtime exposes it."""
+    try:
+        headers = st.context.headers
+    except Exception:
+        return None
+    if not headers:
+        return None
+    return headers.get("Accept-Language") or headers.get("accept-language")
+
+
+def ensure_report_language() -> None:
+    """Use ?lang= when it is already in session. Otherwise follow the browser."""
+    if st.session_state.get("report_language") in ("en", "fr"):
+        return
+    st.session_state.report_language = language_from_accept_language(accept_language_header())
+
+
+def _language_option_label(code: str) -> str:
+    return "Français" if code == "fr" else "English"
+
+
+def show_morty_intro() -> None:
+    for index, line in enumerate(morty_intro_lines(), start=1):
+        streamlit_chat.message(
+            line,
+            key=f"intro_message_{index}",
+            logo=st.session_state.assistant_logo,
+        )
+
+
+def morty_intro_lines() -> List[str]:
+    return [
+        chrome_text(
+            "intro_1",
+            "Hi. I'm Morty. Your friendly postmortem chatbot. I only want to chat about ffbridge pair matchpoint games using a Mitchell movement and not shuffled.",
+        ),
+        chrome_text(
+            "intro_2",
+            "I'm optimized for large screen devices such as a notebook or monitor. Do not use a smartphone.",
+        ),
+        chrome_text(
+            "intro_3",
+            "To start our postmortem chat, I'll need the a player number of your ffbridge game. It will be the subject of our chat.",
+        ),
+        chrome_text(
+            "intro_4",
+            "Enter the player number in the left sidebar or just re-enter the default player number. Press the enter key to begin.",
+        ),
+        chrome_text(
+            "intro_5",
+            "I'm just a Proof of Concept so don't double me.",
+        ),
+    ]
+
+
 def _parse_bool_param(raw: str) -> bool:
     s = str(raw).strip().lower()
     if s in ('1', 'true', 't', 'yes', 'y', 'on'):
@@ -576,6 +644,11 @@ SIDEBAR_URL_PARAM_MAP: Dict[str, Dict[str, Callable[[Any], Any]]] = {
         'state_key': 'debug_mode',
         'parser': _parse_bool_param,
         'serializer': lambda v: None if v is None else ('1' if bool(v) else '0'),
+    },
+    'lang': {
+        'state_key': 'report_language',
+        'parser': _parse_language_param,
+        'serializer': lambda v: v if v in ('en', 'fr') else None,
     },
 }
 
@@ -1456,13 +1529,15 @@ def _sidebar_result_links(
     """Sidebar result links. One organizer sheet is labeled Roy René only."""
     results = _usable_results_url(results_url)
     route = _usable_results_url(route_url)
+    ffbridge_label = chrome_text("ffbridge_result_page", "FFBridge Result Page")
+    roy_rene_label = chrome_text("roy_rene_result_page", "Roy René Result Page")
     if route and results == route:
-        return [("Roy René Result Page", route)]
+        return [(roy_rene_label, route)]
     links: list[tuple[str, str]] = []
     if results:
-        links.append(("FFBridge Result Page", results))
+        links.append((ffbridge_label, results))
     if route:
-        links.append(("Roy René Result Page", route))
+        links.append((roy_rene_label, route))
     return links
 
 
@@ -1927,7 +2002,7 @@ def _change_game_state_lancelot(player_id: str, session_id: Optional[int]) -> bo
             )
         st.session_state.player_id = player_id
 
-    with st.spinner('Preparing Bridge Game Postmortem Report...'):
+    with st.spinner(chrome_text("preparing_report", "Preparing Bridge Game Postmortem Report...")):
         try:
             gen = pm_api.generate_and_wait(str(player_id), session_id=str(session_id))
         except pm_api.FfbridgeApiClientError as e:
@@ -2071,13 +2146,19 @@ def _apply_resolved_search_player(player_id: str, license_number: str, query: st
     try:
         has_games = populate_game_urls_for_player(st.session_state.player_id)
     except Exception as e:
-        st.session_state.player_search_error = f"Error loading games for player: {str(e)}"
+        st.session_state.player_search_error = chrome_text(
+            "games_load_error",
+            "Error loading games for player: {error}",
+        ).format(error=e)
         st.session_state.player_id = None
         return
 
     if not has_games:
         if not st.session_state.get("player_search_error"):
-            st.session_state.player_search_error = f"No games found for player '{query}'."
+            st.session_state.player_search_error = chrome_text(
+                "no_games_for_player",
+                "No games found for player '{query}'.",
+            ).format(query=query)
         st.session_state.player_id = None
         return
 
@@ -2111,10 +2192,10 @@ def player_search_input_on_change_with_query(query: str) -> None:
         matches = _player_search_matches_from_df(dfs['search'], query)
 
         if not matches:
-            st.session_state.player_search_error = (
-                f"No player found matching '{query}'. "
-                "Please check the name or license number and try again."
-            )
+            st.session_state.player_search_error = chrome_text(
+                "player_not_found",
+                "No player found matching '{query}'. Please check the name or license number and try again.",
+            ).format(query=query)
             st.session_state.player_id = None
             st.session_state.deferred_start_report = False
             _clear_player_search_matches()
@@ -2222,31 +2303,7 @@ def initialize_website_specific() -> None:
     #st.session_state.favoritesPath = pathlib.joinpath('favorites'),
     st.session_state.savedModelsPath = st.session_state.rootPath.joinpath('SavedModels')
 
-    streamlit_chat.message(
-        "Hi. I'm Morty. Your friendly postmortem chatbot. I only want to chat about ffbridge pair matchpoint games using a Mitchell movement and not shuffled.",
-        key='intro_message_1',
-        logo=st.session_state.assistant_logo
-    )
-    streamlit_chat.message(
-        "I'm optimized for large screen devices such as a notebook or monitor. Do not use a smartphone.",
-        key='intro_message_2',
-        logo=st.session_state.assistant_logo
-    )
-    streamlit_chat.message(
-        "To start our postmortem chat, I'll need the a player number of your ffbridge game. It will be the subject of our chat.",
-        key='intro_message_3',
-        logo=st.session_state.assistant_logo
-    )
-    streamlit_chat.message(
-        "Enter the player number in the left sidebar or just re-enter the default player number. Press the enter key to begin.",
-        key='intro_message_4',
-        logo=st.session_state.assistant_logo
-    )
-    streamlit_chat.message(
-        "I'm just a Proof of Concept so don't double me.",
-        key='intro_message_5',
-        logo=st.session_state.assistant_logo
-    )
+    show_morty_intro()
     app_info()
     return
 
@@ -2531,6 +2588,7 @@ class FFBridgeApp(PostmortemBase):
         # Apply URL query params last so they override any defaults set above
         # (e.g. ?player_id=...&session_id=...&debug_mode=1).
         apply_url_params_to_session_state()
+        ensure_report_language()
 
         # ?player_id= in shared URLs is usually a license number. Resolve
         # aliases here so generate/filter can use Lancelot/Classic ids, but
@@ -2621,7 +2679,10 @@ class FFBridgeApp(PostmortemBase):
                         # already set (e.g. the Lancelot logged-in-user-only limitation).
                         st.session_state.deferred_start_report = False
                         if not st.session_state.get('player_search_error'):
-                            st.session_state.player_search_error = f"No games found for player ID '{st.session_state.player_id}'."
+                            st.session_state.player_search_error = chrome_text(
+                                "no_games_for_id",
+                                "No games found for player ID '{player_id}'.",
+                            ).format(player_id=st.session_state.player_id)
                         st.session_state.player_id = None
                 except Exception as e:
                     st.session_state.deferred_start_report = False
@@ -2690,31 +2751,7 @@ class FFBridgeApp(PostmortemBase):
                 if hasattr(st.session_state, 'player_search_error'):
                     st.error(st.session_state.player_search_error)
                 
-                streamlit_chat.message(
-                    "Hi. I'm Morty. Your friendly postmortem chatbot. I only want to chat about ffbridge pair matchpoint games using a Mitchell movement and not shuffled.",
-                    key='intro_message_1',
-                    logo=st.session_state.assistant_logo
-                )
-                streamlit_chat.message(
-                    "I'm optimized for large screen devices such as a notebook or monitor. Do not use a smartphone.",
-                    key='intro_message_2',
-                    logo=st.session_state.assistant_logo
-                )
-                streamlit_chat.message(
-                    "To start our postmortem chat, I'll need the a player number of your ffbridge game. It will be the subject of our chat.",
-                    key='intro_message_3',
-                    logo=st.session_state.assistant_logo
-                )
-                streamlit_chat.message(
-                    "Enter the player number in the left sidebar or just re-enter the default player number. Press the enter key to begin.",
-                    key='intro_message_4',
-                    logo=st.session_state.assistant_logo
-                )
-                streamlit_chat.message(
-                    "I'm just a Proof of Concept so don't double me.",
-                    key='intro_message_5',
-                    logo=st.session_state.assistant_logo
-                )
+                show_morty_intro()
                 app_info()
             elif st.session_state.session_id is not None:
                 st.session_state.report_rendering = True
@@ -2759,8 +2796,16 @@ class FFBridgeApp(PostmortemBase):
 
     def create_sidebar(self):
         """Create FFBridge-specific sidebar."""
-        render_sidebar_brand("FFBridge Postmortem")
+        self.read_configs()
+        ensure_report_language()
+        render_sidebar_brand(chrome_text("sidebar_title", "FFBridge Postmortem"))
         st.sidebar.caption(f"Build:{st.session_state.app_datetime}")
+        st.sidebar.selectbox(
+            chrome_text("language", "Language"),
+            options=["en", "fr"],
+            format_func=_language_option_label,
+            key="report_language",
+        )
         
         # Process Go button input OUTSIDE sidebar context (so output goes to main window)
         if hasattr(st.session_state, 'process_go_button_input'):
@@ -2776,7 +2821,10 @@ class FFBridgeApp(PostmortemBase):
                     dfs = {'search': search_members(input_value)}
                     
                     if len(dfs['search']) == 0:
-                        st.error(f"License number '{input_value}' not found.")
+                        st.error(chrome_text(
+                            "license_not_found",
+                            "License number '{license}' not found.",
+                        ).format(license=input_value))
                     elif len(dfs['search']) == 1:
                         # Exactly one player found. Keep the license as the
                         # public player_id so the URL stays shareable.
@@ -2800,7 +2848,10 @@ class FFBridgeApp(PostmortemBase):
                             # A more specific message (e.g. Lancelot logged-in-user-only) may
                             # already be queued for the sidebar; don't duplicate it here.
                             if not st.session_state.get('player_search_error'):
-                                st.error(f"No games found for license number '{input_value}'.")
+                                st.error(chrome_text(
+                                    "no_games_for_license",
+                                    "No games found for license number '{license}'.",
+                                ).format(license=input_value))
                             st.session_state.player_id = None
                             return
                         
@@ -2810,10 +2861,16 @@ class FFBridgeApp(PostmortemBase):
                         return
                     else:
                         # Multiple players found - this shouldn't happen with exact license numbers
-                        st.error(f"Multiple players found for license '{input_value}'. This is unexpected.")
+                        st.error(chrome_text(
+                            "multiple_players",
+                            "Multiple players found for license '{license}'. This is unexpected.",
+                        ).format(license=input_value))
                         
                 except Exception as e:
-                    st.error(f"Error looking up license {input_value}: {str(e)}")
+                    st.error(chrome_text(
+                        "license_lookup_error",
+                        "Error looking up license {license}: {error}",
+                    ).format(license=input_value, error=e))
             else:
                 # If it's a search term, trigger search to show dialog
                 player_search_input_on_change_with_query(input_value)
@@ -2847,21 +2904,31 @@ class FFBridgeApp(PostmortemBase):
         show_match_selectbox = _name_search_has_multiple_matches()
         with st.sidebar.form(key="player_search_form", clear_on_submit=False):
             st.text_input(
-                "FFBridge license number or name",
+                chrome_text("license_label", "FFBridge license number or name"),
                 key='player_search_input',
-                placeholder="9500754 or Robert Salita",
-                help="Digits-only license or Lancelot id, or a fuzzy player name.",
+                placeholder=chrome_text("license_placeholder", "9500754 or Robert Salita"),
+                help=chrome_text(
+                    "license_help",
+                    "Digits-only license or Lancelot id, or a fuzzy player name.",
+                ),
             )
             if show_match_selectbox:
                 st.selectbox(
-                    f"Matching players ({len(matches)})",
+                    chrome_text("matching_players", "Matching players ({count})").format(count=len(matches)),
                     options=[match[0] for match in matches],
                     index=None,
-                    placeholder="Select the player",
+                    placeholder=chrome_text("select_player", "Select the player"),
                     key="player_search_match_selection",
-                    help="Several people matched. Pick one, then click Go.",
+                    help=chrome_text(
+                        "select_player_help",
+                        "Several people matched. Pick one, then click Go.",
+                    ),
                 )
-            submitted = st.form_submit_button("Go", type="primary", use_container_width=True)
+            submitted = st.form_submit_button(
+                chrome_text("go", "Go"),
+                type="primary",
+                use_container_width=True,
+            )
 
         if submitted:
             input_value = (st.session_state.get('player_search_input') or '').strip()
@@ -2927,14 +2994,16 @@ class FFBridgeApp(PostmortemBase):
             if desired and st.session_state.get("club_session_ids_selectbox") not in options:
                 st.session_state.club_session_ids_selectbox = desired
             st.sidebar.selectbox(
-                "Choose a club game.",
+                chrome_text("choose_game", "Choose a club game."),
                 index=current_index,
                 options=options,
                 on_change=club_session_id_on_change,
                 key='club_session_ids_selectbox'
             )
             # Show a small verification of how many games are available
-            st.sidebar.caption(f"Games found: {len(games)}")
+            st.sidebar.caption(
+                chrome_text("games_found", "Games found: {count}").format(count=len(games))
+            )
 
         results_url = _ensure_game_results_url()
         for label, url in _sidebar_result_links(results_url, st.session_state.get("route_url")):
@@ -2944,11 +3013,14 @@ class FFBridgeApp(PostmortemBase):
 
         if st.session_state.get("favorites") and st.session_state.get("df") is not None:
             st.sidebar.markdown("---")
-            st.sidebar.write(
-                "Favorite prompts. Click a button, or ask a question in the box at the bottom."
-            )
+            st.sidebar.write(chrome_text(
+                "favorite_prompts",
+                "Favorite prompts. Click a button, or ask a question in the box at the bottom.",
+            ))
             for key, button in st.session_state.favorites["Buttons"].items():
-                if st.sidebar.button(button["title"], help=button.get("help"), key=key):
+                label = localized_field(button, "title", str(button.get("title") or key))
+                help_text = localized_field(button, "help", str(button.get("help") or ""))
+                if st.sidebar.button(label, help=help_text or None, key=key):
                     st.session_state.sql_query_mode = False
                     st.session_state.button_title = key
                     if key == "AI_Predictions":
@@ -2956,7 +3028,8 @@ class FFBridgeApp(PostmortemBase):
 
         # Other Morty websites
         st.sidebar.markdown("---")
-        st.sidebar.markdown("**Other Morty websites**")
+        st.sidebar.markdown(f"**{chrome_text('other_sites', 'Other Morty websites')}**")
+        st.sidebar.markdown("🔗 [Bridge Chatbot](https://chat.7nt.info)")
         st.sidebar.markdown("🔗 [ACBL Elo Ratings](https://acbl-elo.7nt.info)")
         st.sidebar.markdown("🔗 [ACBL Postmortem](https://acbl.postmortem.chat)")
         st.sidebar.markdown("🔗 [ACBL Statistics](https://acbl-stats.7nt.info)")
