@@ -108,9 +108,9 @@
 				]
 			},
 			"Boards_We_Played": {
-				"title": "Boards You Played",
+				"title": "Boards Your Partnership Played",
 				"row_click": "Show every score on board {Board}.",
-				"help": "**Showing boards you played.**",
+				"help": "**Showing boards your partnership played.**",
 				"comment": "Can't get 2nd prompt to work. Unreliable responses. e.g. Show ROUND(AVG(pct)) from previous prompt.",
 				"prompts": [
 					{
@@ -164,7 +164,7 @@
 			"Boards_We_Beat_Par": {
 				"title": "Boards I beat Par",
 				"row_click": "Show every score on board {Board}.",
-				"help": "**Showing boards which you beat Par.**",
+				"help": "**Showing boards which your partnership beat Par.**",
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, Par, pct, Par pct, sd pct. Show those boards I played and score > Par.",
@@ -181,7 +181,7 @@
 			"Boards_We_Equaled_Par": {
 				"title": "Boards I equaled Par",
 				"row_click": "Show every score on board {Board}.",
-				"help": "**Showing boards which you equaled Par.**",
+				"help": "**Showing boards which your partnership equaled Par.**",
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, Par, pct, Par pct, sd pct. Show those boards I played and score = Par.",
@@ -197,7 +197,7 @@
 			"Boards_We_Underperformed_Par": {
 				"title": "Boards I underperformed Par",
 				"row_click": "Show every score on board {Board}.",
-				"help": "**Showing boards which you underperformed Par.**",
+				"help": "**Showing boards which your partnership underperformed Par.**",
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, Par, pct, Par pct, sd pct. Show those boards I played and score < Par.",
@@ -262,7 +262,7 @@
 				]
 			},
 			"Boards_We_Underperformed_Par_Pct": {
-				"title": "Boards You Underperformed Par Pct",
+				"title": "Boards Your Partnership Underperformed Par Pct",
 				"row_click": "Show every score on board {Board}.",
 				"help": "**Showing boards which underperformed Par percentage.**",
 				"prompts": [
@@ -270,7 +270,7 @@
 						"prompt": "Show board, contract, score, Par, pct, Par pct, sd pct, tricks, DD tricks. Show those boards we played and pct < Par pct.",
 						"try_next": [
 							{"Boards I underperformed Par": "@Boards_We_Underperformed_Par"},
-							{"Boards You Underperformed Expected Value (EV)": "@Boards_We_Underperformed_EV"},
+							{"Boards Your Partnership Underperformed Expected Value (EV)": "@Boards_We_Underperformed_EV"},
 							{"Every score": "Show every score on board {Board}."}
 						],
 						"sql": "SELECT Board, Contract, Score_{Pair_Direction}, Par_{Pair_Direction}, Pct_{Pair_Direction}, Par_Pct_{Pair_Direction}, EV_Pct_Max_{Pair_Direction}, Tricks, DD_Tricks FROM self WHERE Boards_We_Played = True AND Pct_{Pair_Direction} < Par_Pct_{Pair_Direction} ORDER BY Board"
@@ -278,7 +278,7 @@
 				]
 			},
 			"Boards_We_Underperformed_EV": {
-				"title": "Boards You Underperformed Expected Value (EV)",
+				"title": "Boards Your Partnership Underperformed Expected Value (EV)",
 				"row_click": "Show every score on board {Board}.",
 				"help": "**Showing boards we declared which underperformed Expected Value (EV).**",
 				"prompts": [
@@ -295,7 +295,7 @@
 			"We_Got_Gifts": {
 				"title": "We Got Gifts",
 				"row_click": "Show every score on board {Board}.",
-				"help": "**Showing boards your partnership declared which your opponents gifted you the contract or tricks.**",
+				"help": "**Showing boards your partnership declared which your opponents gifted your partnership the contract or tricks.**",
 				"prompts": [
 					{
 						"prompt": "Show board, contract, score, pct, Par, tricks, dd tricks, sd score, sd score max, sd contract max. Show those boards we declared and score > Par and score > sd score.",
@@ -540,7 +540,7 @@
 						"prompt": "Show board, ev max pct diff, contract, score, Par, pct, Par pct, sd pct, dd tricks, sd Par pct diff, sd score, sd probs taking_* sort by sd pct diff descending. Show those boards we played.",
 						"try_next": [
 							{"Expected Value (EV) Analysis of All Boards at All Tables By Strain": "@Expected_Value_All_Boards"},
-							{"Boards You Underperformed Expected Value (EV)": "@Boards_We_Underperformed_EV"}
+							{"Boards Your Partnership Underperformed Expected Value (EV)": "@Boards_We_Underperformed_EV"}
 						],
 						"sql": "SELECT Board, EV_Pct_Max_Diff_{Pair_Direction}, Contract, Score_{Pair_Direction}, Par_{Pair_Direction}, Pct_{Pair_Direction}, Par_Pct_{Pair_Direction}, section_name, Pair_Number_NS, Pair_Number_EW, EV_Pct_Max_{Pair_Direction}, DD_Tricks, EV_Max_{Pair_Direction}, Prob_Taking_0, Prob_Taking_1, Prob_Taking_2, Prob_Taking_3, Prob_Taking_4, Prob_Taking_5, Prob_Taking_6, Prob_Taking_7, Prob_Taking_8, Prob_Taking_9, Prob_Taking_10, Prob_Taking_11, Prob_Taking_12, Prob_Taking_13 FROM self WHERE Boards_We_Played = True ORDER BY EV_Pct_Max_Diff_{Pair_Direction} DESC"
 					}
@@ -584,7 +584,7 @@
 						"prompt": "Show board, contract, result, score, Par, pct, Par pct, sd pct, dd tricks, dd tricks dummy. Show those boards we played and dd tricks < dd tricks dummy.",
 						"try_next": [
 							{"Boards We Declared": "@Boards_We_Declared"},
-							{"Boards You Played": "@Boards_We_Played"},
+							{"Boards Your Partnership Played": "@Boards_We_Played"},
 							{"Every score": "Show every score on board {Board}."}
 						],
 						"sql": "SELECT Board, Contract, Result, Score_{Pair_Direction}, Par_{Pair_Direction}, Pct_{Pair_Direction}, Par_Pct_{Pair_Direction}, EV_Pct_Max_{Pair_Direction}, DD_Tricks, DD_Tricks_Dummy FROM self WHERE Boards_We_Played = True AND DD_Tricks < DD_Tricks_Dummy ORDER BY Board"
@@ -598,7 +598,7 @@
 					{
 						"prompt": "Show distinct board and all directions of HCP, QT, DP.",
 						"try_next": [
-							{"Boards You Played": "@Boards_We_Played"},
+							{"Boards Your Partnership Played": "@Boards_We_Played"},
 							{"Frequency of Contracts of All Boards at All Tables": "@Frequency_of_Contracts"}
 						],
 						"sql": "SELECT DISTINCT Board, HCP_{Pair_Direction}, HCP_{Opponent_Pair_Direction}, QT_{Pair_Direction}, QT_{Opponent_Pair_Direction}, DP_{Pair_Direction}, DP_{Opponent_Pair_Direction} FROM self ORDER BY Board"
@@ -613,7 +613,7 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"Boards You Played": "@Boards_We_Played"},
+							{"Boards Your Partnership Played": "@Boards_We_Played"},
 							{"Rank Pairs by Par Success": "@Par_Rankings"}
 						],
 						"sql": "SELECT CONCAT(section_name, Pair_Number_{Opponent_Pair_Direction}, ' - ', (SELECT STRING_AGG(value.unnest, ' - ') FROM UNNEST(Pair_Names_{Opponent_Pair_Direction}) as value)) as Opponents, AVG(Pct_{Pair_Direction}) AS Avg_Pct_{Pair_Direction}, STRING_AGG(Board, ', ') AS Boards, STRING_AGG(ROUND(Pct_{Pair_Direction},2), ', ') AS Pcts_{Pair_Direction} FROM self WHERE Boards_We_Played = True GROUP BY section_name, Pair_Number_{Opponent_Pair_Direction}, Pair_Names_{Opponent_Pair_Direction} ORDER BY section_name, Pair_Number_{Opponent_Pair_Direction}"
@@ -628,23 +628,23 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"Unique Bids You Played": "@Unique_Bids_We_Played"},
-							{"Unique Bids You Declared": "@Unique_Bids_We_Declared"}
+							{"Unique Bids Your Partnership Played": "@Unique_Bids_We_Played"},
+							{"Unique Bids Your Partnership Declared": "@Unique_Bids_We_Declared"}
 						],
 						"sql": "SELECT x.Board, x.BidSuit, x.ContractType, y.Contract, y.Pct_{Pair_Direction}, y.section_name, y.Pair_Number_NS, y.Pair_Number_EW FROM ((SELECT Board, BidSuit, ContractType FROM self GROUP BY Board, BidSuit, ContractType HAVING COUNT(*) = 1) AS x LEFT JOIN (SELECT * FROM self) AS y ON (x.Board, x.BidSuit, x.ContractType) = (y.Board, y.BidSuit, y.ContractType)) ORDER BY x.Board"
 					}
 				]
 			},
 			"Unique_Bids_We_Played": {
-				"title": "Unique Bids You Played",
+				"title": "Unique Bids Your Partnership Played",
 				"row_click": "Show every score on board {Board}.",
-				"help": "**Showing boards which you played, at your table, having unique bids per strain and contract type.**",
+				"help": "**Showing boards which your partnership played, at your table, having unique bids per strain and contract type.**",
 				"comment": "Too difficult to devise a user friendly prompt using ChatGPT 3.5 Turbo. Must use near total SQL. GPT4 seems to get it right most of the time but too costly. Need x.Pct because x.pct doesn't work.",
 				"prompts": [
 					{
 						"prompt": "",
 						"try_next": [
-							{"Unique Bids You Declared": "@Unique_Bids_We_Declared"},
+							{"Unique Bids Your Partnership Declared": "@Unique_Bids_We_Declared"},
 							{"Unique Bids of All Boards at All Tables": "@Unique_Bids_All_Boards"},
 							{"Every score": "Show every score on board {Board}."}
 						],
@@ -653,7 +653,7 @@
 				]
 			},
 			"Unique_Bids_We_Declared": {
-				"title": "Unique Bids You Declared",
+				"title": "Unique Bids Your Partnership Declared",
 				"row_click": "Show every score on board {Board}.",
 				"help": "**Showing boards, which your partnership declared, having unique bids per strain and contract type.**",
 				"comment": "Too difficult to devise a user friendly prompt using ChatGPT 3.5 Turbo. Must use near total SQL. GPT4 seems to get it right most of the time but too costly. Need x.Pct because x.pct doesn't work.",
@@ -661,7 +661,7 @@
 					{
 						"prompt": "",
 						"try_next": [
-							{"Unique Bids You Played": "@Unique_Bids_We_Played"},
+							{"Unique Bids Your Partnership Played": "@Unique_Bids_We_Played"},
 							{"Boards We Declared": "@Boards_We_Declared"},
 							{"Every score": "Show every score on board {Board}."}
 						],
@@ -730,7 +730,7 @@
 						"failed prompt": "show board, contract, score_declarer, computed_score_declarer, score_ns, score_ew when score_declarer <> computed_score_declarer or score_ns <> -score_ew sort by board.",
 						"prompt": "",
 						"try_next": [
-							{"Boards You Played": "@Boards_We_Played"},
+							{"Boards Your Partnership Played": "@Boards_We_Played"},
 							{"Our Mistakes": "@Our_Mistakes"}
 						],
 						"sql": "SELECT CONCAT(section_name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_NS, CONCAT(section_name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_EW, Board, Contract, Score_Declarer, Computed_Score_Declarer, Score_NS, Score_EW, Result FROM self WHERE Contract IS NULL OR Score_Declarer IS NULL OR Score_Declarer <> Computed_Score_Declarer OR Score_NS <> -Score_EW ORDER BY Board"
@@ -782,7 +782,7 @@
 						"prompt": "",
 						"try_next": [
 							{"Board Results Predictions": "@Board_Results_Predictions"},
-							{"Boards You Played": "@Boards_We_Played"},
+							{"Boards Your Partnership Played": "@Boards_We_Played"},
 							{"Every score": "Show every score on board {Board}."}
 						],
 						"sql": "SELECT Board, Contract, Contract_Pred, Declarer_Direction, Declarer_Direction_Pred, Pct_NS, Pct_NS_Pred, Pct_Diff FROM self WHERE Boards_We_Played = TRUE ORDER BY Board"
@@ -868,7 +868,7 @@
 						"prompt": "",
 						"try_next": [
 							{"Contract Predictions Statistics Per Grouped Contract": "@Contract_Predictions_Statistics_By_Board_By_Contract"},
-							{"Boards You Played": "@Boards_We_Played"}
+							{"Boards Your Partnership Played": "@Boards_We_Played"}
 						],
 						"sql": "SELECT Board, CONCAT(Section_Name, Pair_Number_NS, ' - ', Player_Name_N, ' vs ', Section_Name, Pair_Number_EW, ' - ', Player_Name_E) AS NS_vs_EW, Contract, Contract_Pred FROM self ORDER BY Board, Section_Name, Pair_Number_NS"
 					}
