@@ -201,42 +201,36 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(east["Club_Rank_Pred"].to_list(), [1, 1])
         self.assertEqual(north["Club_Rank_Pred"].to_list(), [3, 3])
 
-    def test_directional_bias_is_centered_before_club_ranking(self):
-        rows = []
-        for board in (1, 2):
-            for table in range(1, 14):
-                rows.append({
-                    "Board": board,
-                    "section_name": "A",
-                    "Pair_Number_NS": table,
-                    "Pair_Number_EW": table,
-                    "Player_ID_N": table,
-                    "Player_ID_S": table + 100,
-                    "Player_ID_E": table + 200,
-                    "Player_ID_W": table + 300,
-                    "Player_Name_N": f"N{table}",
-                    "Player_Name_S": f"S{table}",
-                    "Player_Name_E": f"E{table}",
-                    "Player_Name_W": f"W{table}",
-                    # This raw model bias would rank all 13 EW pairs ahead of
-                    # all 13 NS pairs without session-wide centering.
-                    "Pct_NS_Pred": 0.36 + board / 50 + table / 1000,
-                })
-        biased = pl.DataFrame(rows)
-        centered = predictions._recenter_session_predictions(biased)
-        self.assertAlmostEqual(centered["Pct_NS_Pred"].mean(), 0.5, places=10)
-        self.assertAlmostEqual(
-            centered["Pct_NS_Pred"].std(),
-            biased["Pct_NS_Pred"].std(),
-            places=10,
-        )
+    def test_a_stronger_ns_line_is_not_centered_away(self):
+        # Every NS pair is predicted above 50%. Centering would force the NS
+        # and EW lines to the same average; the raw model output is kept.
+        frame = pl.DataFrame({
+            "Board": [1, 1, 2, 2],
+            "Pct_NS": [0.70, 0.40, 0.55, 0.65],
+            "Pct_NS_Pred": [0.62, 0.58, 1.07, 0.56],
+        })
+        assigned = predictions._assign_ns_prediction(frame)
+        self.assertEqual(assigned["Pct_NS_Pred"].to_list(), [0.62, 0.58, 1.0, 0.56])
+        diffs = [round(value, 6) for value in assigned["Pct_Diff"].to_list()]
+        self.assertEqual(diffs, [-0.08, 0.18, 0.45, -0.09])
 
-        ranked = predictions.ranking_rows(centered, None)
-        ns_ranks = ranked.filter(pl.col("Orientation") == "NS")["Club_Rank_Pred"].to_list()
-        ew_ranks = ranked.filter(pl.col("Orientation") == "EW")["Club_Rank_Pred"].to_list()
-        self.assertLess(min(ns_ranks), max(ew_ranks))
-        self.assertLess(min(ew_ranks), max(ns_ranks))
-        self.assertLessEqual(abs(sum(ns_ranks) - sum(ew_ranks)), 1)
+    def test_elo_gap_uses_the_filled_pair_ratings(self):
+        frame = predictions._add_elo_missing_flags(
+            pl.DataFrame({"Elo_NS": [1600.0, None], "Elo_EW": [1500.0, 1450.0]})
+        )
+        aligned = predictions._align_features(
+            frame,
+            {name: "Float32" for name in ("Elo_NS", "Elo_EW", "Elo_Gap", "Elo_NS_Missing")},
+            ["Elo_NS", "Elo_EW", "Elo_Gap", "Elo_NS_Missing"],
+            {
+                "Elo_NS": {"mean": 1550.0},
+                "Elo_EW": {"mean": 1520.0},
+                "Elo_Gap": {"mean": 30.0},
+                "Elo_NS_Missing": {"mean": 0.05},
+            },
+        )
+        self.assertEqual(aligned["Elo_Gap"].to_list(), [100.0, 100.0])
+        self.assertEqual(aligned["Elo_NS_Missing"].to_list(), [0.0, 1.0])
 
     def test_a_higher_table_prediction_ranks_ahead_of_the_other_tables(self):
         boards = pl.DataFrame({
@@ -337,8 +331,9 @@ class RankingTests(unittest.TestCase):
             self.assertEqual(attached["Elo_S"][0], 1400.0)
             self.assertEqual(attached["Elo_E"][0], 1300.0)
             self.assertEqual(attached["Elo_W"][0], 1200.0)
-            self.assertEqual(attached["Elo_NS"][0], 1475.0)
-            self.assertEqual(attached["Elo_EW"][0], 1275.0)
+            # The before ratings, not scratch_pair_elo (an after-session mean).
+            self.assertEqual(attached["Elo_NS"][0], 1450.0)
+            self.assertEqual(attached["Elo_EW"][0], 1250.0)
 
     def test_attach_elo_features_matches_lancelot_ids_not_the_other_person_id(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -369,7 +364,7 @@ class RankingTests(unittest.TestCase):
             self.assertEqual(attached["Elo_N"][0], 1800.0)
             self.assertEqual(attached["Elo_S"][0], 1600.0)
             self.assertIsNone(attached["Elo_E"][0])
-            self.assertEqual(attached["Elo_NS"][0], 1720.0)
+            self.assertEqual(attached["Elo_NS"][0], 1700.0)
 
 
 if __name__ == "__main__":

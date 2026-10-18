@@ -7,9 +7,9 @@ where that percentage would sit in the published national field.
 FFBridge's global rank is the official ``rank`` on the session ranking.
 ``Rank_Diff`` is our global rank minus that official rank.
 
-Board percentages use the predicted declarer. When the predicted declarer is
-North or South, ``Pct_NS_Pred`` is the predicted declarer percentage. When the
-predicted declarer is East or West, North-South receive the complement.
+``Pct_NS_Pred`` is the percentage model's North-South score on the board,
+from the deal and the four players' pre-session ratings. East-West receive
+the complement.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ _ELO_CACHE_DIRS = (
     Path(__file__).resolve().parent.parent / "data" / "ffbridge" / "elo_cache",
     Path(r"E:\bridge\data\ffbridge\elo_cache"),
 )
-TARGETS = ("Declarer_Direction", "Contract", "Declarer_Pct")
+TARGETS = ("Declarer_Direction", "Contract", "Pct_NS")
 RANKING_COLUMNS = (
     "Pair",
     "Orientation",
@@ -119,7 +119,12 @@ def _id_token(column: str) -> pl.Expr:
 
 
 def _attach_elo_features(frame: pl.DataFrame, session_id: Any) -> pl.DataFrame:
-    """Attach the pre-session seat and pair Elo used by the trained models."""
+    """Attach the pre-session seat and pair Elo used by the trained models.
+
+    ``scratch_pair_elo`` is the mean of the two players' *after* ratings, so
+    it contains this session's result. The pair rating is the mean of the two
+    before ratings instead, as in training.
+    """
     path = _elo_results_path()
     if path is None:
         raise FileNotFoundError("FFBridge Elo results parquet was not found")
@@ -149,9 +154,9 @@ def _attach_elo_features(frame: pl.DataFrame, session_id: Any) -> pl.DataFrame:
         .select(
             pl.col("player1_scratch_elo_before").cast(pl.Float32).alias("e1"),
             pl.col("player2_scratch_elo_before").cast(pl.Float32).alias("e2"),
-            pl.col("scratch_pair_elo").cast(pl.Float32).alias("pair_elo"),
             *[_id_token(name).alias(name) for pair in id_pairs for name in pair],
         )
+        .with_columns(((pl.col("e1") + pl.col("e2")) / 2.0).alias("pair_elo"))
         .collect()
     )
     if results.is_empty():
@@ -241,9 +246,16 @@ def _align_features(
     required: List[str],
     scaling_params: Optional[Dict[str, Any]] = None,
 ) -> pl.DataFrame:
-    """Cast model inputs. Contract-type words become the trained numeric codes."""
+    """Cast model inputs. Contract-type words become the trained numeric codes.
+
+    Missing ratings take the schema mean, as in training. ``Elo_Gap`` is then
+    taken from the filled pair ratings, and the ``*_Missing`` flags must
+    already be on the frame (see ``_add_elo_missing_flags``).
+    """
     aligned = frame
     for column in required:
+        if column == "Elo_Gap":
+            continue
         expected = _dtype_from_schema(str(feature_dtypes.get(column, "Float32")))
         if column not in aligned.columns:
             aligned = aligned.with_columns(pl.lit(None).cast(expected).alias(column))
@@ -273,7 +285,22 @@ def _align_features(
             continue
         if dtype != expected and expected == pl.Utf8:
             aligned = aligned.with_columns(pl.col(column).cast(pl.Utf8, strict=False))
+    if "Elo_Gap" in required:
+        if "Elo_NS" not in required or "Elo_EW" not in required:
+            raise ValueError("Model uses Elo_Gap without Elo_NS and Elo_EW")
+        expected = _dtype_from_schema(str(feature_dtypes.get("Elo_Gap", "Float32")))
+        aligned = aligned.with_columns(
+            (pl.col("Elo_NS") - pl.col("Elo_EW")).cast(expected).alias("Elo_Gap")
+        )
     return aligned
+
+
+def _add_elo_missing_flags(frame: pl.DataFrame) -> pl.DataFrame:
+    """1.0 where a pair rating is missing, taken before any fill."""
+    return frame.with_columns(
+        pl.col(f"Elo_{pair}").is_null().cast(pl.Float32).alias(f"Elo_{pair}_Missing")
+        for pair in ("NS", "EW")
+    )
 
 
 def _predict_targets(
@@ -311,6 +338,8 @@ def _predict_targets(
             out = _attach_elo_features(out, session_id)
         except Exception as exc:
             return _null_prediction_columns(out), f"Prediction Elo unavailable: {exc}"
+    if requires_elo:
+        out = _add_elo_missing_flags(out)
     try:
         from mlBridge.mlBridgeAiLib import predict_model
     except Exception as exc:
@@ -353,7 +382,6 @@ def _null_prediction_columns(frame: pl.DataFrame) -> pl.DataFrame:
     columns = {
         "Declarer_Direction_Pred": pl.Utf8,
         "Contract_Pred": pl.Utf8,
-        "Declarer_Pct_Pred": pl.Float64,
         "Pct_NS_Pred": pl.Float64,
         "Pct_Diff": pl.Float64,
     }
@@ -366,56 +394,24 @@ def _null_prediction_columns(frame: pl.DataFrame) -> pl.DataFrame:
 
 
 def _assign_ns_prediction(frame: pl.DataFrame) -> pl.DataFrame:
-    if "Declarer_Pct_Pred" not in frame.columns:
-        return _null_prediction_columns(frame)
-    direction = pl.col("Declarer_Direction_Pred").cast(pl.Utf8)
-    declarer_pct = pl.col("Declarer_Pct_Pred").cast(pl.Float64, strict=False)
-    ns_pred = (
-        pl.when(direction.is_in(["N", "S"]))
-        .then(declarer_pct)
-        .when(direction.is_in(["E", "W"]))
-        .then(1.0 - declarer_pct)
-        .otherwise(0.5)
-    )
-    actual = pl.col("Pct_NS").cast(pl.Float64, strict=False) if "Pct_NS" in frame.columns else pl.lit(None)
-    assigned = frame.with_columns(
-        ns_pred.alias("Pct_NS_Pred"),
-        (ns_pred - actual).alias("Pct_Diff"),
-    )
-    return _recenter_session_predictions(assigned)
+    """Use the NS percentage model as is.
 
-
-def _recenter_session_predictions(frame: pl.DataFrame) -> pl.DataFrame:
-    """Center the session's predicted NS field at 50%.
-
-    The declarer-direction and declarer-percentage models are independent, so
-    combining their outputs can introduce a directional bias that puts every
-    NS pair below every EW pair. Remove that bias before session percentages
-    and predicted club ranks are calculated. This must be a session-wide
-    shift: centering each board separately would erase all between-table
-    variation when a model gives the same prediction to every table.
+    The scores are national percentages, and clubs often seat their stronger
+    pairs in one direction. Centering per board or per session forces the NS
+    and EW lines to the same average and ranked 2026 club sessions worse.
     """
-    if "Pct_NS_Pred" not in frame.columns or frame.is_empty():
-        return frame
-    centered = frame
-    # Clipping can move the mean away from 0.5. Reapplying the residual shift
-    # converges quickly while keeping every prediction in [0, 1].
-    for _ in range(8):
-        prediction = pl.col("Pct_NS_Pred")
-        mean = prediction.mean()
-        centered = centered.with_columns(
-            (prediction + (pl.lit(0.5) - mean))
-            .clip(0.0, 1.0)
-            .alias("Pct_NS_Pred")
-        )
-    if "Pct_NS" in centered.columns:
-        centered = centered.with_columns(
-            (
-                pl.col("Pct_NS_Pred")
-                - pl.col("Pct_NS").cast(pl.Float64, strict=False)
-            ).alias("Pct_Diff")
-        )
-    return centered
+    if "Pct_NS_Pred" not in frame.columns:
+        return _null_prediction_columns(frame)
+    prediction = pl.col("Pct_NS_Pred").cast(pl.Float64, strict=False).clip(0.0, 1.0)
+    actual = (
+        pl.col("Pct_NS").cast(pl.Float64, strict=False)
+        if "Pct_NS" in frame.columns
+        else pl.lit(None, dtype=pl.Float64)
+    )
+    return frame.with_columns(
+        prediction.alias("Pct_NS_Pred"),
+        (prediction - actual).alias("Pct_Diff"),
+    )
 
 
 def load_ranking(session_id: Any, cache_dir: Path) -> Optional[pl.DataFrame]:
