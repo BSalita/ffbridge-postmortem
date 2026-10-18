@@ -285,6 +285,8 @@ def _align_features(
             continue
         if dtype != expected and expected == pl.Utf8:
             aligned = aligned.with_columns(pl.col(column).cast(pl.Utf8, strict=False))
+        elif dtype != expected and expected in (pl.Float32, pl.Float64) and dtype.is_numeric():
+            aligned = aligned.with_columns(pl.col(column).cast(expected))
     if "Elo_Gap" in required:
         if "Elo_NS" not in required or "Elo_EW" not in required:
             raise ValueError("Model uses Elo_Gap without Elo_NS and Elo_EW")

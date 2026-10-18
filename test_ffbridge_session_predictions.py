@@ -270,6 +270,7 @@ class RankingTests(unittest.TestCase):
         )
         self.assertEqual(aligned["CT_N_S"].to_list(), [0.0, 1.0, 2.0, 3.0, 4.0])
         self.assertEqual(aligned["HCP_N"].to_list(), [10, 11, 12, 13, 14])
+        self.assertEqual(aligned.schema["HCP_N"], pl.Float32)
         self.assertEqual(aligned["Dealer"].to_list(), ["N", "E", "S", "W", "N"])
 
     def test_missing_elo_uses_the_models_neutral_training_value(self):
