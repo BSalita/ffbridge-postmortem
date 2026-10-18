@@ -340,6 +340,37 @@ class RankingTests(unittest.TestCase):
             self.assertEqual(attached["Elo_NS"][0], 1475.0)
             self.assertEqual(attached["Elo_EW"][0], 1275.0)
 
+    def test_attach_elo_features_matches_lancelot_ids_not_the_other_person_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "elo.results.parquet"
+            pl.DataFrame(
+                {
+                    "tournament_id": ["394099"],
+                    "player1_id": ["999"],
+                    "player2_id": ["998"],
+                    "player1_lancelot_id": ["246273"],
+                    "player2_lancelot_id": ["77119"],
+                    "player1_scratch_elo_before": [1800.0],
+                    "player2_scratch_elo_before": [1600.0],
+                    "scratch_pair_elo": [1720.0],
+                }
+            ).write_parquet(path)
+            boards = pl.DataFrame(
+                {
+                    "Player_ID_N": ["246273"],
+                    "Player_ID_S": ["77119"],
+                    "Player_ID_E": ["136662"],
+                    "Player_ID_W": ["1692"],
+                }
+            )
+            with patch.object(predictions, "_elo_results_path", return_value=path):
+                attached = predictions._attach_elo_features(boards, "394099")
+
+            self.assertEqual(attached["Elo_N"][0], 1800.0)
+            self.assertEqual(attached["Elo_S"][0], 1600.0)
+            self.assertIsNone(attached["Elo_E"][0])
+            self.assertEqual(attached["Elo_NS"][0], 1720.0)
+
 
 if __name__ == "__main__":
     unittest.main()

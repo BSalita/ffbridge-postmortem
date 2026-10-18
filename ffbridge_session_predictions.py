@@ -128,15 +128,29 @@ def _attach_elo_features(frame: pl.DataFrame, session_id: Any) -> pl.DataFrame:
     if missing:
         raise ValueError(f"Postmortem is missing player ids required for Elo: {missing}")
 
+    available = set(pl.scan_parquet(path).collect_schema().names())
+    # Postmortem seat ids are Lancelot ids. The Elo file's player*_id is a
+    # different person id, so a lookup on that column alone misses every seat
+    # and the model then sees the training-mean Elo at every table.
+    id_pairs = [
+        pair
+        for pair in (
+            ("player1_lancelot_id", "player2_lancelot_id"),
+            ("player1_id", "player2_id"),
+            ("player1_classic_person_id", "player2_classic_person_id"),
+        )
+        if pair[0] in available and pair[1] in available
+    ]
+    if not id_pairs:
+        raise ValueError("FFBridge Elo results have no player id columns")
     results = (
         pl.scan_parquet(path)
         .filter(pl.col("tournament_id").cast(pl.Utf8) == str(session_id))
         .select(
-            _id_token("player1_id").alias("p1"),
-            _id_token("player2_id").alias("p2"),
             pl.col("player1_scratch_elo_before").cast(pl.Float32).alias("e1"),
             pl.col("player2_scratch_elo_before").cast(pl.Float32).alias("e2"),
             pl.col("scratch_pair_elo").cast(pl.Float32).alias("pair_elo"),
+            *[_id_token(name).alias(name) for pair in id_pairs for name in pair],
         )
         .collect()
     )
@@ -146,8 +160,9 @@ def _attach_elo_features(frame: pl.DataFrame, session_id: Any) -> pl.DataFrame:
     players = (
         pl.concat(
             [
-                results.select(pl.col("p1").alias("id"), pl.col("e1").alias("elo")),
-                results.select(pl.col("p2").alias("id"), pl.col("e2").alias("elo")),
+                results.select(pl.col(column).alias("id"), pl.col(elo).alias("elo"))
+                for left, right in id_pairs
+                for column, elo in ((left, "e1"), (right, "e2"))
             ]
         )
         .filter(pl.col("id") != "")
@@ -156,7 +171,16 @@ def _attach_elo_features(frame: pl.DataFrame, session_id: Any) -> pl.DataFrame:
     )
     player_ratings = dict(players.iter_rows())
     pairs = (
-        results.with_columns(_pair_key(pl.col("p1"), pl.col("p2")).alias("key"))
+        pl.concat(
+            [
+                results.select(
+                    _pair_key(pl.col(left), pl.col(right)).alias("key"),
+                    pl.col("pair_elo"),
+                )
+                for left, right in id_pairs
+            ]
+        )
+        .filter(pl.col("key").is_not_null())
         .group_by("key")
         .agg(pl.col("pair_elo").mean())
     )
@@ -178,6 +202,10 @@ def _attach_elo_features(frame: pl.DataFrame, session_id: Any) -> pl.DataFrame:
         .cast(pl.Float32)
         .alias("Elo_EW"),
     )
+    if all(out[f"Elo_{seat}"].null_count() == out.height for seat in "NESW"):
+        raise ValueError(
+            f"FFBridge Elo ids did not match the players in session {session_id}"
+        )
     return out
 
 
