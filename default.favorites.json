@@ -1352,7 +1352,7 @@
 			},
 			"Overall_Rankings_Predictions": {
 				"title": "Overall Rankings Predictions",
-				"help": "**Club rank, our predicted global rank, FFBridge's published global rank, and the difference. A positive Rank_Diff means our model ranks the pair worse than FFBridge. Global_Pct is the published session percentage. Global_Pct_Pred and Pct_Diff compare that with the predicted percentage.**",
+				"help": "**Club rank and predicted club rank, FFBridge's published global rank and our predicted global rank, and the published and predicted session percentages. Each diff is actual minus predicted. A positive Pct_Diff means the pair scored above the prediction. A positive Rank_Diff means the pair finished lower than predicted, because a smaller rank is better. Club_Rank_Pred ranks predictions against the club's predictions. Global_Rank_Pred ranks the pair's prediction against the published percentages of the national field.**",
 				"prompts": [
 					{
 						"prompt": "",
@@ -1364,7 +1364,7 @@
 								"Declarer Direction Predictions": "@Declarer_Direction_Predictions"
 							}
 						],
-						"sql": "SELECT DISTINCT CONCAT(Section_Name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair, Club_Rank_NS AS Club_Rank, Club_Rank_Pred_NS AS Club_Rank_Pred, Our_Global_Rank_NS AS Our_Global_Rank, FFBridge_Global_Rank_NS AS FFBridge_Global_Rank, Rank_Diff_NS AS Rank_Diff, Global_Pct_NS AS Global_Pct, Global_Pct_Pred_NS AS Global_Pct_Pred, Pct_Diff_NS AS Pct_Diff, Boards_NS AS Boards FROM self ORDER BY Club_Rank, Our_Global_Rank"
+						"sql": "SELECT DISTINCT CONCAT(Section_Name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair, Club_Rank_NS AS Club_Rank, Club_Rank_Pred_NS AS Club_Rank_Pred, Global_Rank_NS AS Global_Rank, Global_Rank_Pred_NS AS Global_Rank_Pred, Rank_Diff_NS AS Rank_Diff, Global_Pct_NS AS Global_Pct, Global_Pct_Pred_NS AS Global_Pct_Pred, Pct_Diff_NS AS Pct_Diff, Boards_NS AS Boards FROM self ORDER BY Club_Rank, Global_Rank"
 					},
 					{
 						"prompt": "",
@@ -1376,19 +1376,19 @@
 								"Declarer Direction Predictions": "@Declarer_Direction_Predictions"
 							}
 						],
-						"sql": "SELECT DISTINCT CONCAT(Section_Name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair, Club_Rank_EW AS Club_Rank, Club_Rank_Pred_EW AS Club_Rank_Pred, Our_Global_Rank_EW AS Our_Global_Rank, FFBridge_Global_Rank_EW AS FFBridge_Global_Rank, Rank_Diff_EW AS Rank_Diff, Global_Pct_EW AS Global_Pct, Global_Pct_Pred_EW AS Global_Pct_Pred, Pct_Diff_EW AS Pct_Diff, Boards_EW AS Boards FROM self ORDER BY Club_Rank, Our_Global_Rank"
+						"sql": "SELECT DISTINCT CONCAT(Section_Name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair, Club_Rank_EW AS Club_Rank, Club_Rank_Pred_EW AS Club_Rank_Pred, Global_Rank_EW AS Global_Rank, Global_Rank_Pred_EW AS Global_Rank_Pred, Rank_Diff_EW AS Rank_Diff, Global_Pct_EW AS Global_Pct, Global_Pct_Pred_EW AS Global_Pct_Pred, Pct_Diff_EW AS Pct_Diff, Boards_EW AS Boards FROM self ORDER BY Club_Rank, Global_Rank"
 					}
 				],
 				"i18n": {
 					"fr": {
 						"title": "Prédictions du classement général",
-						"help": "**Classement au club, notre classement mondial prédit, le classement mondial publié par la FFBridge, et l'écart. Un Rank_Diff positif signifie que notre modèle classe la paire plus mal que la FFBridge. Global_Pct est le pourcentage publié de la séance. Global_Pct_Pred et Pct_Diff comparent ce pourcentage au pourcentage prédit.**"
+						"help": "**Classement au club et classement au club prédit, classement mondial publié par la FFBridge et notre classement mondial prédit, et pourcentages de la séance publié et prédit. Chaque écart est le réel moins le prédit. Un Pct_Diff positif signifie que la paire a fait mieux que la prédiction. Un Rank_Diff positif signifie que la paire a fini moins bien classée que prédit, car un rang plus petit est meilleur. Club_Rank_Pred classe les prédictions parmi celles du club. Global_Rank_Pred classe la prédiction de la paire parmi les pourcentages publiés du classement national.**"
 					}
 				}
 			},
 			"Board_Results_Predictions": {
 				"title": "Board Results Predictions",
-				"help": "**Every table on every board: contract, predicted contract, declarer, predicted declarer, North-South percentage, predicted percentage, and the difference.**",
+				"help": "**Every table on every board: contract, predicted contract, declarer, predicted declarer, North-South percentage, predicted percentage, and Pct_Diff (actual minus predicted).**",
 				"prompts": [
 					{
 						"prompt": "",
@@ -1406,7 +1406,7 @@
 				"i18n": {
 					"fr": {
 						"title": "Prédictions des résultats de donne",
-						"help": "**Chaque table, chaque donne : contrat, contrat prédit, déclarant, déclarant prédit, pourcentage Nord-Sud, pourcentage prédit, et l'écart.**"
+						"help": "**Chaque table, chaque donne : contrat, contrat prédit, déclarant, déclarant prédit, pourcentage Nord-Sud, pourcentage prédit, et Pct_Diff (réel moins prédit).**"
 					}
 				}
 			},

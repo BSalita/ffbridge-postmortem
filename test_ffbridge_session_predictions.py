@@ -11,7 +11,7 @@ import ffbridge_session_predictions as predictions
 
 
 class RankingTests(unittest.TestCase):
-    def test_club_rank_then_our_global_rank_then_ffbridge_and_diff(self):
+    def test_club_ranks_then_global_ranks_and_actual_minus_pred_diffs(self):
         ranking = pl.DataFrame(
             {
                 "sessionScore": [60.0, 40.0, 55.0, 45.0],
@@ -44,14 +44,16 @@ class RankingTests(unittest.TestCase):
         )
         ranked = predictions.ranking_rows(boards, ranking)
         north = ranked.filter(pl.col("Orientation") == "NS").row(0, named=True)
-        east = ranked.filter(pl.col("FFBridge_Global_Rank") == 4).row(0, named=True)
+        east = ranked.filter(pl.col("Global_Rank") == 4).row(0, named=True)
         self.assertEqual(north["Club_Rank"], 1)
-        self.assertEqual(north["FFBridge_Global_Rank"], 1)
-        # Predicted 50 sits behind the other club's 55, so our global rank is 2.
-        self.assertEqual(north["Our_Global_Rank"], 2)
-        self.assertEqual(north["Rank_Diff"], 1)
-        self.assertEqual(list(ranked.columns).index("Our_Global_Rank") + 1, list(ranked.columns).index("FFBridge_Global_Rank"))
-        self.assertEqual(list(ranked.columns).index("FFBridge_Global_Rank") + 1, list(ranked.columns).index("Rank_Diff"))
+        self.assertEqual(north["Global_Rank"], 1)
+        # Predicted 50 sits behind the other club's 55, so the predicted global rank is 2.
+        self.assertEqual(north["Global_Rank_Pred"], 2)
+        self.assertEqual(north["Rank_Diff"], -1)
+        self.assertAlmostEqual(north["Pct_Diff"], 10.0)
+        columns = list(ranked.columns)
+        self.assertEqual(columns.index("Global_Rank") + 1, columns.index("Global_Rank_Pred"))
+        self.assertEqual(columns.index("Global_Rank_Pred") + 1, columns.index("Rank_Diff"))
         self.assertEqual(east["Club_Rank"], 2)
         self.assertAlmostEqual(east["Global_Pct_Pred"], 50.0)
 
@@ -72,13 +74,13 @@ class RankingTests(unittest.TestCase):
                 "Declarer_Direction_Pred": ["S"],
                 "Pct_NS": [0.6],
                 "Pct_NS_Pred": [0.5],
-                "Pct_Diff": [-0.1],
+                "Pct_Diff": [0.1],
             }
         )
         rows = predictions.board_prediction_rows(boards)
         self.assertEqual(rows["Contract_Pred"][0], "4SN")
         self.assertEqual(rows["Declarer_Direction"][0], "N")
-        self.assertAlmostEqual(rows["Pct_Diff"][0], -0.1)
+        self.assertAlmostEqual(rows["Pct_Diff"][0], 0.1)
 
     def test_missing_models_still_return_published_ranks(self):
         boards = pl.DataFrame(
@@ -111,8 +113,8 @@ class RankingTests(unittest.TestCase):
         ranked = predictions.ranking_rows(boards, ranking)
         north = ranked.filter(pl.col("Orientation") == "NS").row(0, named=True)
         self.assertEqual(north["Club_Rank"], 1)
-        self.assertEqual(north["FFBridge_Global_Rank"], 3)
-        self.assertIsNone(north["Our_Global_Rank"])
+        self.assertEqual(north["Global_Rank"], 3)
+        self.assertIsNone(north["Global_Rank_Pred"])
         self.assertIsNone(north["Rank_Diff"])
         with patch.object(predictions, "models_dir", return_value=Path("missing-models")):
             payload = predictions.prediction_payload(
@@ -170,11 +172,11 @@ class RankingTests(unittest.TestCase):
         second = attached.filter(pl.col("Player_ID_N") == 3).row(0, named=True)
         self.assertEqual(first["Club_Rank_NS"], 1)
         self.assertEqual(second["Club_Rank_NS"], 2)
-        self.assertEqual(first["FFBridge_Global_Rank_NS"], 2)
+        self.assertEqual(first["Global_Rank_NS"], 2)
         self.assertIsNotNone(first["Club_Rank_Pred_NS"])
-        self.assertIsNotNone(first["Our_Global_Rank_NS"])
+        self.assertIsNotNone(first["Global_Rank_Pred_NS"])
         self.assertIsNotNone(first["Rank_Diff_NS"])
-        self.assertNotEqual(first["FFBridge_Global_Rank_NS"], 1)
+        self.assertNotEqual(first["Global_Rank_NS"], 1)
 
     def test_same_prediction_at_every_table_shares_a_place(self):
         # The deal score is the same at every table. East-West receive the
@@ -213,7 +215,7 @@ class RankingTests(unittest.TestCase):
         assigned = predictions._assign_ns_prediction(frame)
         self.assertEqual(assigned["Pct_NS_Pred"].to_list(), [0.62, 0.58, 1.0, 0.56])
         diffs = [round(value, 6) for value in assigned["Pct_Diff"].to_list()]
-        self.assertEqual(diffs, [-0.08, 0.18, 0.45, -0.09])
+        self.assertEqual(diffs, [0.08, -0.18, -0.45, 0.09])
 
     def test_elo_gap_uses_the_filled_pair_ratings(self):
         frame = predictions._add_elo_missing_flags(

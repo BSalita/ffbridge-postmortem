@@ -2,10 +2,14 @@
 
 Club rank is the place among pairs at the same club. Predicted club rank
 is the place of the pair's predicted session percentage among those pairs.
-Pairs with the same predicted percentage share a place. Our global rank is
-where that percentage would sit in the published national field.
-FFBridge's global rank is the official ``rank`` on the session ranking.
-``Rank_Diff`` is our global rank minus that official rank.
+Pairs with the same predicted percentage share a place. ``Global_Rank`` is
+the official ``rank`` on FFBridge's session ranking. ``Global_Rank_Pred`` is
+where the predicted percentage would sit among the other pairs' published
+percentages in the national field.
+
+Every diff is actual minus predicted: ``Rank_Diff`` is ``Global_Rank`` minus
+``Global_Rank_Pred`` and ``Pct_Diff`` is the published percentage minus the
+predicted one.
 
 ``Pct_NS_Pred`` is the percentage model's North-South score on the board,
 from the deal, the four players' pre-session ratings, and their records
@@ -43,8 +47,8 @@ RANKING_COLUMNS = (
     "Orientation",
     "Club_Rank",
     "Club_Rank_Pred",
-    "Our_Global_Rank",
-    "FFBridge_Global_Rank",
+    "Global_Rank",
+    "Global_Rank_Pred",
     "Rank_Diff",
     "Global_Pct",
     "Global_Pct_Pred",
@@ -70,8 +74,7 @@ _PREDICTION_SQL_MARKERS = (
     "pct_ns_pred",
     "contract_pred",
     "declarer_direction_pred",
-    "our_global_rank",
-    "ffbridge_global_rank",
+    "global_rank",
     "club_rank_pred",
     "rank_diff",
 )
@@ -516,7 +519,7 @@ def _assign_ns_prediction(frame: pl.DataFrame) -> pl.DataFrame:
     )
     return frame.with_columns(
         prediction.alias("Pct_NS_Pred"),
-        (prediction - actual).alias("Pct_Diff"),
+        (actual - prediction).alias("Pct_Diff"),
     )
 
 
@@ -603,7 +606,7 @@ def _mean(values: List[Optional[float]]) -> Optional[float]:
 
 
 def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.DataFrame:
-    """One row per ranked pair, club rank then our global rank then FFBridge."""
+    """One row per ranked pair: club ranks, then global ranks, then percentages."""
     official = _official_pairs(ranking)
     predicted = _predicted_pair_scores(boards)
     if official.is_empty() and predicted.is_empty():
@@ -635,7 +638,7 @@ def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.Da
             add_row(raw)
     else:
         for raw in predicted.to_dicts():
-            raw["FFBridge_Global_Rank"] = None
+            raw["Global_Rank"] = None
             raw["Club"] = raw.get("Section") or ""
             raw["Global_Pct"] = raw.get("Global_Pct_Pred")
             add_row(raw)
@@ -665,7 +668,7 @@ def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.Da
             ]
             raw["Club_Rank_Pred"] = _rank_against(shown, club_pred_field)
         if pred_score is None:
-            raw["Our_Global_Rank"] = None
+            raw["Global_Rank_Pred"] = None
             raw["Rank_Diff"] = None
             raw["Pct_Diff"] = None
             continue
@@ -676,14 +679,14 @@ def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.Da
                 national_pred_field.append(pred_score)
             elif item.get("Global_Pct") is not None:
                 national_pred_field.append(float(item["Global_Pct"]))
-        raw["Our_Global_Rank"] = _rank_against(pred_score, national_pred_field or national_scores)
-        official_rank = raw.get("FFBridge_Global_Rank")
+        raw["Global_Rank_Pred"] = _rank_against(pred_score, national_pred_field or national_scores)
+        official_rank = raw.get("Global_Rank")
         raw["Rank_Diff"] = (
-            None if official_rank is None or raw["Our_Global_Rank"] is None
-            else int(raw["Our_Global_Rank"]) - int(official_rank)
+            None if official_rank is None or raw["Global_Rank_Pred"] is None
+            else int(official_rank) - int(raw["Global_Rank_Pred"])
         )
         actual = raw.get("Global_Pct")
-        raw["Pct_Diff"] = None if actual is None else round(pred_score - float(actual), 2)
+        raw["Pct_Diff"] = None if actual is None else round(float(actual) - pred_score, 2)
         raw["Global_Pct_Pred"] = round(pred_score, 2)
 
     ranked = pl.DataFrame(rows) if rows else pl.DataFrame({name: [] for name in RANKING_COLUMNS})
@@ -696,7 +699,7 @@ def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.Da
         if name in ranked.columns
     ]
     return ranked.select(ordered).sort(
-        ["Club_Rank", "FFBridge_Global_Rank"],
+        ["Club_Rank", "Global_Rank"],
         nulls_last=True,
     )
 
@@ -740,7 +743,7 @@ def _official_pairs(ranking: Optional[pl.DataFrame]) -> pl.DataFrame:
             pl.col(rank_col).cast(pl.Int64, strict=False)
             if rank_col
             else pl.lit(None).cast(pl.Int64)
-        ).alias("FFBridge_Global_Rank"),
+        ).alias("Global_Rank"),
         (pl.col(club_col).cast(pl.Utf8) if club_col else pl.lit("")).alias("Club"),
         section.alias("Section"),
         table.alias("Table"),

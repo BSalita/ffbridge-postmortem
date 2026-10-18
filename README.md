@@ -41,10 +41,10 @@ This project provides a comprehensive toolkit for extracting, analyzing, and pos
 
 The postmortem API on port 8517 (`python ffbridge_postmortem_api_server.py`) exposes the same predictions the sidebar uses.
 
-- `GET /postmortems/{player_id}/predictions/boards` — every table on every board: contract, predicted contract, declarer, predicted declarer, North-South percentage, predicted percentage, and the difference.
-- `GET /postmortems/{player_id}/predictions/rankings` — club rank, predicted club rank, our global rank, FFBridge's published global rank, `Rank_Diff` (our rank minus FFBridge's), published session percentage, predicted percentage, and their difference.
+- `GET /postmortems/{player_id}/predictions/boards` — every table on every board: contract, predicted contract, declarer, predicted declarer, North-South percentage, predicted percentage, and `Pct_Diff`.
+- `GET /postmortems/{player_id}/predictions/rankings` — `Club_Rank`, `Club_Rank_Pred`, `Global_Rank` (FFBridge's published global rank), `Global_Rank_Pred`, `Rank_Diff`, `Global_Pct` (published session percentage), `Global_Pct_Pred`, and `Pct_Diff`.
 
-Optional query parameters are `session_id` and `limit` (default 500, maximum 2000). Omit `session_id` to use the latest cached session for that player. DuckDB `GET /postmortems/{player_id}/sql` attaches the same columns when the query mentions them (`Pct_NS_Pred`, `Contract_Pred`, `Our_Global_Rank`, `FFBridge_Global_Rank`, and the other prediction markers).
+Optional query parameters are `session_id` and `limit` (default 500, maximum 2000). Omit `session_id` to use the latest cached session for that player. DuckDB `GET /postmortems/{player_id}/sql` attaches the same columns when the query mentions them (`Pct_NS_Pred`, `Contract_Pred`, `Global_Rank`, `Global_Rank_Pred`, and the other prediction markers).
 
 The MCP tools `ffbridge_postmortem_prediction_boards` and `ffbridge_postmortem_prediction_rankings` call those routes. Checkpoints live in `FFBRIDGE_SAVED_MODELS` or `E:\bridge\data\ffbridge\SavedModels`. When the checkpoints are missing, published club rank and FFBridge global rank are still returned and the prediction columns are null.
 
@@ -67,7 +67,7 @@ The response is `job_id`, `status` (`queued`), `cached`, `player_id`, `session_i
 
 Board-level statements should select `Result` (integer overtricks) as well as the score. The MCP start tool inserts `Result` into those statements. Aggregate statements that use `GROUP BY` are left unchanged.
 
-A positive `Rank_Diff` means the model places the pair worse than FFBridge. `Pct_Diff` is the predicted North-South percentage minus the published board percentage. The predicted North-South percentage uses the predicted declarer: the declarer percentage when the model expects North or South, and its complement when the model expects East or West.
+Every diff is actual minus predicted. `Rank_Diff` is `Global_Rank - Global_Rank_Pred`; a positive value means the pair finished lower than predicted, because a smaller rank is better. `Pct_Diff` on a board is `Pct_NS - Pct_NS_Pred`, and on the rankings it is `Global_Pct - Global_Pct_Pred`; a positive value means the pair scored above the prediction. `Global_Rank_Pred` places the pair's predicted percentage among the other pairs' published percentages in the national field, while `Club_Rank_Pred` ranks predictions against the club's predictions.
 
 ### 3. Authentication (`ffbridge_auth_playwright.py`)
 - Automated bearer token extraction using Playwright
