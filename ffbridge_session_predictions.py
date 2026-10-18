@@ -8,12 +8,17 @@ FFBridge's global rank is the official ``rank`` on the session ranking.
 ``Rank_Diff`` is our global rank minus that official rank.
 
 ``Pct_NS_Pred`` is the percentage model's North-South score on the board,
-from the deal and the four players' pre-session ratings. East-West receive
-the complement.
+from the deal, the four players' pre-session ratings, and their records
+before the session date. East-West receive the complement.
+
+``Contract_Pred`` and ``Declarer_Direction_Pred`` are one choice: the
+contract that maximizes the contract model's probability times the declarer
+model's probability for that contract's declarer.
 """
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 from pathlib import Path
@@ -31,6 +36,8 @@ _ELO_CACHE_DIRS = (
     Path(r"E:\bridge\data\ffbridge\elo_cache"),
 )
 TARGETS = ("Declarer_Direction", "Contract", "Pct_NS")
+PLAYER_HISTORY_NAME = "ffbridge_prediction_player_history.parquet"
+PAIR_HISTORY_NAME = "ffbridge_prediction_pair_history.parquet"
 RANKING_COLUMNS = (
     "Pair",
     "Orientation",
@@ -214,6 +221,75 @@ def _attach_elo_features(frame: pl.DataFrame, session_id: Any) -> pl.DataFrame:
     return out
 
 
+@functools.lru_cache(maxsize=2)
+def _classic_ids(path: Path, modified: float) -> Dict[str, str]:
+    """Lancelot person id to the Classic id the history tables are keyed on."""
+    scan = pl.scan_parquet(path)
+    pairs = (
+        pl.concat(
+            [
+                scan.select(
+                    _id_token(f"player{index}_lancelot_id").alias("lancelot"),
+                    _id_token(f"player{index}_id").alias("classic"),
+                )
+                for index in (1, 2)
+            ]
+        )
+        .filter((pl.col("lancelot") != "") & (pl.col("classic") != ""))
+        .unique()
+        .collect()
+    )
+    conflicts = pairs.group_by("lancelot").len().filter(pl.col("len") > 1).height
+    if conflicts:
+        raise ValueError(f"{conflicts} Lancelot ids map to more than one Classic id in {path.name}")
+    return dict(pairs.iter_rows())
+
+
+@functools.lru_cache(maxsize=2)
+def _history_tables(directory: Path, modified: Tuple[float, float]) -> Tuple[pl.DataFrame, pl.DataFrame]:
+    return (
+        pl.read_parquet(directory / PLAYER_HISTORY_NAME),
+        pl.read_parquet(directory / PAIR_HISTORY_NAME),
+    )
+
+
+def _add_model_inputs(frame: pl.DataFrame, required: set, directory: Path) -> pl.DataFrame:
+    """Suit lengths and player history on a copy used only as model input."""
+    from mlBridge.ffbridge_prediction_features import (
+        HISTORY_FEATURES,
+        SHAPE_FEATURES,
+        attach_history,
+        shape_features,
+    )
+
+    out = frame
+    if required & set(SHAPE_FEATURES):
+        out = shape_features(out)
+    if required & set(HISTORY_FEATURES):
+        elo_path = _elo_results_path()
+        if elo_path is None:
+            raise FileNotFoundError("FFBridge Elo results parquet was not found")
+        classic = _classic_ids(elo_path, elo_path.stat().st_mtime)
+        paths = (directory / PLAYER_HISTORY_NAME, directory / PAIR_HISTORY_NAME)
+        missing = [path.name for path in paths if not path.is_file()]
+        if missing:
+            raise FileNotFoundError(f"History tables not found in {directory}: {missing}")
+        players, pairs = _history_tables(directory, tuple(path.stat().st_mtime for path in paths))
+        out = out.with_columns(
+            _id_token(f"Player_ID_{seat}").replace_strict(classic, default=None).alias(f"_classic_{seat}")
+            for seat in "NESW"
+        )
+        if all(out[f"_classic_{seat}"].null_count() == out.height for seat in "NESW"):
+            raise ValueError("No postmortem player id has a Classic id in the Elo results")
+        out = attach_history(out, players, pairs, {seat: f"_classic_{seat}" for seat in "NESW"})
+    return out
+
+
+def _schema_classes(schema: Dict[str, Any]) -> List[str]:
+    class_to_idx = schema["class_to_idx"]
+    return sorted(class_to_idx, key=class_to_idx.get)
+
+
 def sql_needs_predictions(sql: str) -> bool:
     lowered = sql.lower()
     return any(marker in lowered for marker in _PREDICTION_SQL_MARKERS)
@@ -343,11 +419,23 @@ def _predict_targets(
     if requires_elo:
         out = _add_elo_missing_flags(out)
     try:
+        from mlBridge.ffbridge_prediction_features import joint_contract_and_declarer
         from mlBridge.mlBridgeAiLib import predict_model
     except Exception as exc:
         return _null_prediction_columns(out), f"Prediction library unavailable: {exc}"
 
+    all_required = {
+        str(name)
+        for schema in schemas.values()
+        for name in (schema.get("numerical_feature_cols") or []) + (schema.get("categorical_feature_cols") or [])
+    }
+    try:
+        model_input = _add_model_inputs(out, all_required, directory)
+    except Exception as exc:
+        return _null_prediction_columns(out), f"Prediction features unavailable: {exc}"
+
     warnings: List[str] = []
+    probabilities: Dict[str, Any] = {}
     for target in TARGETS:
         schema = schemas[target]
         feature_dtypes = schema.get("feature_dtypes") or {}
@@ -355,13 +443,15 @@ def _predict_targets(
         required = list(schema.get("numerical_feature_cols") or []) + list(
             schema.get("categorical_feature_cols") or []
         )
-        aligned = _align_features(out, feature_dtypes, required, scaling_params)
+        aligned = _align_features(model_input, feature_dtypes, required, scaling_params)
+        classifier = target != "Pct_NS"
         try:
             predicted = predict_model(
                 directory,
                 _model_name(target),
                 aligned,
                 device="cpu",
+                return_probs=classifier,
                 strict_validation=False,
                 parity_drop_non_finite=False,
             )
@@ -372,9 +462,23 @@ def _predict_targets(
         if pred_column not in predicted.columns or predicted.height != out.height:
             warnings.append(f"{target}: prediction row count did not match the session")
             continue
+        if classifier:
+            classes = _schema_classes(schema)
+            probabilities[target] = (
+                classes,
+                predicted[f"{target}_Probs"].list.to_array(len(classes)).to_numpy(),
+            )
         if pred_column in out.columns:
             out = out.drop(pred_column)
         out = out.hstack(predicted.select(pred_column))
+    if "Contract" in probabilities and "Declarer_Direction" in probabilities:
+        contracts, directions = joint_contract_and_declarer(
+            *probabilities["Contract"], *probabilities["Declarer_Direction"]
+        )
+        out = out.with_columns(
+            pl.Series("Contract_Pred", contracts, dtype=pl.Utf8),
+            pl.Series("Declarer_Direction_Pred", directions, dtype=pl.Utf8),
+        )
     out = _assign_ns_prediction(out)
     warning = "; ".join(warnings) if warnings else None
     return out, warning

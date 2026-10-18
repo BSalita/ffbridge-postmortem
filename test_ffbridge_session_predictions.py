@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
@@ -366,6 +367,60 @@ class RankingTests(unittest.TestCase):
             self.assertEqual(attached["Elo_S"][0], 1600.0)
             self.assertIsNone(attached["Elo_E"][0])
             self.assertEqual(attached["Elo_NS"][0], 1700.0)
+
+    def test_model_inputs_look_up_history_by_classic_id_before_the_session(self):
+        from mlBridge.ffbridge_prediction_features import build_history_tables
+
+        earlier = pl.DataFrame(
+            {
+                "Date": [date(2026, 1, 5)] * 2 + [date(2026, 2, 1)],
+                "session_id": ["1", "1", "2"],
+                "Declarer_Direction": ["N", "E", "N"],
+                "Declarer_Pct": [1.0, 0.25, 0.0],
+                "Player_ID_N": ["10"] * 3,
+                "Player_ID_S": ["20"] * 3,
+                "Player_ID_E": ["30"] * 3,
+                "Player_ID_W": ["40"] * 3,
+            }
+        )
+        players, pairs = build_history_tables(earlier.lazy())
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            players.write_parquet(root / predictions.PLAYER_HISTORY_NAME)
+            pairs.write_parquet(root / predictions.PAIR_HISTORY_NAME)
+            elo = root / "elo.results.parquet"
+            pl.DataFrame(
+                {
+                    "player1_id": ["10", "30"],
+                    "player2_id": ["20", "40"],
+                    "player1_lancelot_id": ["1010", "3030"],
+                    "player2_lancelot_id": ["2020", "4040"],
+                }
+            ).write_parquet(elo)
+            # The session on 2026-02-01 must not see that day's board.
+            session = pl.DataFrame(
+                {
+                    "Date": ["2026-02-01"],
+                    "PBN": ["N:AKQJ.T98.765.43 T98.765.43.AKQJ 765.43.AKQJ.T98 432.AKQJ.T98.765"],
+                    "Player_ID_N": ["1010"],
+                    "Player_ID_S": ["2020"],
+                    "Player_ID_E": ["3030"],
+                    "Player_ID_W": ["4040"],
+                    "SL_N_S": [4],
+                }
+            )
+            with patch.object(predictions, "_elo_results_path", return_value=elo):
+                model_input = predictions._add_model_inputs(
+                    session, {"Hist_Pct_N", "SL_E_C", "Fit_NS_S"}, root
+                )
+        row = model_input.row(0, named=True)
+        # NS scored 1.0 and 0.75 on 2026-01-05: (1.75 + 30) / (2 + 60).
+        self.assertAlmostEqual(row["Hist_Pct_N"], 31.75 / 62.0, places=5)
+        self.assertAlmostEqual(row["Hist_Decl_Pct_N"], 8.5 / 16.0, places=5)
+        self.assertGreater(row["Hist_Partner_Sessions_NS"], 0.0)
+        self.assertEqual(row["SL_E_C"], 4.0)
+        self.assertEqual(row["Fit_NS_S"], 7.0)
+        self.assertEqual(session.schema["SL_N_S"], pl.Int64)
 
 
 if __name__ == "__main__":
