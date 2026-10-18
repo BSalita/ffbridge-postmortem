@@ -14,9 +14,9 @@ Favorite-group jobs (what the website runs as one postmortem):
   POST /postmortems/{player_id}/run-group
   GET  /run-group/{job_id}
   GET  /run-group/{job_id}/result
-MCP clients call ffbridge_postmortem_run_group_start, then
-ffbridge_postmortem_run_group_status, then
-ffbridge_postmortem_run_group_result. They do not call /sql once per favorite.
+MCP clients call ffbridge_postmortem_report_start, then
+ffbridge_postmortem_report_status, then
+ffbridge_postmortem_report_result. They do not call /sql once per favorite.
 """
 
 from __future__ import annotations
@@ -55,9 +55,9 @@ app = FastAPI(
         "A brief, full, or predictions report is a job: "
         "POST /postmortems/{player_id}/run-group, then "
         "GET /run-group/{job_id}, then GET /run-group/{job_id}/result. "
-        "MCP clients use ffbridge_postmortem_run_group_start, "
-        "ffbridge_postmortem_run_group_status, and "
-        "ffbridge_postmortem_run_group_result."
+        "MCP clients use ffbridge_postmortem_report_start, "
+        "ffbridge_postmortem_report_status, and "
+        "ffbridge_postmortem_report_result."
     ),
     version="1.0.0",
     lifespan=lifespan,
@@ -251,7 +251,7 @@ def start_group_run(player_id: str, body: dict = Body(...)) -> dict:
     once. Poll GET /run-group/{job_id}. Read GET /run-group/{job_id}/result
     for favorites as they finish. The same player, session, group, and SQL
     returns the finished job with cached true. force true starts a new job.
-    MCP clients call ffbridge_postmortem_run_group_start instead of this route.
+    MCP clients call ffbridge_postmortem_report_start instead of this route.
     """
     return group_job.start_run_group(
         player_id,
@@ -271,7 +271,7 @@ def group_run_status(job_id: str) -> dict:
     done and total count favorites. elapsed_s is seconds since start.
     completed lists each finished favorite with title, elapsed_s, row_count,
     and error. Poll until done or failed. MCP clients call
-    ffbridge_postmortem_run_group_status.
+    ffbridge_postmortem_report_status.
     """
     return group_job.run_group_status(job_id)
 
@@ -294,7 +294,7 @@ def group_run_result(
     page, or null when nothing further is waiting. Each section has columns,
     rows, row_count, and elapsed_s. results_file on a finished job is the
     server cache name, not a path the client can open. MCP clients call
-    ffbridge_postmortem_run_group_result.
+    ffbridge_postmortem_report_result.
     """
     return group_job.run_group_result(
         job_id, offset=offset, limit=limit, title=title

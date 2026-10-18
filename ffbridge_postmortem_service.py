@@ -190,7 +190,6 @@ def dataset_info() -> Dict[str, Any]:
             "tool": "ffbridge_postmortem_generate",
             "list_source_sessions_tool": "ffbridge_postmortem_list_source_sessions",
             "status_tool": "ffbridge_postmortem_generate_status",
-            "writer_health_tool": "ffbridge_postmortem_writer_health",
             "player_id": (
                 "Lancelot person id, Classic/migration id, or FFBridge license. "
                 "Optional explicit prefixes: lancelot:, classic:, license:."
@@ -201,24 +200,23 @@ def dataset_info() -> Dict[str, Any]:
             "(same Lancelot + augment path as Streamlit) and written to this "
             "cache. Archive queries also include recent boards whose session "
             "is not in the historical archive yet. List playable sessions with "
-            "ffbridge_postmortem_list_source_sessions. Check writer readiness "
-            "without generating with ffbridge_postmortem_writer_health. Streamlit "
+            "ffbridge_postmortem_list_source_sessions. Streamlit "
             "(https://ffbridge.postmortem.chat) reads and writes the same cache. "
             "Session predictions are GET /postmortems/{player_id}/predictions/boards "
             "and /postmortems/{player_id}/predictions/rankings. "
             "A brief, full, or predictions report is POST /postmortems/{player_id}/run-group, "
             "then GET /run-group/{job_id}, then GET /run-group/{job_id}/result. "
-            "MCP clients call ffbridge_postmortem_run_group_start, "
-            "ffbridge_postmortem_run_group_status, and "
-            "ffbridge_postmortem_run_group_result. Do not call /sql once per favorite."
+            "MCP clients call ffbridge_postmortem_report_start, "
+            "ffbridge_postmortem_report_status, and "
+            "ffbridge_postmortem_report_result. Do not call /sql once per favorite."
         ),
         "group_run": {
             "start": "POST /postmortems/{player_id}/run-group",
             "status": "GET /run-group/{job_id}",
             "result": "GET /run-group/{job_id}/result",
-            "mcp_start": "ffbridge_postmortem_run_group_start",
-            "mcp_status": "ffbridge_postmortem_run_group_status",
-            "mcp_result": "ffbridge_postmortem_run_group_result",
+            "mcp_start": "ffbridge_postmortem_report_start",
+            "mcp_status": "ffbridge_postmortem_report_status",
+            "mcp_result": "ffbridge_postmortem_report_result",
             "groups": "Summarize_Briefly, Summarize, AI_Predictions",
         },
     }

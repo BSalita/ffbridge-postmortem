@@ -52,7 +52,7 @@ The MCP tools `ffbridge_postmortem_prediction_boards` and `ffbridge_postmortem_p
 
 A brief, full, or predictions postmortem runs as a job. The server loads the session once and runs every favorite, the same way the website does. Do not call `GET /postmortems/{player_id}/sql` once per favorite.
 
-MCP clients do not call these routes themselves. They call `ffbridge_postmortem_run_group_start`, then `ffbridge_postmortem_run_group_status`, then `ffbridge_postmortem_run_group_result`. `group` is `Summarize_Briefly`, `Summarize`, or `AI_Predictions`. Omit `session_id` on the MCP start tool for the player's latest published game. Do not call `ffbridge_postmortem_run_group`; that one call times out.
+MCP clients do not call these routes themselves. They call `ffbridge_postmortem_report_start`, then `ffbridge_postmortem_report_status`, then `ffbridge_postmortem_report_result`, and `ffbridge_postmortem_report_pdf` for the PDF. The MCP `report` argument is `Brief postmortem`, `Full postmortem`, or `Predictions`, which map to the groups `Summarize_Briefly`, `Summarize`, and `AI_Predictions`. Omit `session_id` on the MCP start tool for the player's latest published game.
 
 `POST /postmortems/{player_id}/run-group` returns a `job_id` before the SQL runs. JSON body:
 
