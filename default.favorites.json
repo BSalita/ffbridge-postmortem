@@ -1428,7 +1428,7 @@
 			},
 			"Declarer_Direction_Predictions": {
 				"title": "Declarer Direction Predictions",
-				"help": "**Predicted direction of declarer per board and result. Predictions made before game starts.**",
+				"help": "**Actual and predicted direction of declarer per board and result. Predictions made before game starts.**",
 				"prompts": [
 					{
 						"prompt": "",
@@ -1440,19 +1440,19 @@
 								"Declarer Direction Predictions Statistics Per Actual Declarer": "@Declarer_Direction_Predictions_Statistics_By_Actual_Declarer"
 							}
 						],
-						"sql": "SELECT Board, Declarer_Direction_Pred AS Pred, Contract, Result, Score_NS, MP_NS, CONCAT(Section_Name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_NS, CONCAT(Section_Name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_EW FROM self ORDER BY Board, MP_NS DESC"
+						"sql": "SELECT Board, Declarer_Direction, Declarer_Direction_Pred, Contract, Result, Score_NS, MP_NS, CONCAT(Section_Name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_NS, CONCAT(Section_Name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_EW FROM self ORDER BY Board, MP_NS DESC"
 					}
 				],
 				"i18n": {
 					"fr": {
 						"title": "Prédictions de la direction du déclarant",
-						"help": "**Direction prédite du déclarant par donne et résultat. Prédictions faites avant le début de la partie.**"
+						"help": "**Direction réelle et prédite du déclarant par donne et résultat. Prédictions faites avant le début de la partie.**"
 					}
 				}
 			},
 			"Declarer_Direction_Predictions_Statistics_By_Board": {
 				"title": "Declarer Direction Predictions Statistics Per Board",
-				"help": "**Statistics on declarer direction predictions per board number. Predictions made before game starts.**",
+				"help": "**Statistics on declarer direction predictions per board number. Declarer_Direction lists the seats that actually declared at the tables given each prediction. Predictions made before game starts.**",
 				"prompts": [
 					{
 						"prompt": "",
@@ -1464,13 +1464,13 @@
 								"Declarer Direction Predictions Statistics Per Predicted Declarer": "@Declarer_Direction_Predictions_Statistics_By_Predicted_Declarer"
 							}
 						],
-						"sql": "SELECT Board, Declarer_Direction_Pred, COUNT() AS Board_Plays, SUM(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN 1 ELSE 0 END) AS Correct_Preds, Correct_Preds/Board_Plays AS Correct_Direction_Pct, SUM(CASE WHEN (Declarer_Direction IN ('N','S') AND Declarer_Direction_Pred IN ('N', 'S')) OR (Declarer_Direction IN ('E','W') AND Declarer_Direction_Pred IN ('E', 'W')) THEN 1 ELSE 0 END) AS Correct_Pair_Preds, Correct_Pair_Preds/Board_Plays AS Correct_Pair_Pct FROM self GROUP BY Board, Declarer_Direction_Pred ORDER BY Board"
+						"sql": "SELECT Board, STRING_AGG(DISTINCT Declarer_Direction, ', ' ORDER BY Declarer_Direction) AS Declarer_Direction, Declarer_Direction_Pred, COUNT() AS Board_Plays, SUM(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN 1 ELSE 0 END) AS Correct_Preds, Correct_Preds/Board_Plays AS Correct_Direction_Pct, SUM(CASE WHEN (Declarer_Direction IN ('N','S') AND Declarer_Direction_Pred IN ('N', 'S')) OR (Declarer_Direction IN ('E','W') AND Declarer_Direction_Pred IN ('E', 'W')) THEN 1 ELSE 0 END) AS Correct_Pair_Preds, Correct_Pair_Preds/Board_Plays AS Correct_Pair_Pct FROM self GROUP BY Board, Declarer_Direction_Pred ORDER BY Board"
 					}
 				],
 				"i18n": {
 					"fr": {
 						"title": "Statistiques des prédictions de direction du déclarant par donne",
-						"help": "**Statistiques des prédictions de direction du déclarant par numéro de donne. Prédictions faites avant le début de la partie.**"
+						"help": "**Statistiques des prédictions de direction du déclarant par numéro de donne. Declarer_Direction liste les places qui ont réellement joué le contrat aux tables ayant reçu chaque prédiction. Prédictions faites avant le début de la partie.**"
 					}
 				}
 			},

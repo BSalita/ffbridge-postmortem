@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import unittest
@@ -116,16 +117,73 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(north["Global_Rank"], 3)
         self.assertIsNone(north["Global_Rank_Pred"])
         self.assertIsNone(north["Rank_Diff"])
-        with patch.object(predictions, "models_dir", return_value=Path("missing-models")):
+        with (
+            patch.object(predictions, "models_dir", return_value=Path("missing-models")),
+            patch.object(predictions, "_fetch_ranking", return_value=ranking.to_dicts()),
+            tempfile.TemporaryDirectory() as cache,
+        ):
             payload = predictions.prediction_payload(
                 boards,
                 "1",
-                Path("."),
+                Path(cache),
                 view="rankings",
                 limit=20,
             )
         self.assertFalse(payload["predictions_available"])
         self.assertGreaterEqual(payload["row_count"], 1)
+        self.assertEqual(payload["rows"][0]["Global_Rank"], 3)
+
+    def test_a_ranking_cached_before_publication_is_downloaded_again(self):
+        placeholder = [
+            {"sessionScore": 0.0, "rank": 1, "orientation": "NS", "tableNumber": 1},
+            {"sessionScore": 0.0, "rank": 1, "orientation": "EW", "tableNumber": 1},
+        ]
+        published = [
+            {"sessionScore": 53.82, "rank": 61, "orientation": "NS", "tableNumber": 1},
+            {"sessionScore": 46.18, "rank": 150, "orientation": "EW", "tableNumber": 1},
+        ]
+        with tempfile.TemporaryDirectory() as cache:
+            path = Path(cache) / "rankings" / "288737.json"
+            path.parent.mkdir()
+            path.write_text(json.dumps(placeholder), encoding="utf-8")
+            with patch.object(predictions, "_fetch_ranking", return_value=published) as fetch:
+                ranking, warning = predictions.load_ranking("288737", Path(cache))
+                again, _ = predictions.load_ranking("288737", Path(cache))
+            self.assertIsNone(warning)
+            self.assertEqual(ranking["sessionScore"].to_list(), [53.82, 46.18])
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), published)
+            self.assertEqual(again["rank"].to_list(), [61, 150])
+            self.assertEqual(fetch.call_count, 1)
+
+    def test_unpublished_results_warn_instead_of_ranking_everyone_first(self):
+        boards = pl.DataFrame(
+            {
+                "Board": [1, 1],
+                "section_name": ["A", "A"],
+                "Pair_Number_NS": [1, 2],
+                "Pair_Number_EW": [1, 2],
+                "Pct_NS": [0.6, 0.4],
+            }
+        )
+        placeholder = [
+            {"sessionScore": 0.0, "rank": 1, "orientation": orientation, "tableNumber": table}
+            for orientation in ("NS", "EW")
+            for table in (1, 2)
+        ]
+        with (
+            patch.object(predictions, "models_dir", return_value=Path("missing-models")),
+            patch.object(predictions, "_fetch_ranking", return_value=placeholder),
+            tempfile.TemporaryDirectory() as cache,
+        ):
+            _, info = predictions.apply_session_predictions(boards, "288737", Path(cache))
+            self.assertFalse((Path(cache) / "rankings" / "288737.json").exists())
+        self.assertIn("has not published results for session 288737", info["warning"])
+        self.assertFalse(info["results_published"])
+        ranks = info["ranks"]
+        self.assertEqual(ranks.height, 4)
+        self.assertEqual(ranks["Global_Pct"].null_count(), 4)
+        self.assertEqual(ranks["Club_Rank"].null_count(), 4)
+        self.assertEqual(ranks["Global_Rank"].null_count(), 4)
 
     def test_same_table_number_at_two_clubs_keeps_this_clubs_rank(self):
         ranking = pl.DataFrame(
@@ -165,8 +223,8 @@ class RankingTests(unittest.TestCase):
         )
         attached = predictions._broadcast_ranks(boards, predictions.ranking_rows(boards, ranking))
         ranked = predictions.ranking_rows(boards, ranking)
-        other_club = ranked.filter(pl.col("Club") == "B")
-        self.assertEqual(other_club["Global_Pct_Pred"].null_count(), other_club.height)
+        self.assertEqual(ranked["Club"].unique().to_list(), ["A"])
+        self.assertEqual(ranked.height, 3)
         self.assertEqual(attached.height, boards.height)
         first = attached.filter(pl.col("Player_ID_N") == 1).row(0, named=True)
         second = attached.filter(pl.col("Player_ID_N") == 3).row(0, named=True)
@@ -213,13 +271,12 @@ class RankingTests(unittest.TestCase):
             }
         )
         ranked = predictions.ranking_rows(boards, ranking)
-        away = ranked.filter(pl.col("Club") == "away").row(0, named=True)
-        self.assertIsNone(away["Global_Pct_Pred"])
-        self.assertIsNone(away["Club_Rank_Pred"])
-        self.assertEqual(away["Pair"], "A4 - Away E - Away W")
-        home = ranked.filter((pl.col("Club") == "home") & (pl.col("Orientation") == "EW")).row(0, named=True)
+        self.assertEqual(ranked["Club"].to_list(), ["home", "home"])
+        home = ranked.filter(pl.col("Orientation") == "EW").row(0, named=True)
+        self.assertEqual(home["Pair"], "A4 - Cat E - Fran W")
         self.assertAlmostEqual(home["Global_Pct_Pred"], 48.0)
-        self.assertEqual(ranked.filter(pl.col("Global_Pct_Pred").is_not_null()).height, 2)
+        # 48 sits behind the away pair's published 53.24 in the national field.
+        self.assertEqual(home["Global_Rank_Pred"], 3)
 
     def test_same_prediction_at_every_table_shares_a_place(self):
         # The deal score is the same at every table. East-West receive the

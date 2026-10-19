@@ -42,7 +42,9 @@ This project provides a comprehensive toolkit for extracting, analyzing, and pos
 The postmortem API on port 8517 (`python ffbridge_postmortem_api_server.py`) exposes the same predictions the sidebar uses.
 
 - `GET /postmortems/{player_id}/predictions/boards` — every table on every board: contract, predicted contract, declarer, predicted declarer, North-South percentage, predicted percentage, and `Pct_Diff`.
-- `GET /postmortems/{player_id}/predictions/rankings` — `Club_Rank`, `Club_Rank_Pred`, `Global_Rank` (FFBridge's published global rank), `Global_Rank_Pred`, `Rank_Diff`, `Global_Pct` (published session percentage), `Global_Pct_Pred`, and `Pct_Diff`.
+- `GET /postmortems/{player_id}/predictions/rankings` — one row per pair at the player's club: `Pair`, `Orientation`, `Club_Rank`, `Club_Rank_Pred`, `Global_Rank` (FFBridge's published global rank), `Global_Rank_Pred`, `Rank_Diff`, `Global_Pct` (published session percentage), `Global_Pct_Pred`, `Pct_Diff`, and `Boards`. The other clubs in the simultaneous are used only to place each prediction in the national field.
+
+The national ranking is cached under `rankings/{session_id}.json`. Before FFBridge publishes a session, its ranking lists every pair at 0% and 1st place. A cached ranking like that is downloaded again on the next request and replaced once the scores arrive. Until then, the actual columns are null and the response's `warning` says the results are not published.
 
 Optional query parameters are `session_id` and `limit` (default 500, maximum 2000). Omit `session_id` to use the latest cached session for that player. DuckDB `GET /postmortems/{player_id}/sql` attaches the same columns when the query mentions them (`Pct_NS_Pred`, `Contract_Pred`, `Global_Rank`, `Global_Rank_Pred`, and the other prediction markers).
 

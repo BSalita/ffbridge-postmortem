@@ -530,16 +530,55 @@ def _assign_ns_prediction(frame: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def load_ranking(session_id: Any, cache_dir: Path) -> Optional[pl.DataFrame]:
-    path = Path(cache_dir) / "rankings" / f"{session_id}.json"
-    if not path.is_file():
-        return None
-    payload = json.loads(path.read_text(encoding="utf-8"))
+_SCORE_COLUMNS = ("sessionScore", "session_score", "percentage")
+
+
+def _ranking_frame(payload: Any) -> Optional[pl.DataFrame]:
     if isinstance(payload, dict):
         payload = payload.get("items") or payload.get("ranking") or [payload]
     if not payload:
         return None
     return pl.json_normalize(payload, separator="_", infer_schema_length=None)
+
+
+def ranking_is_published(ranking: Optional[pl.DataFrame]) -> bool:
+    """FFBridge lists every pair at 0% and 1st place until it publishes results."""
+    if ranking is None or ranking.is_empty():
+        return False
+    score_col = _first_present(ranking, _SCORE_COLUMNS)
+    if score_col is None:
+        return False
+    scores = ranking[score_col].cast(pl.Float64, strict=False).fill_null(0.0)
+    return bool((scores != 0.0).any())
+
+
+def _fetch_ranking(session_id: Any) -> Any:
+    import mlBridge.mlBridgeFFLib as mlBridgeFFLib
+
+    return mlBridgeFFLib.lancelot_get(f"results/sessions/{int(session_id)}/ranking")
+
+
+def load_ranking(session_id: Any, cache_dir: Path) -> Tuple[Optional[pl.DataFrame], Optional[str]]:
+    """The national ranking and a warning when FFBridge has not published it.
+
+    A ranking cached before publication is downloaded again, and the cache is
+    rewritten once the published scores arrive.
+    """
+    path = Path(cache_dir) / "rankings" / f"{session_id}.json"
+    if path.is_file():
+        ranking = _ranking_frame(json.loads(path.read_text(encoding="utf-8")))
+        if ranking_is_published(ranking):
+            return ranking, None
+    payload = _fetch_ranking(session_id)
+    ranking = _ranking_frame(payload)
+    if not ranking_is_published(ranking):
+        return None, (
+            f"FFBridge has not published results for session {session_id} yet, "
+            "so actual percentages and ranks are not shown."
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return ranking, None
 
 
 def _text(column: str) -> pl.Expr:
@@ -635,6 +674,7 @@ def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.Da
         club_groups.setdefault(str(raw.get("Club")), []).append(raw)
         rows.append(raw)
 
+    home_club = None
     if official.height:
         officials = official.to_dicts()
         matches = [_match_prediction(predicted, raw) for raw in officials]
@@ -654,7 +694,7 @@ def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.Da
         for raw in predicted.to_dicts():
             raw["Global_Rank"] = None
             raw["Club"] = raw.get("Section") or ""
-            raw["Global_Pct"] = raw.get("Global_Pct_Pred")
+            raw["Global_Pct"] = None
             add_row(raw)
 
     for raw in rows:
@@ -703,6 +743,10 @@ def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.Da
         raw["Pct_Diff"] = None if actual is None else round(float(actual) - pred_score, 2)
         raw["Global_Pct_Pred"] = round(pred_score, 2)
 
+    # Other clubs were needed to rank against the national field, but the
+    # postmortem reports only the home club's pairs.
+    if home_club is not None:
+        rows = [raw for raw in rows if raw.get("Club") == home_club]
     ranked = pl.DataFrame(rows) if rows else pl.DataFrame({name: [] for name in RANKING_COLUMNS})
     for name in (*RANKING_COLUMNS, "Section", "Table", "Club"):
         if name not in ranked.columns:
@@ -713,7 +757,7 @@ def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.Da
         if name in ranked.columns
     ]
     return ranked.select(ordered).sort(
-        ["Club_Rank", "Global_Rank"],
+        ["Club_Rank", "Global_Rank", "Club_Rank_Pred"],
         nulls_last=True,
     )
 
@@ -895,14 +939,16 @@ def apply_session_predictions(
     predicted, warning = _predict_targets(boards, session_id)
     if "Declarer_Direction" not in predicted.columns and "Declarer" in predicted.columns:
         predicted = predicted.with_columns(pl.col("Declarer").cast(pl.Utf8).alias("Declarer_Direction"))
-    ranking = load_ranking(session_id, Path(cache_dir))
+    ranking, ranking_warning = load_ranking(session_id, Path(cache_dir))
     ranks = ranking_rows(predicted, ranking)
     predicted = _broadcast_ranks(predicted, ranks)
     info = {
-        "warning": warning,
+        "warning": " ".join(text for text in (warning, ranking_warning) if text) or None,
         "models_dir": str(models_dir()),
         "predictions_available": warning is None and "Pct_NS_Pred" in predicted.columns and predicted["Pct_NS_Pred"].null_count() < predicted.height,
+        "results_published": ranking is not None,
         "ranking_pairs": ranks.height,
+        "ranks": ranks,
     }
     return predicted, info
 
@@ -966,7 +1012,7 @@ def prediction_payload(
 ) -> Dict[str, Any]:
     predicted, info = apply_session_predictions(boards, session_id, cache_dir)
     if view == "rankings":
-        frame = ranking_rows(predicted, load_ranking(session_id, Path(cache_dir))).select(RANKING_COLUMNS)
+        frame = info["ranks"].select(RANKING_COLUMNS)
     else:
         frame = board_prediction_rows(predicted)
     frame = frame.head(limit)
