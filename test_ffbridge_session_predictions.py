@@ -178,6 +178,49 @@ class RankingTests(unittest.TestCase):
         self.assertIsNotNone(first["Rank_Diff_NS"])
         self.assertNotEqual(first["Global_Rank_NS"], 1)
 
+    def test_another_clubs_row_without_ids_gets_no_prediction_by_table_number(self):
+        ranking = pl.DataFrame(
+            {
+                "sessionScore": [56.4, 53.24, 50.0],
+                "rank": [244, 430, 500],
+                "simultaneousId": ["home", "away", "home"],
+                "orientation": ["EW", "EW", "NS"],
+                "section": ["A", "A", "A"],
+                "tableNumber": [4, 4, 4],
+                "team_player1_id": [21, None, 1],
+                "team_player2_id": [31, None, 11],
+                "team_player1_firstName": ["Cat", "Away", "Nor"],
+                "team_player1_lastName": ["E", "E", "N"],
+                "team_player2_firstName": ["Fran", "Away", "Sou"],
+                "team_player2_lastName": ["W", "W", "S"],
+            }
+        )
+        boards = pl.DataFrame(
+            {
+                "Board": [1],
+                "section_name": ["A"],
+                "Pair_Number_NS": [4],
+                "Pair_Number_EW": [4],
+                "Player_ID_N": [1],
+                "Player_ID_S": [11],
+                "Player_ID_E": [21],
+                "Player_ID_W": [31],
+                "Player_Name_N": ["Nor N"],
+                "Player_Name_S": ["Sou S"],
+                "Player_Name_E": ["Cat E"],
+                "Player_Name_W": ["Fran W"],
+                "Pct_NS_Pred": [0.52],
+            }
+        )
+        ranked = predictions.ranking_rows(boards, ranking)
+        away = ranked.filter(pl.col("Club") == "away").row(0, named=True)
+        self.assertIsNone(away["Global_Pct_Pred"])
+        self.assertIsNone(away["Club_Rank_Pred"])
+        self.assertEqual(away["Pair"], "A4 - Away E - Away W")
+        home = ranked.filter((pl.col("Club") == "home") & (pl.col("Orientation") == "EW")).row(0, named=True)
+        self.assertAlmostEqual(home["Global_Pct_Pred"], 48.0)
+        self.assertEqual(ranked.filter(pl.col("Global_Pct_Pred").is_not_null()).height, 2)
+
     def test_same_prediction_at_every_table_shares_a_place(self):
         # The deal score is the same at every table. East-West receive the
         # complement, so they share one place and North-South share the next.
@@ -275,6 +318,25 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(aligned["HCP_N"].to_list(), [10, 11, 12, 13, 14])
         self.assertEqual(aligned.schema["HCP_N"], pl.Float32)
         self.assertEqual(aligned["Dealer"].to_list(), ["N", "E", "S", "W", "N"])
+
+    def test_a_missing_model_input_is_an_error_not_a_null_column(self):
+        with self.assertRaisesRegex(ValueError, "SL_N_Longest"):
+            predictions._align_features(
+                pl.DataFrame({"HCP_N": [10]}),
+                {"HCP_N": "Float32", "SL_N_Longest": "Float32"},
+                ["HCP_N", "SL_N_Longest"],
+            )
+
+    def test_norths_longest_suit_comes_from_the_deal_not_the_shape_string(self):
+        session = pl.DataFrame(
+            {
+                "PBN": ["N:J2.KQ7.K87.KT864 AKQ74.AJ52.94.92 98.T6.Q532.AQJ73 T653.9843.AJT6.5"],
+                "SL_N_ML_SJ": ["5-3-3-2"],
+            }
+        )
+        model_input = predictions._add_model_inputs(session, {"SL_N_Longest"}, Path("."))
+        self.assertEqual(model_input["SL_N_Longest"].to_list(), [5.0])
+        self.assertEqual(model_input.schema["SL_N_Longest"], pl.Float32)
 
     def test_missing_elo_uses_the_models_neutral_training_value(self):
         aligned = predictions._align_features(

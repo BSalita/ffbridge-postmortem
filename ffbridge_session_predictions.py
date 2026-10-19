@@ -25,6 +25,7 @@ from __future__ import annotations
 import functools
 import json
 import os
+from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -266,8 +267,14 @@ def _add_model_inputs(frame: pl.DataFrame, required: set, directory: Path) -> pl
     )
 
     out = frame
-    if required & set(SHAPE_FEATURES):
+    if required & (set(SHAPE_FEATURES) | {"SL_N_Longest"}):
         out = shape_features(out)
+    if "SL_N_Longest" in required:
+        # Training reads this from the hand file's SL_N_ML_SJ, an integer.
+        # The postmortem's SL_N_ML_SJ is the shape string ("4-3-3-3").
+        out = out.with_columns(
+            pl.max_horizontal(f"SL_N_{suit}" for suit in "SHDC").cast(pl.Float32).alias("SL_N_Longest")
+        )
     if required & set(HISTORY_FEATURES):
         elo_path = _elo_results_path()
         if elo_path is None:
@@ -331,14 +338,14 @@ def _align_features(
     taken from the filled pair ratings, and the ``*_Missing`` flags must
     already be on the frame (see ``_add_elo_missing_flags``).
     """
+    missing = [column for column in required if column != "Elo_Gap" and column not in frame.columns]
+    if missing:
+        raise ValueError(f"Model input is missing {missing}")
     aligned = frame
     for column in required:
         if column == "Elo_Gap":
             continue
         expected = _dtype_from_schema(str(feature_dtypes.get(column, "Float32")))
-        if column not in aligned.columns:
-            aligned = aligned.with_columns(pl.lit(None).cast(expected).alias(column))
-            continue
         dtype = aligned.schema[column]
         if column.startswith("Elo_") and expected in (pl.Float32, pl.Float64):
             mean = (scaling_params or {}).get(column, {}).get("mean")
@@ -446,9 +453,9 @@ def _predict_targets(
         required = list(schema.get("numerical_feature_cols") or []) + list(
             schema.get("categorical_feature_cols") or []
         )
-        aligned = _align_features(model_input, feature_dtypes, required, scaling_params)
         classifier = target != "Pct_NS"
         try:
+            aligned = _align_features(model_input, feature_dtypes, required, scaling_params)
             predicted = predict_model(
                 directory,
                 _model_name(target),
@@ -629,8 +636,15 @@ def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.Da
         rows.append(raw)
 
     if official.height:
-        for raw in official.to_dicts():
-            pred = _match_prediction(predicted, raw)
+        officials = official.to_dicts()
+        matches = [_match_prediction(predicted, raw) for raw in officials]
+        # The postmortem is one club's boards. A row from another club can
+        # still match by table number when its player ids are missing.
+        matched_clubs = Counter(raw.get("Club") for raw, pred in zip(officials, matches) if pred is not None)
+        home_club = matched_clubs.most_common(1)[0][0] if matched_clubs else None
+        for raw, pred in zip(officials, matches):
+            if raw.get("Club") != home_club:
+                pred = None
             raw["Global_Pct_Pred"] = None if pred is None else pred.get("Global_Pct_Pred")
             raw["Boards"] = None if pred is None else pred.get("Boards")
             if pred is not None and pred.get("Pair"):
