@@ -42,7 +42,9 @@ This project provides a comprehensive toolkit for extracting, analyzing, and pos
 The postmortem API on port 8517 (`python ffbridge_postmortem_api_server.py`) exposes the same predictions the sidebar uses.
 
 - `GET /postmortems/{player_id}/predictions/boards` — every table on every board: contract, predicted contract, declarer, predicted declarer, North-South percentage, predicted percentage, and `Pct_Diff`.
-- `GET /postmortems/{player_id}/predictions/rankings` — one row per pair at the player's club: `Pair`, `Orientation`, `Club_Rank`, `Club_Rank_Pred`, `Global_Rank` (FFBridge's published global rank), `Global_Rank_Pred`, `Rank_Diff`, `Global_Pct` (published session percentage), `Global_Pct_Pred`, `Pct_Diff`, and `Boards`. The other clubs in the simultaneous are used only to place each prediction in the national field.
+- `GET /postmortems/{player_id}/predictions/rankings` — one row per pair at the player's club: `Pair`, `Orientation`, `Club_Rank`, `Club_Rank_Pred`, `Global_Rank` (FFBridge's published global rank), `Global_Rank_Pred`, `Rank_Diff`, `Global_Pct` (published session percentage), `Global_Pct_Pred`, `Pct_Diff`, `Handicap_Pct`, `Handicap_Club_Rank`, `Handicap_Global_Rank`, and `Boards`. The other clubs in the simultaneous are used only to place each prediction in the national field.
+
+The predictions are scratch, so `Club_Rank`, `Global_Rank`, `Global_Pct`, and the diffs are scratch too. In a handicapped session (Octopus, Roy René first Tuesday) FFBridge's `sessionScore` and `rank` include the IV bonus `totalBonus`; the scratch percentage is `sessionScore - totalBonus`, and the scratch global rank places it among the whole national field. FFBridge's handicapped figures are in the `Handicap_*` columns, which are null in a session without handicap.
 
 The national ranking is cached under `rankings/{session_id}.json`. Before FFBridge publishes a session, its ranking lists every pair at 0% and 1st place. A cached ranking like that is downloaded again on the next request and replaced once the scores arrive. Until then, the actual columns are null and the response's `warning` says the results are not published.
 

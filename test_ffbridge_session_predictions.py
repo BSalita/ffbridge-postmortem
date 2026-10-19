@@ -278,6 +278,85 @@ class RankingTests(unittest.TestCase):
         # 48 sits behind the away pair's published 53.24 in the national field.
         self.assertEqual(home["Global_Rank_Pred"], 3)
 
+    def test_handicapped_session_compares_scratch_and_shows_handicap_beside_it(self):
+        # 288737: sessionScore and rank include the IV bonus (totalBonus).
+        ranking = pl.DataFrame(
+            {
+                "sessionScore": [64.32, 60.0, 58.0, 45.0],
+                "totalBonus": [10.5, 0.0, 2.0, 3.0],
+                "rank": [1, 2, 3, 4],
+                "simultaneousId": ["home", "away", "home", "home"],
+                "orientation": ["NS", "NS", "NS", "EW"],
+                "section": ["A", "A", "A", "A"],
+                "tableNumber": [1, 1, 2, 1],
+                "team_player1_id": [1, 5, 3, 11],
+                "team_player2_id": [2, 6, 4, 12],
+            }
+        )
+        boards = pl.DataFrame(
+            {
+                "Board": [1, 1],
+                "section_name": ["A", "A"],
+                "Pair_Number_NS": [1, 2],
+                "Pair_Number_EW": [1, 1],
+                "Player_ID_N": [1, 3],
+                "Player_ID_S": [2, 4],
+                "Player_ID_E": [11, 11],
+                "Player_ID_W": [12, 12],
+                "Pct_NS_Pred": [0.54, 0.50],
+            }
+        )
+        ranked = predictions.ranking_rows(boards, ranking)
+        bob = ranked.filter((pl.col("Orientation") == "NS") & (pl.col("Table") == "1")).row(0, named=True)
+        self.assertAlmostEqual(bob["Global_Pct"], 53.82)
+        self.assertEqual(bob["Global_Rank"], 3)
+        self.assertEqual(bob["Club_Rank"], 2)
+        self.assertAlmostEqual(bob["Pct_Diff"], -0.18)
+        self.assertAlmostEqual(bob["Handicap_Pct"], 64.32)
+        self.assertEqual(bob["Handicap_Global_Rank"], 1)
+        self.assertEqual(bob["Handicap_Club_Rank"], 1)
+        second = ranked.filter((pl.col("Orientation") == "NS") & (pl.col("Table") == "2")).row(0, named=True)
+        self.assertAlmostEqual(second["Global_Pct"], 56.0)
+        self.assertEqual(second["Club_Rank"], 1)
+        self.assertEqual(second["Handicap_Club_Rank"], 2)
+        columns = list(ranked.columns)
+        self.assertEqual(columns.index("Pct_Diff") + 1, columns.index("Handicap_Pct"))
+
+    def test_scratch_session_has_no_handicap_columns_filled(self):
+        ranking = pl.DataFrame(
+            {
+                "sessionScore": [58.78, 41.22],
+                "totalBonus": [0.0, 0.0],
+                "rank": [148, 900],
+                "simultaneousId": ["home", "home"],
+                "orientation": ["EW", "NS"],
+                "section": ["A", "A"],
+                "tableNumber": [12, 12],
+                "team_player1_id": [21, 1],
+                "team_player2_id": [31, 11],
+            }
+        )
+        boards = pl.DataFrame(
+            {
+                "Board": [1],
+                "section_name": ["A"],
+                "Pair_Number_NS": [12],
+                "Pair_Number_EW": [12],
+                "Player_ID_N": [1],
+                "Player_ID_S": [11],
+                "Player_ID_E": [21],
+                "Player_ID_W": [31],
+                "Pct_NS_Pred": [0.45],
+            }
+        )
+        ranked = predictions.ranking_rows(boards, ranking)
+        east = ranked.filter(pl.col("Orientation") == "EW").row(0, named=True)
+        self.assertAlmostEqual(east["Global_Pct"], 58.78)
+        self.assertEqual(east["Global_Rank"], 148)
+        self.assertIsNone(east["Handicap_Pct"])
+        self.assertIsNone(east["Handicap_Global_Rank"])
+        self.assertIsNone(east["Handicap_Club_Rank"])
+
     def test_same_prediction_at_every_table_shares_a_place(self):
         # The deal score is the same at every table. East-West receive the
         # complement, so they share one place and North-South share the next.

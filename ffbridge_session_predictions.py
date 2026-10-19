@@ -54,6 +54,9 @@ RANKING_COLUMNS = (
     "Global_Pct",
     "Global_Pct_Pred",
     "Pct_Diff",
+    "Handicap_Pct",
+    "Handicap_Club_Rank",
+    "Handicap_Global_Rank",
     "Boards",
 )
 BOARD_COLUMNS = (
@@ -652,7 +655,11 @@ def _mean(values: List[Optional[float]]) -> Optional[float]:
 
 
 def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.DataFrame:
-    """One row per ranked pair: club ranks, then global ranks, then percentages."""
+    """One row per ranked pair: club ranks, then global ranks, then percentages.
+
+    The actual percentages and ranks are scratch, like the predictions. In a
+    handicapped session FFBridge's published figures follow as Handicap_*.
+    """
     official = _official_pairs(ranking)
     predicted = _predicted_pair_scores(boards)
     if official.is_empty() and predicted.is_empty():
@@ -698,15 +705,16 @@ def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.Da
             add_row(raw)
 
     for raw in rows:
-        club_field = [
-            float(item["Global_Pct"])
-            for item in club_groups.get(str(raw.get("Club")), [])
-            if item.get("Global_Pct") is not None
-        ]
-        raw["Club_Rank"] = _rank_against(
-            None if raw.get("Global_Pct") is None else float(raw["Global_Pct"]),
-            club_field,
-        )
+        for pct_name, rank_name in (("Global_Pct", "Club_Rank"), ("Handicap_Pct", "Handicap_Club_Rank")):
+            club_field = [
+                float(item[pct_name])
+                for item in club_groups.get(str(raw.get("Club")), [])
+                if item.get(pct_name) is not None
+            ]
+            raw[rank_name] = _rank_against(
+                None if raw.get(pct_name) is None else float(raw[pct_name]),
+                club_field,
+            )
         pred_score = raw.get("Global_Pct_Pred")
         if pred_score is None:
             raw["Club_Rank_Pred"] = None
@@ -793,15 +801,37 @@ def _official_pairs(ranking: Optional[pl.DataFrame]) -> pl.DataFrame:
     id_right = _first_present(ranking, ("team_player2_id", "player2_id"))
     left_id = pl.col(id_left).cast(pl.Utf8) if id_left else pl.lit(None).cast(pl.Utf8)
     right_id = pl.col(id_right).cast(pl.Utf8) if id_right else pl.lit(None).cast(pl.Utf8)
+    score = pl.col(score_col).cast(pl.Float64, strict=False)
+    rank = pl.col(rank_col).cast(pl.Int64, strict=False) if rank_col else pl.lit(None).cast(pl.Int64)
+    # In a handicapped session sessionScore and rank include the IV bonus
+    # (totalBonus, percentage points) and the predictions do not.
+    bonus_col = _first_present(ranking, ("totalBonus",))
+    unbonused_col = _first_present(ranking, ("totalScoreWithoutHandicap",))
+    unbonused = (
+        pl.col(unbonused_col).cast(pl.Float64, strict=False) if unbonused_col else pl.lit(None, dtype=pl.Float64)
+    )
+    bonus = pl.col(bonus_col).cast(pl.Float64, strict=False) if bonus_col else pl.lit(None, dtype=pl.Float64)
+    handicapped = ranking.select(
+        ((bonus.fill_null(0.0) > 0.0) | unbonused.is_not_null()).any()
+    ).item()
+    if handicapped:
+        scratch = pl.coalesce([unbonused, score - bonus]).round(2)
+        unbonused_rank_col = _first_present(ranking, ("rankWithoutHandicap",))
+        scratch_rank = pl.coalesce([
+            pl.col(unbonused_rank_col).cast(pl.Int64, strict=False) if unbonused_rank_col else pl.lit(None).cast(pl.Int64),
+            scratch.rank("min", descending=True).cast(pl.Int64),
+        ])
+        handicap, handicap_rank = score, rank
+    else:
+        scratch, scratch_rank = score, rank
+        handicap, handicap_rank = pl.lit(None, dtype=pl.Float64), pl.lit(None).cast(pl.Int64)
     return ranking.select(
         _pair_label(section, table, left, right).alias("Pair"),
         pl.col(orientation_col).cast(pl.Utf8).alias("Orientation"),
-        pl.col(score_col).cast(pl.Float64, strict=False).alias("Global_Pct"),
-        (
-            pl.col(rank_col).cast(pl.Int64, strict=False)
-            if rank_col
-            else pl.lit(None).cast(pl.Int64)
-        ).alias("Global_Rank"),
+        scratch.alias("Global_Pct"),
+        scratch_rank.alias("Global_Rank"),
+        handicap.alias("Handicap_Pct"),
+        handicap_rank.alias("Handicap_Global_Rank"),
         (pl.col(club_col).cast(pl.Utf8) if club_col else pl.lit("")).alias("Club"),
         section.alias("Section"),
         table.alias("Table"),
