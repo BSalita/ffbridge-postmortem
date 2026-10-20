@@ -2,13 +2,13 @@
 
 Club rank is the place among pairs at the same club. Predicted club rank
 is the place of the pair's predicted session percentage among those pairs.
-Pairs with the same predicted percentage share a place. ``Global_Rank`` is
-the official ``rank`` on FFBridge's session ranking. ``Global_Rank_Pred`` is
+Pairs with the same predicted percentage share a place. ``Global_Scratch_Rank`` is
+the official ``rank`` on FFBridge's session ranking. ``Global_Scratch_Rank_Pred`` is
 where the predicted percentage would sit among the other pairs' published
 percentages in the national field.
 
-Every diff is actual minus predicted: ``Rank_Diff`` is ``Global_Rank`` minus
-``Global_Rank_Pred`` and ``Pct_Diff`` is the published percentage minus the
+Every diff is actual minus predicted: ``Rank_Diff`` is ``Global_Scratch_Rank`` minus
+``Global_Scratch_Rank_Pred`` and ``Pct_Diff`` is the published percentage minus the
 predicted one.
 
 ``Pct_NS_Pred`` is the percentage model's North-South score on the board,
@@ -49,11 +49,11 @@ RANKING_COLUMNS = (
     "Orientation",
     "Club_Rank",
     "Club_Rank_Pred",
-    "Global_Rank",
-    "Global_Rank_Pred",
+    "Global_Scratch_Rank",
+    "Global_Scratch_Rank_Pred",
     "Rank_Diff",
-    "Global_Pct",
-    "Global_Pct_Pred",
+    "Global_Scratch_Pct",
+    "Global_Scratch_Pct_Pred",
     "Pct_Diff",
     "Handicap_Pct",
     "Handicap_Club_Rank",
@@ -79,6 +79,7 @@ _PREDICTION_SQL_MARKERS = (
     "pct_ns_pred",
     "contract_pred",
     "declarer_direction_pred",
+    "global_scratch_",
     "global_rank",
     "club_rank_pred",
     "rank_diff",
@@ -668,7 +669,7 @@ def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.Da
 
     national_scores = [
         float(value)
-        for value in (official["Global_Pct"].drop_nulls().to_list() if official.height else [])
+        for value in (official["Global_Scratch_Pct"].drop_nulls().to_list() if official.height else [])
     ]
     rows: List[Dict[str, Any]] = []
     club_groups: Dict[str, List[Dict[str, Any]]] = {}
@@ -693,20 +694,20 @@ def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.Da
         for raw, pred in zip(officials, matches):
             if raw.get("Club") != home_club:
                 pred = None
-            raw["Global_Pct_Pred"] = None if pred is None else pred.get("Global_Pct_Pred")
+            raw["Global_Scratch_Pct_Pred"] = None if pred is None else pred.get("Global_Scratch_Pct_Pred")
             raw["Boards"] = None if pred is None else pred.get("Boards")
             if pred is not None and pred.get("Pair"):
                 raw["Pair"] = pred["Pair"]
             add_row(raw)
     else:
         for raw in predicted.to_dicts():
-            raw["Global_Rank"] = None
+            raw["Global_Scratch_Rank"] = None
             raw["Club"] = raw.get("Section") or ""
-            raw["Global_Pct"] = None
+            raw["Global_Scratch_Pct"] = None
             add_row(raw)
 
     for raw in rows:
-        for pct_name, rank_name in (("Global_Pct", "Club_Rank"), ("Handicap_Pct", "Handicap_Club_Rank")):
+        for pct_name, rank_name in (("Global_Scratch_Pct", "Club_Rank"), ("Handicap_Pct", "Handicap_Club_Rank")):
             club_field = [
                 float(item[pct_name])
                 for item in club_groups.get(str(raw.get("Club")), [])
@@ -716,7 +717,7 @@ def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.Da
                 None if raw.get(pct_name) is None else float(raw[pct_name]),
                 club_field,
             )
-        pred_score = raw.get("Global_Pct_Pred")
+        pred_score = raw.get("Global_Scratch_Pct_Pred")
         if pred_score is None:
             raw["Club_Rank_Pred"] = None
         else:
@@ -725,13 +726,13 @@ def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.Da
             # distinct place for every table.
             shown = round(float(pred_score), 2)
             club_pred_field = [
-                round(float(item["Global_Pct_Pred"]), 2)
+                round(float(item["Global_Scratch_Pct_Pred"]), 2)
                 for item in club_groups.get(str(raw.get("Club")), [])
-                if item.get("Global_Pct_Pred") is not None
+                if item.get("Global_Scratch_Pct_Pred") is not None
             ]
             raw["Club_Rank_Pred"] = _rank_against(shown, club_pred_field)
         if pred_score is None:
-            raw["Global_Rank_Pred"] = None
+            raw["Global_Scratch_Rank_Pred"] = None
             raw["Rank_Diff"] = None
             raw["Pct_Diff"] = None
             continue
@@ -740,17 +741,17 @@ def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.Da
         for item in rows:
             if item is raw:
                 national_pred_field.append(pred_score)
-            elif item.get("Global_Pct") is not None:
-                national_pred_field.append(float(item["Global_Pct"]))
-        raw["Global_Rank_Pred"] = _rank_against(pred_score, national_pred_field or national_scores)
-        official_rank = raw.get("Global_Rank")
+            elif item.get("Global_Scratch_Pct") is not None:
+                national_pred_field.append(float(item["Global_Scratch_Pct"]))
+        raw["Global_Scratch_Rank_Pred"] = _rank_against(pred_score, national_pred_field or national_scores)
+        official_rank = raw.get("Global_Scratch_Rank")
         raw["Rank_Diff"] = (
-            None if official_rank is None or raw["Global_Rank_Pred"] is None
-            else int(official_rank) - int(raw["Global_Rank_Pred"])
+            None if official_rank is None or raw["Global_Scratch_Rank_Pred"] is None
+            else int(official_rank) - int(raw["Global_Scratch_Rank_Pred"])
         )
-        actual = raw.get("Global_Pct")
+        actual = raw.get("Global_Scratch_Pct")
         raw["Pct_Diff"] = None if actual is None else round(float(actual) - pred_score, 2)
-        raw["Global_Pct_Pred"] = round(pred_score, 2)
+        raw["Global_Scratch_Pct_Pred"] = round(pred_score, 2)
 
     # Other clubs were needed to rank against the national field, but the
     # postmortem reports only the home club's pairs.
@@ -766,7 +767,7 @@ def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.Da
         if name in ranked.columns
     ]
     return ranked.select(ordered).sort(
-        ["Club_Rank", "Global_Rank", "Club_Rank_Pred"],
+        ["Club_Rank", "Global_Scratch_Rank", "Club_Rank_Pred"],
         nulls_last=True,
     )
 
@@ -829,8 +830,8 @@ def _official_pairs(ranking: Optional[pl.DataFrame]) -> pl.DataFrame:
     return ranking.select(
         _pair_label(section, table, left, right).alias("Pair"),
         pl.col(orientation_col).cast(pl.Utf8).alias("Orientation"),
-        scratch.alias("Global_Pct"),
-        scratch_rank.alias("Global_Rank"),
+        scratch.alias("Global_Scratch_Pct"),
+        scratch_rank.alias("Global_Scratch_Rank"),
         handicap.alias("Handicap_Pct"),
         handicap_rank.alias("Handicap_Global_Rank"),
         (pl.col(club_col).cast(pl.Utf8) if club_col else pl.lit("")).alias("Club"),
@@ -886,9 +887,9 @@ def _predicted_pair_scores(boards: pl.DataFrame) -> pl.DataFrame:
             .with_columns(
                 pl.lit(orientation).alias("Orientation"),
                 _pair_label(pl.col("Section"), pl.col("Table"), pl.col("_left"), pl.col("_right")).alias("Pair"),
-                (pl.col("_pred") * 100.0).alias("Global_Pct_Pred"),
+                (pl.col("_pred") * 100.0).alias("Global_Scratch_Pct_Pred"),
             )
-            .select("Pair", "Orientation", "Section", "Table", "Pair_Key", "Global_Pct_Pred", "Boards")
+            .select("Pair", "Orientation", "Section", "Table", "Pair_Key", "Global_Scratch_Pct_Pred", "Boards")
         )
         frames.append(piece)
     if not frames:

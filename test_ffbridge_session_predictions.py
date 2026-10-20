@@ -73,18 +73,18 @@ class RankingTests(unittest.TestCase):
         )
         ranked = predictions.ranking_rows(boards, ranking)
         north = ranked.filter(pl.col("Orientation") == "NS").row(0, named=True)
-        east = ranked.filter(pl.col("Global_Rank") == 4).row(0, named=True)
+        east = ranked.filter(pl.col("Global_Scratch_Rank") == 4).row(0, named=True)
         self.assertEqual(north["Club_Rank"], 1)
-        self.assertEqual(north["Global_Rank"], 1)
+        self.assertEqual(north["Global_Scratch_Rank"], 1)
         # Predicted 50 sits behind the other club's 55, so the predicted global rank is 2.
-        self.assertEqual(north["Global_Rank_Pred"], 2)
+        self.assertEqual(north["Global_Scratch_Rank_Pred"], 2)
         self.assertEqual(north["Rank_Diff"], -1)
         self.assertAlmostEqual(north["Pct_Diff"], 10.0)
         columns = list(ranked.columns)
-        self.assertEqual(columns.index("Global_Rank") + 1, columns.index("Global_Rank_Pred"))
-        self.assertEqual(columns.index("Global_Rank_Pred") + 1, columns.index("Rank_Diff"))
+        self.assertEqual(columns.index("Global_Scratch_Rank") + 1, columns.index("Global_Scratch_Rank_Pred"))
+        self.assertEqual(columns.index("Global_Scratch_Rank_Pred") + 1, columns.index("Rank_Diff"))
         self.assertEqual(east["Club_Rank"], 2)
-        self.assertAlmostEqual(east["Global_Pct_Pred"], 50.0)
+        self.assertAlmostEqual(east["Global_Scratch_Pct_Pred"], 50.0)
 
     def test_board_rows_include_prediction_diff(self):
         boards = pl.DataFrame(
@@ -142,8 +142,8 @@ class RankingTests(unittest.TestCase):
         ranked = predictions.ranking_rows(boards, ranking)
         north = ranked.filter(pl.col("Orientation") == "NS").row(0, named=True)
         self.assertEqual(north["Club_Rank"], 1)
-        self.assertEqual(north["Global_Rank"], 3)
-        self.assertIsNone(north["Global_Rank_Pred"])
+        self.assertEqual(north["Global_Scratch_Rank"], 3)
+        self.assertIsNone(north["Global_Scratch_Rank_Pred"])
         self.assertIsNone(north["Rank_Diff"])
         with (
             patch.object(predictions, "models_dir", return_value=Path("missing-models")),
@@ -159,7 +159,7 @@ class RankingTests(unittest.TestCase):
             )
         self.assertFalse(payload["predictions_available"])
         self.assertGreaterEqual(payload["row_count"], 1)
-        self.assertEqual(payload["rows"][0]["Global_Rank"], 3)
+        self.assertEqual(payload["rows"][0]["Global_Scratch_Rank"], 3)
 
     def test_a_ranking_cached_before_publication_is_downloaded_again(self):
         placeholder = [
@@ -209,9 +209,9 @@ class RankingTests(unittest.TestCase):
         self.assertFalse(info["results_published"])
         ranks = info["ranks"]
         self.assertEqual(ranks.height, 4)
-        self.assertEqual(ranks["Global_Pct"].null_count(), 4)
+        self.assertEqual(ranks["Global_Scratch_Pct"].null_count(), 4)
         self.assertEqual(ranks["Club_Rank"].null_count(), 4)
-        self.assertEqual(ranks["Global_Rank"].null_count(), 4)
+        self.assertEqual(ranks["Global_Scratch_Rank"].null_count(), 4)
 
     def test_same_table_number_at_two_clubs_keeps_this_clubs_rank(self):
         ranking = pl.DataFrame(
@@ -258,11 +258,11 @@ class RankingTests(unittest.TestCase):
         second = attached.filter(pl.col("Player_ID_N") == 3).row(0, named=True)
         self.assertEqual(first["Club_Rank_NS"], 1)
         self.assertEqual(second["Club_Rank_NS"], 2)
-        self.assertEqual(first["Global_Rank_NS"], 2)
+        self.assertEqual(first["Global_Scratch_Rank_NS"], 2)
         self.assertIsNotNone(first["Club_Rank_Pred_NS"])
-        self.assertIsNotNone(first["Global_Rank_Pred_NS"])
+        self.assertIsNotNone(first["Global_Scratch_Rank_Pred_NS"])
         self.assertIsNotNone(first["Rank_Diff_NS"])
-        self.assertNotEqual(first["Global_Rank_NS"], 1)
+        self.assertNotEqual(first["Global_Scratch_Rank_NS"], 1)
 
     def test_another_clubs_row_without_ids_gets_no_prediction_by_table_number(self):
         ranking = pl.DataFrame(
@@ -302,9 +302,9 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(ranked["Club"].to_list(), ["home", "home"])
         home = ranked.filter(pl.col("Orientation") == "EW").row(0, named=True)
         self.assertEqual(home["Pair"], "A4 - Cat E - Fran W")
-        self.assertAlmostEqual(home["Global_Pct_Pred"], 48.0)
+        self.assertAlmostEqual(home["Global_Scratch_Pct_Pred"], 48.0)
         # 48 sits behind the away pair's published 53.24 in the national field.
-        self.assertEqual(home["Global_Rank_Pred"], 3)
+        self.assertEqual(home["Global_Scratch_Rank_Pred"], 3)
 
     def test_handicapped_session_compares_scratch_and_shows_handicap_beside_it(self):
         # 288737: sessionScore and rank include the IV bonus (totalBonus).
@@ -336,15 +336,15 @@ class RankingTests(unittest.TestCase):
         )
         ranked = predictions.ranking_rows(boards, ranking)
         bob = ranked.filter((pl.col("Orientation") == "NS") & (pl.col("Table") == "1")).row(0, named=True)
-        self.assertAlmostEqual(bob["Global_Pct"], 53.82)
-        self.assertEqual(bob["Global_Rank"], 3)
+        self.assertAlmostEqual(bob["Global_Scratch_Pct"], 53.82)
+        self.assertEqual(bob["Global_Scratch_Rank"], 3)
         self.assertEqual(bob["Club_Rank"], 2)
         self.assertAlmostEqual(bob["Pct_Diff"], -0.18)
         self.assertAlmostEqual(bob["Handicap_Pct"], 64.32)
         self.assertEqual(bob["Handicap_Global_Rank"], 1)
         self.assertEqual(bob["Handicap_Club_Rank"], 1)
         second = ranked.filter((pl.col("Orientation") == "NS") & (pl.col("Table") == "2")).row(0, named=True)
-        self.assertAlmostEqual(second["Global_Pct"], 56.0)
+        self.assertAlmostEqual(second["Global_Scratch_Pct"], 56.0)
         self.assertEqual(second["Club_Rank"], 1)
         self.assertEqual(second["Handicap_Club_Rank"], 2)
         columns = list(ranked.columns)
@@ -379,8 +379,8 @@ class RankingTests(unittest.TestCase):
         )
         ranked = predictions.ranking_rows(boards, ranking)
         east = ranked.filter(pl.col("Orientation") == "EW").row(0, named=True)
-        self.assertAlmostEqual(east["Global_Pct"], 58.78)
-        self.assertEqual(east["Global_Rank"], 148)
+        self.assertAlmostEqual(east["Global_Scratch_Pct"], 58.78)
+        self.assertEqual(east["Global_Scratch_Rank"], 148)
         self.assertIsNone(east["Handicap_Pct"])
         self.assertIsNone(east["Handicap_Global_Rank"])
         self.assertIsNone(east["Handicap_Club_Rank"])
@@ -406,8 +406,8 @@ class RankingTests(unittest.TestCase):
         ranked = predictions.ranking_rows(pl.DataFrame(rows), None)
         east = ranked.filter(pl.col("Orientation") == "EW").sort("Table")
         north = ranked.filter(pl.col("Orientation") == "NS").sort("Table")
-        self.assertEqual(east["Global_Pct_Pred"].to_list(), [59.0, 59.0])
-        self.assertEqual(north["Global_Pct_Pred"].to_list(), [41.0, 41.0])
+        self.assertEqual(east["Global_Scratch_Pct_Pred"].to_list(), [59.0, 59.0])
+        self.assertEqual(north["Global_Scratch_Pct_Pred"].to_list(), [41.0, 41.0])
         self.assertEqual(east["Club_Rank_Pred"].to_list(), [1, 1])
         self.assertEqual(north["Club_Rank_Pred"].to_list(), [3, 3])
 
