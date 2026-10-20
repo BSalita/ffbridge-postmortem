@@ -1286,7 +1286,7 @@
 								"Boards I Declared": "@Boards_I_Declared"
 							}
 						],
-						"sql": "SELECT Declarer_Name AS Name, CASE WHEN Declarer_Direction IN ('N', 'S') THEN AVG(Pct_NS) ELSE AVG(Pct_EW) END AS Avg_Pct, COUNT(*) AS Count, Declarer_ID AS Declarer, Declarer_Direction AS Direction, AVG(CAST(Tricks > DD_Tricks AS INT)) AS Pct_GT_DD, AVG(CAST(Tricks = DD_Tricks AS INT)) AS Pct_EQ_DD, AVG(CAST(Score_Declarer > Par_Declarer AS INT)) AS Pct_GT_Par, AVG(CAST(Score_Declarer = Par_Declarer AS INT)) AS Pct_EQ_Par, AVG(CAST(Par_Declarer = DD_Score_Max_Declarer AS INT)) AS Is_Par_Suit, AVG(CAST(Par_Declarer = DD_Score_Declarer AS INT)) AS Is_Par_Contract, SUM(CAST(DD_Score_Declarer = Par_Declarer AND DD_Score_Declarer < 0 AS INT)) AS Sacrifices FROM self GROUP BY Declarer_ID, Declarer_Name, Declarer_Direction HAVING COUNT(*) >= 4 ORDER BY Avg_Pct DESC"
+						"sql": "SELECT Declarer_Name AS Name, CASE WHEN Declarer_Direction IN ('N', 'S') THEN AVG(Pct_NS) ELSE AVG(Pct_EW) END AS Avg_Pct, COUNT(*) AS Count, Declarer_ID AS Declarer, Declarer_Direction AS Direction, AVG(CAST(Tricks > DD_Tricks AS INT)) AS Pct_GT_DD, AVG(CAST(Tricks = DD_Tricks AS INT)) AS Pct_EQ_DD, AVG(CAST(Score_Declarer > Par_Declarer AS INT)) AS Pct_GT_Par, AVG(CAST(Score_Declarer = Par_Declarer AS INT)) AS Pct_EQ_Par, AVG(CAST(Par_Declarer = DD_Score_Max_Declarer AS INT)) AS Is_Par_Suit, AVG(CAST(Par_Declarer = DD_Score_Declarer AS INT)) AS Is_Par_Contract, SUM(CAST(DD_Score_Declarer = Par_Declarer AND DD_Score_Declarer < 0 AS INT)) AS Sacrifices FROM self WHERE Declarer_Direction IS NOT NULL GROUP BY Declarer_ID, Declarer_Name, Declarer_Direction HAVING COUNT(*) >= 4 ORDER BY Avg_Pct DESC"
 					}
 				],
 				"i18n": {
