@@ -13,7 +13,10 @@ predicted one.
 
 ``Pct_NS_Pred`` is the percentage model's North-South score on the board,
 from the deal, the four players' pre-session ratings, and their records
-before the session date. East-West receive the complement.
+before the session date. East-West receive the complement. Until the Elo
+build covers the session, the pre-session ratings are each player's latest
+rating before the session date (``prediction_source`` is
+``fallback_latest_elo``); the next build switches to the real ones.
 
 ``Contract_Pred`` and ``Declarer_Direction_Pred`` are one choice: the
 contract that maximizes the contract model's probability times the declarer
@@ -64,6 +67,8 @@ RANKING_COLUMNS = (
     "Pct_Pred_High",
     "Low_Confidence",
     "Min_Prior_Sessions",
+    "Pair_Prior_Sessions",
+    "Ratings_Age_Days",
     "Boards",
 )
 # ffbridge_prediction_rank_eval.py, 2026-10-20, 214,092 held-out pair sessions:
@@ -72,6 +77,10 @@ RANKING_COLUMNS = (
 PCT_PRED_SPREAD = 28.41
 Z95 = 1.959963984540054
 LOW_CONFIDENCE_SESSIONS = 20
+LOW_CONFIDENCE_PAIR_SESSIONS = 5
+STALE_RATINGS_DAYS = 30
+PRE_SESSION_SOURCE = "pre_session_elo"
+FALLBACK_SOURCE = "fallback_latest_elo"
 BOARD_COLUMNS = (
     "Board",
     "Pair_NS",
@@ -146,30 +155,69 @@ def _id_token(column: str) -> pl.Expr:
     )
 
 
-def _attach_prior_sessions(frame: pl.DataFrame, session_id: Any) -> pl.DataFrame:
-    """``Prior_Sessions_{seat}``: Elo sessions each player had before this session.
+class SessionNotInElo(ValueError):
+    """The Elo build does not cover this session yet."""
 
-    Counted on Lancelot ids, the namespace of the postmortem's seat ids. A seat
-    with no earlier Elo session gets 0.
-    """
+
+_LANCELOT_ID_COLUMNS = ("player1_lancelot_id", "player2_lancelot_id")
+_ELO_DAY = pl.col("date").cast(pl.Utf8).str.slice(0, 10)
+
+
+def _lancelot_results() -> pl.LazyFrame:
     path = _elo_results_path()
     if path is None:
         raise FileNotFoundError("FFBridge Elo results parquet was not found")
     results = pl.scan_parquet(path)
-    id_columns = ("player1_lancelot_id", "player2_lancelot_id")
-    missing = sorted(set(id_columns) - set(results.collect_schema().names()))
+    missing = sorted(set(_LANCELOT_ID_COLUMNS) - set(results.collect_schema().names()))
     if missing:
         raise ValueError(f"FFBridge Elo results lack {missing}")
-    day = pl.col("date").cast(pl.Utf8).str.slice(0, 10)
-    session_day = (
+    return results
+
+
+def _session_day(results: pl.LazyFrame, session_id: Any, frame: pl.DataFrame) -> str:
+    """The session's date from the Elo build, else from the postmortem's Date."""
+    day = (
         results.filter(pl.col("tournament_id").cast(pl.Utf8) == str(session_id))
-        .select(day.min())
+        .select(_ELO_DAY.min())
         .collect()
         .item()
     )
-    if session_day is None:
-        raise ValueError(f"FFBridge Elo has no rows for session {session_id}")
-    prior = results.filter(day < session_day)
+    if day is None and "Date" in frame.columns:
+        day = frame.select(pl.col("Date").cast(pl.Utf8).str.slice(0, 10).min()).item()
+    if not day:
+        raise ValueError(f"Session {session_id} has no date in FFBridge Elo or the postmortem")
+    return day
+
+
+def _attach_prior_sessions(frame: pl.DataFrame, session_id: Any) -> pl.DataFrame:
+    """Elo sessions before this session: ``Prior_Sessions_{seat}`` per player and
+    ``Pair_Prior_Sessions_{NS|EW}`` for the two partners together.
+
+    Counted on Lancelot ids, the namespace of the postmortem's seat ids. A seat
+    or pair with no earlier Elo session gets 0.
+    """
+    results = _lancelot_results()
+    id_columns = _LANCELOT_ID_COLUMNS
+    session_day = _session_day(results, session_id, frame)
+    prior = results.filter(_ELO_DAY < session_day)
+    pair_counts = (
+        prior.select(
+            _pair_key(pl.col(id_columns[0]), pl.col(id_columns[1])).alias("key"),
+            pl.col("tournament_id").cast(pl.Utf8).alias("session"),
+        )
+        .filter(pl.col("key").is_not_null())
+        .group_by("key")
+        .agg(pl.col("session").n_unique().cast(pl.Int32).alias("n"))
+        .collect()
+    )
+    pair_lookup = dict(pair_counts.iter_rows())
+    frame = frame.with_columns(
+        _pair_key(pl.col(f"Player_ID_{a}"), pl.col(f"Player_ID_{b}"))
+        .replace_strict(pair_lookup, default=0, return_dtype=pl.Int32)
+        .fill_null(0)
+        .alias(f"Pair_Prior_Sessions_{a}{b}")
+        for a, b in (("N", "S"), ("E", "W"))
+    )
     counts = (
         pl.concat(
             [
@@ -236,7 +284,7 @@ def _attach_elo_features(frame: pl.DataFrame, session_id: Any) -> pl.DataFrame:
         .collect()
     )
     if results.is_empty():
-        raise ValueError(f"FFBridge Elo has no pre-session ratings for session {session_id}")
+        raise SessionNotInElo(f"FFBridge Elo has no pre-session ratings for session {session_id}")
 
     players = (
         pl.concat(
@@ -288,6 +336,65 @@ def _attach_elo_features(frame: pl.DataFrame, session_id: Any) -> pl.DataFrame:
             f"FFBridge Elo ids did not match the players in session {session_id}"
         )
     return out
+
+
+def _attach_latest_elo_features(frame: pl.DataFrame, session_id: Any) -> Tuple[pl.DataFrame, str]:
+    """Each player's latest scratch rating before the session day, from any club.
+
+    For a session the Elo build does not cover yet. A player's pre-session
+    rating is the rating after their previous session, so this differs from
+    the real input only by sessions played after the last Elo build.
+    ``Ratings_Age_Days_{seat}`` is the session day minus that rating's day.
+    Returns the frame and the newest rating day used.
+    """
+    results = _lancelot_results()
+    session_day = _session_day(results, session_id, frame)
+    latest = (
+        pl.concat(
+            [
+                results.filter(_ELO_DAY < session_day).select(
+                    _id_token(column).alias("id"),
+                    _ELO_DAY.alias("day"),
+                    pl.col(f"{prefix}_scratch_elo_after").cast(pl.Float32).alias("elo"),
+                )
+                for column, prefix in zip(_LANCELOT_ID_COLUMNS, ("player1", "player2"))
+            ]
+        )
+        .filter((pl.col("id") != "") & pl.col("elo").is_not_null())
+        .group_by("id")
+        .agg(pl.col("elo").sort_by("day").last(), pl.col("day").max())
+        .collect()
+    )
+    ratings = dict(zip(latest["id"].to_list(), latest["elo"].to_list()))
+    days = dict(zip(latest["id"].to_list(), latest["day"].to_list()))
+    session_date = pl.lit(session_day).str.to_date()
+    out = frame.with_columns(
+        *[
+            _id_token(f"Player_ID_{seat}")
+            .replace_strict(ratings, default=None, return_dtype=pl.Float32)
+            .alias(f"Elo_{seat}")
+            for seat in "NESW"
+        ],
+        *[
+            (session_date - _id_token(f"Player_ID_{seat}").replace_strict(days, default=None, return_dtype=pl.Utf8).str.to_date())
+            .dt.total_days()
+            .cast(pl.Int32)
+            .alias(f"Ratings_Age_Days_{seat}")
+            for seat in "NESW"
+        ],
+    )
+    if all(out[f"Elo_{seat}"].null_count() == out.height for seat in "NESW"):
+        raise ValueError(f"FFBridge Elo has no earlier ratings for the players in session {session_id}")
+    out = out.with_columns(
+        ((pl.col("Elo_N") + pl.col("Elo_S")) / 2.0).alias("Elo_NS"),
+        ((pl.col("Elo_E") + pl.col("Elo_W")) / 2.0).alias("Elo_EW"),
+    )
+    tokens = {
+        token
+        for seat in "NESW"
+        for token in out.select(_id_token(f"Player_ID_{seat}")).to_series().to_list()
+    }
+    return out, max(days[token] for token in tokens if token in days)
 
 
 @functools.lru_cache(maxsize=2)
@@ -488,7 +595,19 @@ def _predict_targets(
     elo_columns = {f"Elo_{seat}" for seat in "NESW"} | {"Elo_NS", "Elo_EW"}
     if requires_elo and not elo_columns.issubset(out.columns):
         try:
-            out = _attach_elo_features(out, session_id)
+            out = _attach_elo_features(out, session_id).with_columns(
+                pl.lit(PRE_SESSION_SOURCE).alias("Prediction_Source"),
+                pl.lit(None, dtype=pl.Utf8).alias("Ratings_As_Of"),
+            )
+        except SessionNotInElo:
+            try:
+                out, ratings_as_of = _attach_latest_elo_features(out, session_id)
+            except Exception as exc:
+                return _null_prediction_columns(out), f"Prediction Elo unavailable: {exc}"
+            out = out.with_columns(
+                pl.lit(FALLBACK_SOURCE).alias("Prediction_Source"),
+                pl.lit(ratings_as_of).alias("Ratings_As_Of"),
+            )
         except Exception as exc:
             return _null_prediction_columns(out), f"Prediction Elo unavailable: {exc}"
     if requires_elo:
@@ -717,13 +836,25 @@ def _mean(values: List[Optional[float]]) -> Optional[float]:
 
 
 def _prediction_spread(
-    pred_pct: float, boards: Optional[int], min_prior_sessions: Optional[int]
+    pred_pct: float,
+    boards: Optional[int],
+    min_prior_sessions: Optional[int],
+    pair_prior_sessions: Optional[int] = None,
+    ratings_age_days: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """SD and 95% range of a predicted session percentage, and the low-confidence flag."""
+    """SD and 95% range of a predicted session percentage, and the low-confidence flag.
+
+    Low confidence: either player has fewer than 20 earlier sessions, the pair
+    fewer than 5 together, or fallback ratings are more than 30 days old.
+    """
     out: Dict[str, Any] = {
         "Low_Confidence": None
         if min_prior_sessions is None
-        else int(min_prior_sessions) < LOW_CONFIDENCE_SESSIONS,
+        else (
+            int(min_prior_sessions) < LOW_CONFIDENCE_SESSIONS
+            or (pair_prior_sessions is not None and int(pair_prior_sessions) < LOW_CONFIDENCE_PAIR_SESSIONS)
+            or (ratings_age_days is not None and int(ratings_age_days) > STALE_RATINGS_DAYS)
+        ),
     }
     if not boards:
         return {**out, "Pct_Pred_SD": None, "Pct_Pred_Low": None, "Pct_Pred_High": None}
@@ -776,7 +907,8 @@ def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.Da
                 pred = None
             raw["Global_Scratch_Pct_Pred"] = None if pred is None else pred.get("Global_Scratch_Pct_Pred")
             raw["Boards"] = None if pred is None else pred.get("Boards")
-            raw["Min_Prior_Sessions"] = None if pred is None else pred.get("Min_Prior_Sessions")
+            for name in ("Min_Prior_Sessions", "Pair_Prior_Sessions", "Ratings_Age_Days"):
+                raw[name] = None if pred is None else pred.get(name)
             if pred is not None and pred.get("Pair"):
                 raw["Pair"] = pred["Pair"]
             add_row(raw)
@@ -834,7 +966,15 @@ def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.Da
         actual = raw.get("Global_Scratch_Pct")
         raw["Pct_Diff"] = None if actual is None else round(float(actual) - pred_score, 2)
         raw["Global_Scratch_Pct_Pred"] = round(pred_score, 2)
-        raw.update(_prediction_spread(pred_score, raw.get("Boards"), raw.get("Min_Prior_Sessions")))
+        raw.update(
+            _prediction_spread(
+                pred_score,
+                raw.get("Boards"),
+                raw.get("Min_Prior_Sessions"),
+                raw.get("Pair_Prior_Sessions"),
+                raw.get("Ratings_Age_Days"),
+            )
+        )
 
     # Other clubs were needed to rank against the national field, but the
     # postmortem reports only the home club's pairs.
@@ -952,6 +1092,13 @@ def _predicted_pair_scores(boards: pl.DataFrame) -> pl.DataFrame:
             if f"Prior_Sessions_{seat_a}" in boards.columns
             else pl.lit(None, dtype=pl.Int32)
         )
+        pair_prior_col = f"Pair_Prior_Sessions_{orientation}"
+        pair_prior = pl.col(pair_prior_col) if pair_prior_col in boards.columns else pl.lit(None, dtype=pl.Int32)
+        age = (
+            pl.max_horizontal(pl.col(f"Ratings_Age_Days_{seat_a}"), pl.col(f"Ratings_Age_Days_{seat_b}"))
+            if f"Ratings_Age_Days_{seat_a}" in boards.columns
+            else pl.lit(None, dtype=pl.Int32)
+        )
         pair_key = (
             _pair_key(pl.col(id_a), pl.col(id_b))
             if id_a in boards.columns and id_b in boards.columns
@@ -965,6 +1112,8 @@ def _predicted_pair_scores(boards: pl.DataFrame) -> pl.DataFrame:
             right.alias("_right"),
             pair_key.alias("Pair_Key"),
             prior.cast(pl.Int32).alias("_prior"),
+            pair_prior.cast(pl.Int32).alias("_pair_prior"),
+            age.cast(pl.Int32).alias("_age"),
         )
         piece = (
             work.group_by(["Section", "Table", "Pair_Key"])
@@ -974,6 +1123,8 @@ def _predicted_pair_scores(boards: pl.DataFrame) -> pl.DataFrame:
                 pl.col("_left").drop_nulls().first().alias("_left"),
                 pl.col("_right").drop_nulls().first().alias("_right"),
                 pl.col("_prior").min().alias("Min_Prior_Sessions"),
+                pl.col("_pair_prior").min().alias("Pair_Prior_Sessions"),
+                pl.col("_age").max().alias("Ratings_Age_Days"),
             )
             .with_columns(
                 pl.lit(orientation).alias("Orientation"),
@@ -983,6 +1134,7 @@ def _predicted_pair_scores(boards: pl.DataFrame) -> pl.DataFrame:
             .select(
                 "Pair", "Orientation", "Section", "Table", "Pair_Key",
                 "Global_Scratch_Pct_Pred", "Boards", "Min_Prior_Sessions",
+                "Pair_Prior_Sessions", "Ratings_Age_Days",
             )
         )
         frames.append(piece)
@@ -1091,11 +1243,23 @@ def apply_session_predictions(
         predicted = _attach_prior_sessions(predicted, session_id)
     if "Declarer_Direction" not in predicted.columns and "Declarer" in predicted.columns:
         predicted = predicted.with_columns(pl.col("Declarer").cast(pl.Utf8).alias("Declarer_Direction"))
+    source = ratings_as_of = None
+    if "Prediction_Source" in predicted.columns and predicted.height:
+        source = predicted["Prediction_Source"][0]
+        ratings_as_of = predicted["Ratings_As_Of"][0]
+    fallback_note = (
+        f"Session {session_id} is not in the Elo build yet; predictions use each "
+        f"player's latest rating through {ratings_as_of}."
+        if source == FALLBACK_SOURCE
+        else None
+    )
     ranking, ranking_warning = load_ranking(session_id, Path(cache_dir))
     ranks = ranking_rows(predicted, ranking)
     predicted = _broadcast_ranks(predicted, ranks)
     info = {
-        "warning": " ".join(text for text in (warning, ranking_warning) if text) or None,
+        "warning": " ".join(text for text in (warning, fallback_note, ranking_warning) if text) or None,
+        "prediction_source": source,
+        "ratings_as_of": ratings_as_of,
         "models_dir": str(models_dir()),
         "provenance": {
             **prediction_provenance(models_dir()),
@@ -1178,6 +1342,8 @@ def prediction_payload(
         "rows": frame.to_dicts(),
         "row_count": frame.height,
         "predictions_available": info["predictions_available"],
+        "prediction_source": info["prediction_source"],
+        "ratings_as_of": info["ratings_as_of"],
         "warning": info["warning"],
         "models_dir": info["models_dir"],
         "provenance": info["provenance"],

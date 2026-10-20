@@ -79,6 +79,39 @@ class SpreadAndConfidenceTests(unittest.TestCase):
             out.select(f"Prior_Sessions_{seat}" for seat in "NESW").row(0),
             (2, 1, 2, 0),
         )
+        self.assertEqual(out.select("Pair_Prior_Sessions_NS", "Pair_Prior_Sessions_EW").row(0), (2, 0))
+
+    def test_session_missing_from_elo_takes_its_day_from_the_boards(self):
+        results = pl.DataFrame(
+            {
+                "tournament_id": ["1", "2"],
+                "date": ["2026-10-01", "2026-10-25"],
+                "player1_lancelot_id": ["246273", "246273"],
+                "player2_lancelot_id": ["77119", "77119"],
+            }
+        )
+        boards = pl.DataFrame(
+            {
+                "Date": ["2026-10-20"],
+                "Player_ID_N": ["246273"],
+                "Player_ID_S": ["77119"],
+                "Player_ID_E": ["500"],
+                "Player_ID_W": ["999"],
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "elo.results.parquet"
+            results.write_parquet(path)
+            with patch.object(predictions, "_elo_results_path", return_value=path):
+                out = predictions._attach_prior_sessions(boards, "282863")
+        self.assertEqual(out["Prior_Sessions_N"][0], 1)
+        self.assertEqual(out["Pair_Prior_Sessions_NS"][0], 1)
+
+    def test_new_partnership_or_stale_ratings_are_low_confidence(self):
+        self.assertTrue(predictions._prediction_spread(55.0, 24, 214, 0)["Low_Confidence"])
+        self.assertFalse(predictions._prediction_spread(55.0, 24, 214, 5)["Low_Confidence"])
+        self.assertTrue(predictions._prediction_spread(55.0, 24, 214, 50, 31)["Low_Confidence"])
+        self.assertFalse(predictions._prediction_spread(55.0, 24, 214, 50, 30)["Low_Confidence"])
 
     def test_pair_takes_the_smaller_prior_count(self):
         boards = pl.DataFrame(
@@ -655,6 +688,53 @@ class RankingTests(unittest.TestCase):
             self.assertEqual(attached["Elo_S"][0], 1600.0)
             self.assertIsNone(attached["Elo_E"][0])
             self.assertEqual(attached["Elo_NS"][0], 1700.0)
+
+            with patch.object(predictions, "_elo_results_path", return_value=path):
+                with self.assertRaises(predictions.SessionNotInElo):
+                    predictions._attach_elo_features(boards, "282863")
+
+    def test_fallback_uses_each_players_latest_rating_before_the_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "elo.results.parquet"
+            pl.DataFrame(
+                {
+                    "tournament_id": ["1", "2", "3", "9"],
+                    "date": [
+                        "2026-08-01T00:00:00+02:00",
+                        "2026-10-14T00:00:00+02:00",
+                        "2026-10-16T00:00:00+02:00",
+                        "2026-10-25T00:00:00+02:00",
+                    ],
+                    "player1_lancelot_id": ["136662", "246273", "77119", "246273"],
+                    "player2_lancelot_id": ["1692", "500", "246273", "77119"],
+                    "player1_scratch_elo_after": [1500.0, 1700.0, 1650.0, 9999.0],
+                    "player2_scratch_elo_after": [1450.0, 1400.0, 1820.0, 9999.0],
+                }
+            ).write_parquet(path)
+            boards = pl.DataFrame(
+                {
+                    "Date": ["2026-10-20"],
+                    "Player_ID_N": ["246273"],
+                    "Player_ID_S": ["77119"],
+                    "Player_ID_E": ["136662"],
+                    "Player_ID_W": ["777"],
+                }
+            )
+            with patch.object(predictions, "_elo_results_path", return_value=path):
+                attached, ratings_as_of = predictions._attach_latest_elo_features(boards, "282863")
+
+        row = attached.row(0, named=True)
+        # 246273's latest is session 3 (as player2), not 2 or the later session 9.
+        self.assertEqual(row["Elo_N"], 1820.0)
+        self.assertEqual(row["Elo_S"], 1650.0)
+        self.assertEqual(row["Elo_E"], 1500.0)
+        self.assertIsNone(row["Elo_W"])
+        self.assertEqual(row["Elo_NS"], 1735.0)
+        self.assertIsNone(row["Elo_EW"])
+        self.assertEqual(row["Ratings_Age_Days_N"], 4)
+        self.assertEqual(row["Ratings_Age_Days_E"], 80)
+        self.assertIsNone(row["Ratings_Age_Days_W"])
+        self.assertEqual(ratings_as_of, "2026-10-16")
 
     def test_model_inputs_look_up_history_by_classic_id_before_the_session(self):
         from mlBridge.ffbridge_prediction_features import build_history_tables
