@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import functools
 import json
+import math
 import os
 from collections import Counter
 from datetime import datetime, timezone
@@ -58,8 +59,19 @@ RANKING_COLUMNS = (
     "Handicap_Pct",
     "Handicap_Club_Rank",
     "Handicap_Global_Rank",
+    "Pct_Pred_SD",
+    "Pct_Pred_Low",
+    "Pct_Pred_High",
+    "Low_Confidence",
+    "Min_Prior_Sessions",
     "Boards",
 )
+# ffbridge_prediction_rank_eval.py, 2026-10-20, 214,092 held-out pair sessions:
+# board error SD 0.2717 x widening 1.0455, in percentage points. 1.96 x
+# PCT_PRED_SPREAD / sqrt(boards) covered 95.1% of actual session percentages.
+PCT_PRED_SPREAD = 28.41
+Z95 = 1.959963984540054
+LOW_CONFIDENCE_SESSIONS = 20
 BOARD_COLUMNS = (
     "Board",
     "Pair_NS",
@@ -131,6 +143,54 @@ def _id_token(column: str) -> pl.Expr:
         .fill_null("")
         .str.strip_chars()
         .str.replace(r"\.0$", "")
+    )
+
+
+def _attach_prior_sessions(frame: pl.DataFrame, session_id: Any) -> pl.DataFrame:
+    """``Prior_Sessions_{seat}``: Elo sessions each player had before this session.
+
+    Counted on Lancelot ids, the namespace of the postmortem's seat ids. A seat
+    with no earlier Elo session gets 0.
+    """
+    path = _elo_results_path()
+    if path is None:
+        raise FileNotFoundError("FFBridge Elo results parquet was not found")
+    results = pl.scan_parquet(path)
+    id_columns = ("player1_lancelot_id", "player2_lancelot_id")
+    missing = sorted(set(id_columns) - set(results.collect_schema().names()))
+    if missing:
+        raise ValueError(f"FFBridge Elo results lack {missing}")
+    day = pl.col("date").cast(pl.Utf8).str.slice(0, 10)
+    session_day = (
+        results.filter(pl.col("tournament_id").cast(pl.Utf8) == str(session_id))
+        .select(day.min())
+        .collect()
+        .item()
+    )
+    if session_day is None:
+        raise ValueError(f"FFBridge Elo has no rows for session {session_id}")
+    prior = results.filter(day < session_day)
+    counts = (
+        pl.concat(
+            [
+                prior.select(
+                    _id_token(column).alias("id"),
+                    pl.col("tournament_id").cast(pl.Utf8).alias("session"),
+                )
+                for column in id_columns
+            ]
+        )
+        .filter(pl.col("id") != "")
+        .group_by("id")
+        .agg(pl.col("session").n_unique().cast(pl.Int32).alias("n"))
+        .collect()
+    )
+    lookup = dict(counts.iter_rows())
+    return frame.with_columns(
+        _id_token(f"Player_ID_{seat}")
+        .replace_strict(lookup, default=0, return_dtype=pl.Int32)
+        .alias(f"Prior_Sessions_{seat}")
+        for seat in "NESW"
     )
 
 
@@ -656,6 +716,26 @@ def _mean(values: List[Optional[float]]) -> Optional[float]:
     return sum(clean) / len(clean)
 
 
+def _prediction_spread(
+    pred_pct: float, boards: Optional[int], min_prior_sessions: Optional[int]
+) -> Dict[str, Any]:
+    """SD and 95% range of a predicted session percentage, and the low-confidence flag."""
+    out: Dict[str, Any] = {
+        "Low_Confidence": None
+        if min_prior_sessions is None
+        else int(min_prior_sessions) < LOW_CONFIDENCE_SESSIONS,
+    }
+    if not boards:
+        return {**out, "Pct_Pred_SD": None, "Pct_Pred_Low": None, "Pct_Pred_High": None}
+    sd = PCT_PRED_SPREAD / math.sqrt(int(boards))
+    return {
+        **out,
+        "Pct_Pred_SD": round(sd, 2),
+        "Pct_Pred_Low": round(max(0.0, pred_pct - Z95 * sd), 2),
+        "Pct_Pred_High": round(min(100.0, pred_pct + Z95 * sd), 2),
+    }
+
+
 def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.DataFrame:
     """One row per ranked pair: club ranks, then global ranks, then percentages.
 
@@ -696,6 +776,7 @@ def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.Da
                 pred = None
             raw["Global_Scratch_Pct_Pred"] = None if pred is None else pred.get("Global_Scratch_Pct_Pred")
             raw["Boards"] = None if pred is None else pred.get("Boards")
+            raw["Min_Prior_Sessions"] = None if pred is None else pred.get("Min_Prior_Sessions")
             if pred is not None and pred.get("Pair"):
                 raw["Pair"] = pred["Pair"]
             add_row(raw)
@@ -735,6 +816,7 @@ def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.Da
             raw["Global_Scratch_Rank_Pred"] = None
             raw["Rank_Diff"] = None
             raw["Pct_Diff"] = None
+            raw.update(_prediction_spread(0.0, None, None))
             continue
         pred_score = float(pred_score)
         national_pred_field = []
@@ -752,6 +834,7 @@ def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.Da
         actual = raw.get("Global_Scratch_Pct")
         raw["Pct_Diff"] = None if actual is None else round(float(actual) - pred_score, 2)
         raw["Global_Scratch_Pct_Pred"] = round(pred_score, 2)
+        raw.update(_prediction_spread(pred_score, raw.get("Boards"), raw.get("Min_Prior_Sessions")))
 
     # Other clubs were needed to rank against the national field, but the
     # postmortem reports only the home club's pairs.
@@ -863,6 +946,12 @@ def _predicted_pair_scores(boards: pl.DataFrame) -> pl.DataFrame:
         right = pl.col(name_b) if name_b in boards.columns else pl.lit("")
         id_a, id_b = ("Player_ID_N", "Player_ID_S") if orientation == "NS" else ("Player_ID_E", "Player_ID_W")
         pred = pct_expr if "Pct_NS_Pred" in boards.columns else pl.lit(None, dtype=pl.Float64)
+        seat_a, seat_b = id_a[-1], id_b[-1]
+        prior = (
+            pl.min_horizontal(pl.col(f"Prior_Sessions_{seat_a}"), pl.col(f"Prior_Sessions_{seat_b}"))
+            if f"Prior_Sessions_{seat_a}" in boards.columns
+            else pl.lit(None, dtype=pl.Int32)
+        )
         pair_key = (
             _pair_key(pl.col(id_a), pl.col(id_b))
             if id_a in boards.columns and id_b in boards.columns
@@ -875,6 +964,7 @@ def _predicted_pair_scores(boards: pl.DataFrame) -> pl.DataFrame:
             left.alias("_left"),
             right.alias("_right"),
             pair_key.alias("Pair_Key"),
+            prior.cast(pl.Int32).alias("_prior"),
         )
         piece = (
             work.group_by(["Section", "Table", "Pair_Key"])
@@ -883,13 +973,17 @@ def _predicted_pair_scores(boards: pl.DataFrame) -> pl.DataFrame:
                 pl.len().alias("Boards"),
                 pl.col("_left").drop_nulls().first().alias("_left"),
                 pl.col("_right").drop_nulls().first().alias("_right"),
+                pl.col("_prior").min().alias("Min_Prior_Sessions"),
             )
             .with_columns(
                 pl.lit(orientation).alias("Orientation"),
                 _pair_label(pl.col("Section"), pl.col("Table"), pl.col("_left"), pl.col("_right")).alias("Pair"),
                 (pl.col("_pred") * 100.0).alias("Global_Scratch_Pct_Pred"),
             )
-            .select("Pair", "Orientation", "Section", "Table", "Pair_Key", "Global_Scratch_Pct_Pred", "Boards")
+            .select(
+                "Pair", "Orientation", "Section", "Table", "Pair_Key",
+                "Global_Scratch_Pct_Pred", "Boards", "Min_Prior_Sessions",
+            )
         )
         frames.append(piece)
     if not frames:
@@ -993,6 +1087,8 @@ def apply_session_predictions(
 ) -> Tuple[pl.DataFrame, Dict[str, Any]]:
     """Attach board predictions and broadcast pair ranks onto every board row."""
     predicted, warning = _predict_targets(boards, session_id)
+    if warning is None:
+        predicted = _attach_prior_sessions(predicted, session_id)
     if "Declarer_Direction" not in predicted.columns and "Declarer" in predicted.columns:
         predicted = predicted.with_columns(pl.col("Declarer").cast(pl.Utf8).alias("Declarer_Direction"))
     ranking, ranking_warning = load_ranking(session_id, Path(cache_dir))

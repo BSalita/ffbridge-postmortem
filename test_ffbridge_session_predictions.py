@@ -39,6 +39,65 @@ class ProvenanceTests(unittest.TestCase):
         self.assertIsNone(provenance["elo_results_built_at"])
 
 
+class SpreadAndConfidenceTests(unittest.TestCase):
+    def test_spread_shrinks_with_boards_and_stays_inside_0_100(self):
+        spread = predictions._prediction_spread(58.04, 24, 281)
+        self.assertEqual(spread["Pct_Pred_SD"], 5.8)
+        self.assertEqual(spread["Pct_Pred_Low"], 46.67)
+        self.assertEqual(spread["Pct_Pred_High"], 69.41)
+        self.assertFalse(spread["Low_Confidence"])
+        edge = predictions._prediction_spread(99.0, 8, 19)
+        self.assertEqual(edge["Pct_Pred_High"], 100.0)
+        self.assertTrue(edge["Low_Confidence"])
+        empty = predictions._prediction_spread(0.0, None, None)
+        self.assertIsNone(empty["Pct_Pred_SD"])
+        self.assertIsNone(empty["Low_Confidence"])
+
+    def test_prior_sessions_count_earlier_elo_sessions_per_lancelot_id(self):
+        results = pl.DataFrame(
+            {
+                "tournament_id": ["1", "2", "2", "3", "9"],
+                "date": ["2026-10-01", "2026-10-05", "2026-10-05", "2026-10-16", "2026-10-20"],
+                "player1_lancelot_id": ["246273", "246273", "77119", "246273", "246273"],
+                "player2_lancelot_id": ["77119", "500", "246273", "77119", "77119"],
+            }
+        )
+        boards = pl.DataFrame(
+            {
+                "Player_ID_N": ["246273"],
+                "Player_ID_S": ["77119"],
+                "Player_ID_E": ["500"],
+                "Player_ID_W": ["999"],
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "elo.results.parquet"
+            results.write_parquet(path)
+            with patch.object(predictions, "_elo_results_path", return_value=path):
+                out = predictions._attach_prior_sessions(boards, "3")
+        self.assertEqual(
+            out.select(f"Prior_Sessions_{seat}" for seat in "NESW").row(0),
+            (2, 1, 2, 0),
+        )
+
+    def test_pair_takes_the_smaller_prior_count(self):
+        boards = pl.DataFrame(
+            {
+                "Pair_Number_NS": [1, 1],
+                "Player_ID_N": ["246273"] * 2,
+                "Player_ID_S": ["77119"] * 2,
+                "Player_Name_N": ["Robert SALITA"] * 2,
+                "Player_Name_S": ["Ramendra DAS"] * 2,
+                "Pct_NS_Pred": [0.6, 0.5],
+                "Prior_Sessions_N": [281, 281],
+                "Prior_Sessions_S": [12, 12],
+            }
+        )
+        pair = predictions._predicted_pair_scores(boards).row(0, named=True)
+        self.assertEqual(pair["Min_Prior_Sessions"], 12)
+        self.assertEqual(pair["Boards"], 2)
+
+
 class RankingTests(unittest.TestCase):
     def test_club_ranks_then_global_ranks_and_actual_minus_pred_diffs(self):
         ranking = pl.DataFrame(
