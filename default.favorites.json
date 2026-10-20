@@ -1464,7 +1464,7 @@
 								"Declarer Direction Predictions Statistics Per Predicted Declarer": "@Declarer_Direction_Predictions_Statistics_By_Predicted_Declarer"
 							}
 						],
-						"sql": "SELECT Board, STRING_AGG(DISTINCT Declarer_Direction, ', ' ORDER BY Declarer_Direction) AS Declarer_Direction, Declarer_Direction_Pred, COUNT() AS Board_Plays, SUM(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN 1 ELSE 0 END) AS Correct_Preds, Correct_Preds/Board_Plays AS Correct_Direction_Pct, SUM(CASE WHEN (Declarer_Direction IN ('N','S') AND Declarer_Direction_Pred IN ('N', 'S')) OR (Declarer_Direction IN ('E','W') AND Declarer_Direction_Pred IN ('E', 'W')) THEN 1 ELSE 0 END) AS Correct_Pair_Preds, Correct_Pair_Preds/Board_Plays AS Correct_Pair_Pct FROM self GROUP BY Board, Declarer_Direction_Pred ORDER BY Board"
+						"sql": "SELECT Board, STRING_AGG(DISTINCT Declarer_Direction, ', ' ORDER BY Declarer_Direction) AS Declarer_Direction, Declarer_Direction_Pred, COUNT() AS Board_Plays, SUM(CASE WHEN Declarer_Direction = Declarer_Direction_Pred THEN 1 ELSE 0 END) AS Correct_Preds, CASE WHEN Declarer_Direction_Pred IN ('N','E','S','W') THEN Correct_Preds/Board_Plays END AS Correct_Direction_Pct, SUM(CASE WHEN (Declarer_Direction IN ('N','S') AND Declarer_Direction_Pred IN ('N', 'S')) OR (Declarer_Direction IN ('E','W') AND Declarer_Direction_Pred IN ('E', 'W')) THEN 1 ELSE 0 END) AS Correct_Pair_Preds, CASE WHEN Declarer_Direction_Pred IN ('N','E','S','W') THEN Correct_Pair_Preds/Board_Plays END AS Correct_Pair_Pct FROM self GROUP BY Board, Declarer_Direction_Pred ORDER BY Board"
 					}
 				],
 				"i18n": {
