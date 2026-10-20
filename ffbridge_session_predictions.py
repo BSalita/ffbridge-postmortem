@@ -1097,7 +1097,10 @@ def apply_session_predictions(
     info = {
         "warning": " ".join(text for text in (warning, ranking_warning) if text) or None,
         "models_dir": str(models_dir()),
-        "provenance": prediction_provenance(models_dir()),
+        "provenance": {
+            **prediction_provenance(models_dir()),
+            "predicted_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        },
         "predictions_available": warning is None and "Pct_NS_Pred" in predicted.columns and predicted["Pct_NS_Pred"].null_count() < predicted.height,
         "results_published": ranking is not None,
         "ranking_pairs": ranks.height,

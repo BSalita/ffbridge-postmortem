@@ -217,6 +217,7 @@ class RankingTests(unittest.TestCase):
                 limit=20,
             )
         self.assertFalse(payload["predictions_available"])
+        self.assertRegex(payload["provenance"]["predicted_at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\+00:00$")
         self.assertGreaterEqual(payload["row_count"], 1)
         self.assertEqual(payload["rows"][0]["Global_Scratch_Rank"], 3)
 
