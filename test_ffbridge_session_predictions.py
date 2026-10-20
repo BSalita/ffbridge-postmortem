@@ -11,6 +11,34 @@ import polars as pl
 import ffbridge_session_predictions as predictions
 
 
+class ProvenanceTests(unittest.TestCase):
+    def test_reports_newest_checkpoint_and_history_build_times(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            stamps = {
+                "ffbridge_club_predicted_declarer_direction_torch_model.pth": 1_760_900_000,
+                "ffbridge_club_predicted_contract_torch_model.pth": 1_760_920_000,
+                predictions.PLAYER_HISTORY_NAME: 1_760_890_000,
+            }
+            for name, stamp in stamps.items():
+                (directory / name).write_bytes(b"x")
+                os.utime(directory / name, (stamp, stamp))
+            with patch.object(predictions, "_elo_results_path", return_value=None):
+                provenance = predictions.prediction_provenance(directory)
+        self.assertEqual(provenance["model_version"], "2025-10-20T00:26:40+00:00")
+        self.assertEqual(
+            provenance["models_built_at"],
+            {
+                "Declarer_Direction": "2025-10-19T18:53:20+00:00",
+                "Contract": "2025-10-20T00:26:40+00:00",
+                "Pct_NS": None,
+            },
+        )
+        self.assertEqual(provenance["player_history_built_at"], "2025-10-19T16:06:40+00:00")
+        self.assertIsNone(provenance["pair_history_built_at"])
+        self.assertIsNone(provenance["elo_results_built_at"])
+
+
 class RankingTests(unittest.TestCase):
     def test_club_ranks_then_global_ranks_and_actual_minus_pred_diffs(self):
         ranking = pl.DataFrame(

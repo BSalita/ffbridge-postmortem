@@ -26,6 +26,7 @@ import functools
 import json
 import os
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -960,6 +961,30 @@ def board_prediction_rows(boards: pl.DataFrame) -> pl.DataFrame:
     return selected.select(keep)
 
 
+def _file_built_at(path: Optional[Path]) -> Optional[str]:
+    if path is None or not path.is_file():
+        return None
+    return datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(timespec="seconds")
+
+
+def prediction_provenance(directory: Path) -> Dict[str, Any]:
+    """UTC build times of every artifact the predictions depend on.
+
+    The checkpoints and history tables are rebuilt by the nightly training
+    run, so the same session can be predicted differently from one day to
+    the next. ``model_version`` is the newest checkpoint time.
+    """
+    models = {target: _file_built_at(directory / f"{_model_name(target)}.pth") for target in TARGETS}
+    stamps = [stamp for stamp in models.values() if stamp]
+    return {
+        "model_version": max(stamps) if stamps else None,
+        "models_built_at": models,
+        "player_history_built_at": _file_built_at(directory / PLAYER_HISTORY_NAME),
+        "pair_history_built_at": _file_built_at(directory / PAIR_HISTORY_NAME),
+        "elo_results_built_at": _file_built_at(_elo_results_path()),
+    }
+
+
 def apply_session_predictions(
     boards: pl.DataFrame,
     session_id: Any,
@@ -975,6 +1000,7 @@ def apply_session_predictions(
     info = {
         "warning": " ".join(text for text in (warning, ranking_warning) if text) or None,
         "models_dir": str(models_dir()),
+        "provenance": prediction_provenance(models_dir()),
         "predictions_available": warning is None and "Pct_NS_Pred" in predicted.columns and predicted["Pct_NS_Pred"].null_count() < predicted.height,
         "results_published": ranking is not None,
         "ranking_pairs": ranks.height,
@@ -1054,4 +1080,5 @@ def prediction_payload(
         "predictions_available": info["predictions_available"],
         "warning": info["warning"],
         "models_dir": info["models_dir"],
+        "provenance": info["provenance"],
     }
