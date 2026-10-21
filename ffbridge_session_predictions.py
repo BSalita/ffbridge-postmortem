@@ -89,6 +89,7 @@ BOARD_COLUMNS = (
     "Contract",
     "Contract_Pred",
     "Contract_Pred_Tables",
+    "Pred_Not_Played_In_Room",
     "Declarer_Direction",
     "Declarer_Direction_Pred",
     "Declarer_Direction_Pred_Tables",
@@ -616,7 +617,10 @@ def _predict_targets(
     if requires_elo:
         out = _add_elo_missing_flags(out)
     try:
-        from mlBridge.ffbridge_prediction_features import joint_contract_and_declarer
+        from mlBridge.ffbridge_prediction_features import (
+            FFBRIDGE_DECLARER_WEIGHT,
+            joint_contract_and_declarer,
+        )
         from mlBridge.mlBridgeAiLib import predict_model
     except Exception as exc:
         return _null_prediction_columns(out), f"Prediction library unavailable: {exc}"
@@ -670,7 +674,9 @@ def _predict_targets(
         out = out.hstack(predicted.select(pred_column))
     if "Contract" in probabilities and "Declarer_Direction" in probabilities:
         contracts, directions = joint_contract_and_declarer(
-            *probabilities["Contract"], *probabilities["Declarer_Direction"]
+            *probabilities["Contract"],
+            *probabilities["Declarer_Direction"],
+            declarer_weight=FFBRIDGE_DECLARER_WEIGHT,
         )
         out = out.with_columns(
             pl.Series("Contract_Pred", contracts, dtype=pl.Utf8),
@@ -1223,11 +1229,22 @@ def prediction_provenance(directory: Path) -> Dict[str, Any]:
     The checkpoints and history tables are rebuilt by the nightly training
     run, so the same session can be predicted differently from one day to
     the next. ``model_version`` is the newest checkpoint time.
+    ``contract_selection`` and ``declarer_weight`` are the inference rule
+    that turns the two models into one contract. They are not in the
+    checkpoint, so a new rule can change predictions while
+    ``model_version`` stays the same.
     """
+    from mlBridge.ffbridge_prediction_features import (
+        CONTRACT_SELECTION,
+        FFBRIDGE_DECLARER_WEIGHT,
+    )
+
     models = {target: _file_built_at(directory / f"{_model_name(target)}.pth") for target in TARGETS}
     stamps = [stamp for stamp in models.values() if stamp]
     return {
         "model_version": max(stamps) if stamps else None,
+        "contract_selection": CONTRACT_SELECTION,
+        "declarer_weight": FFBRIDGE_DECLARER_WEIGHT,
         "models_built_at": models,
         "player_history_built_at": _file_built_at(directory / PLAYER_HISTORY_NAME),
         "pair_history_built_at": _file_built_at(directory / PAIR_HISTORY_NAME),

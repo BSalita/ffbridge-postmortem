@@ -1522,7 +1522,7 @@
 			},
 			"Contract_Predictions_Statistics_By_Boards_We_Played": {
 				"title": "Contract Predictions Statistics for Boards We Played",
-				"help": "**Statistics on contract predictions for boards our partnership played. Experimental. Predictions made before game starts.**",
+				"help": "**Statistics on contract predictions for boards our partnership played. Board_Tables is the tables that played the board; Contract_Pred_Tables and Declarer_Direction_Pred_Tables are how many of them played the predicted contract and declared from the predicted seat, so 8 of 13 means the room mostly agreed with the model. Pred_Not_Played_In_Room is true when no table played the predicted contract: the model picks from the pairs' strength before it sees what this room bid, and that pick can differ by table. Experimental. Predictions made before game starts.**",
 				"comment": "Need to implement par score, actual contract dd score, predicted contract dd score. Maybe SD scores too.",
 				"prompts": [
 					{
@@ -1535,7 +1535,7 @@
 								"Contract Predictions Statistics Per Grouped Contract": "@Contract_Predictions_Statistics_By_Board_By_Contract"
 							}
 						],
-						"sql": "SELECT Board, Board_Tables, Contract, Contract_Pred, Contract_Pred_Tables FROM self WHERE Boards_We_Played = True ORDER BY Board"
+						"sql": "SELECT Board, Board_Tables, Contract, Contract_Pred, Contract_Pred_Tables, Declarer_Direction_Pred_Tables, Pred_Not_Played_In_Room FROM self WHERE Boards_We_Played = True ORDER BY Board"
 					}
 				],
 				"i18n": {
@@ -1547,7 +1547,7 @@
 			},
 			"Contract_Predictions_Statistics_By_Board": {
 				"title": "Contract Predictions Statistics Per Table",
-				"help": "**Statistics on contract predictions per board played. Experimental. Predictions made before game starts.**",
+				"help": "**Statistics on contract predictions per board played. Board_Tables is the tables that played the board; Contract_Pred_Tables and Declarer_Direction_Pred_Tables are how many of them played the predicted contract and declared from the predicted seat, so 8 of 13 means the room mostly agreed with the model. Pred_Not_Played_In_Room is true when no table played the predicted contract: the model picks from the pairs' strength before it sees what this room bid, and that pick can differ by table. Experimental. Predictions made before game starts.**",
 				"prompts": [
 					{
 						"prompt": "",
@@ -1559,7 +1559,7 @@
 								"Boards Your Partnership Played": "@Boards_We_Played"
 							}
 						],
-						"sql": "SELECT Board, CONCAT(Section_Name, Pair_Number_NS, ' - ', Player_Name_N, ' vs ', Section_Name, Pair_Number_EW, ' - ', Player_Name_E) AS NS_vs_EW, Board_Tables, Contract, Contract_Pred, Contract_Pred_Tables FROM self ORDER BY Board, Section_Name, Pair_Number_NS"
+						"sql": "SELECT Board, CONCAT(Section_Name, Pair_Number_NS, ' - ', Player_Name_N, ' vs ', Section_Name, Pair_Number_EW, ' - ', Player_Name_E) AS NS_vs_EW, Board_Tables, Contract, Contract_Pred, Contract_Pred_Tables, Declarer_Direction_Pred_Tables, Pred_Not_Played_In_Room FROM self ORDER BY Board, Section_Name, Pair_Number_NS"
 					}
 				],
 				"i18n": {

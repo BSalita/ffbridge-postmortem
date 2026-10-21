@@ -37,6 +37,8 @@ class ProvenanceTests(unittest.TestCase):
         self.assertEqual(provenance["player_history_built_at"], "2025-10-19T16:06:40+00:00")
         self.assertIsNone(provenance["pair_history_built_at"])
         self.assertIsNone(provenance["elo_results_built_at"])
+        self.assertEqual(provenance["contract_selection"], "bucket_then_contract")
+        self.assertEqual(provenance["declarer_weight"], 1.0)
 
 
 class SpreadAndConfidenceTests(unittest.TestCase):
@@ -227,6 +229,10 @@ class RankingTests(unittest.TestCase):
         columns = list(predictions.board_prediction_rows(predicted).columns)
         self.assertEqual(columns[:2], ["Board", "Board_Tables"])
         self.assertEqual(columns.index("Contract_Pred") + 1, columns.index("Contract_Pred_Tables"))
+        self.assertEqual(
+            columns.index("Contract_Pred_Tables") + 1, columns.index("Pred_Not_Played_In_Room")
+        )
+        self.assertEqual(predicted["Pred_Not_Played_In_Room"].null_count(), 3)
         self.assertEqual(
             columns.index("Declarer_Direction_Pred") + 1, columns.index("Declarer_Direction_Pred_Tables")
         )
