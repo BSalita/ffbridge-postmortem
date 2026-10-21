@@ -81,6 +81,7 @@
 		},
 		"AI_Predictions": {
 			"title": "AI Predictions",
+			"chip": "Predictions",
 			"help": "Show AI Predictions",
 			"comment": "@ in prompt means prompt is a key into ['SelectBoxes']['Vetted_Prompts'] list. Optional prompt key Output is Grid, Deal, or Info; missing Output stays Grid.",
 			"prompts": [
@@ -98,6 +99,7 @@
 			"i18n": {
 				"fr": {
 					"title": "Prédictions IA",
+					"chip": "Prédictions",
 					"help": "Afficher les prédictions de l'IA"
 				}
 			}
