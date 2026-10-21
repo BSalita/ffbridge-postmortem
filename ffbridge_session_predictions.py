@@ -819,10 +819,20 @@ def _pair_key(left: pl.Expr, right: pl.Expr) -> pl.Expr:
     return pl.when((first == "") | (second == "")).then(pl.lit(None)).otherwise(combined)
 
 
-def _pair_label(section: pl.Expr, table: pl.Expr, left: pl.Expr, right: pl.Expr) -> pl.Expr:
+def _pair_label(
+    section: pl.Expr,
+    table: pl.Expr,
+    left: pl.Expr,
+    right: pl.Expr,
+    direction: pl.Expr | None = None,
+) -> pl.Expr:
+    """``A1-NS - North - South``. Direction keeps NS and EW pair 1 distinct."""
+    ident = pl.coalesce([section.fill_null(""), pl.lit("")]) + table.cast(pl.Utf8)
+    if direction is not None:
+        way = direction.cast(pl.Utf8).fill_null("").str.replace("EO", "EW")
+        ident = pl.when(way == "").then(ident).otherwise(ident + pl.lit("-") + way)
     return (
-        pl.coalesce([section.fill_null(""), pl.lit("")])
-        + table.cast(pl.Utf8)
+        ident
         + pl.lit(" - ")
         + left.fill_null("")
         + pl.lit(" - ")
@@ -1060,7 +1070,7 @@ def _official_pairs(ranking: Optional[pl.DataFrame]) -> pl.DataFrame:
         scratch, scratch_rank = score, rank
         handicap, handicap_rank = pl.lit(None, dtype=pl.Float64), pl.lit(None).cast(pl.Int64)
     return ranking.select(
-        _pair_label(section, table, left, right).alias("Pair"),
+        _pair_label(section, table, left, right, pl.col(orientation_col)).alias("Pair"),
         pl.col(orientation_col).cast(pl.Utf8).alias("Orientation"),
         scratch.alias("Global_Scratch_Pct"),
         scratch_rank.alias("Global_Scratch_Rank"),
@@ -1137,7 +1147,9 @@ def _predicted_pair_scores(boards: pl.DataFrame) -> pl.DataFrame:
             )
             .with_columns(
                 pl.lit(orientation).alias("Orientation"),
-                _pair_label(pl.col("Section"), pl.col("Table"), pl.col("_left"), pl.col("_right")).alias("Pair"),
+                _pair_label(
+                    pl.col("Section"), pl.col("Table"), pl.col("_left"), pl.col("_right"), pl.lit(orientation)
+                ).alias("Pair"),
                 (pl.col("_pred") * 100.0).alias("Global_Scratch_Pct_Pred"),
             )
             .select(
@@ -1203,12 +1215,14 @@ def board_prediction_rows(boards: pl.DataFrame) -> pl.DataFrame:
         pl.col("Pair_Number_NS").cast(pl.Utf8) if "Pair_Number_NS" in frame.columns else pl.lit(""),
         pl.col("Player_Name_N") if "Player_Name_N" in frame.columns else pl.lit(""),
         pl.col("Player_Name_S") if "Player_Name_S" in frame.columns else pl.lit(""),
+        pl.lit("NS"),
     )
     pair_ew = _pair_label(
         section.cast(pl.Utf8),
         pl.col("Pair_Number_EW").cast(pl.Utf8) if "Pair_Number_EW" in frame.columns else pl.lit(""),
         pl.col("Player_Name_E") if "Player_Name_E" in frame.columns else pl.lit(""),
         pl.col("Player_Name_W") if "Player_Name_W" in frame.columns else pl.lit(""),
+        pl.lit("EW"),
     )
     selected = frame.with_columns(pair_ns.alias("Pair_NS"), pair_ew.alias("Pair_EW"))
     keep = [name for name in BOARD_COLUMNS if name in selected.columns]

@@ -201,6 +201,8 @@ class RankingTests(unittest.TestCase):
             }
         )
         rows = predictions.board_prediction_rows(boards)
+        self.assertEqual(rows["Pair_NS"][0], "A1-NS - Ann - Sue")
+        self.assertEqual(rows["Pair_EW"][0], "A1-EW - Ed - Wes")
         self.assertEqual(rows["Contract_Pred"][0], "4SN")
         self.assertEqual(rows["Declarer_Direction"][0], "N")
         self.assertAlmostEqual(rows["Pct_Diff"][0], 0.1)
@@ -432,7 +434,9 @@ class RankingTests(unittest.TestCase):
         ranked = predictions.ranking_rows(boards, ranking)
         self.assertEqual(ranked["Club"].to_list(), ["home", "home"])
         home = ranked.filter(pl.col("Orientation") == "EW").row(0, named=True)
-        self.assertEqual(home["Pair"], "A4 - Cat E - Fran W")
+        north = ranked.filter(pl.col("Orientation") == "NS").row(0, named=True)
+        self.assertEqual(home["Pair"], "A4-EW - Cat E - Fran W")
+        self.assertEqual(north["Pair"], "A4-NS - Nor N - Sou S")
         self.assertAlmostEqual(home["Global_Scratch_Pct_Pred"], 48.0)
         # 48 sits behind the away pair's published 53.24 in the national field.
         self.assertEqual(home["Global_Scratch_Rank_Pred"], 3)
