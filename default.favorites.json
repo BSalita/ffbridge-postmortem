@@ -1535,7 +1535,7 @@
 								"Contract Predictions Statistics Per Grouped Contract": "@Contract_Predictions_Statistics_By_Board_By_Contract"
 							}
 						],
-						"sql": "SELECT Board, Contract, Contract_Pred FROM self WHERE Boards_We_Played = True ORDER BY Board"
+						"sql": "SELECT Board, Board_Tables, Contract, Contract_Pred, Contract_Pred_Tables FROM self WHERE Boards_We_Played = True ORDER BY Board"
 					}
 				],
 				"i18n": {
@@ -1559,7 +1559,7 @@
 								"Boards Your Partnership Played": "@Boards_We_Played"
 							}
 						],
-						"sql": "SELECT Board, CONCAT(Section_Name, Pair_Number_NS, ' - ', Player_Name_N, ' vs ', Section_Name, Pair_Number_EW, ' - ', Player_Name_E) AS NS_vs_EW, Contract, Contract_Pred FROM self ORDER BY Board, Section_Name, Pair_Number_NS"
+						"sql": "SELECT Board, CONCAT(Section_Name, Pair_Number_NS, ' - ', Player_Name_N, ' vs ', Section_Name, Pair_Number_EW, ' - ', Player_Name_E) AS NS_vs_EW, Board_Tables, Contract, Contract_Pred, Contract_Pred_Tables FROM self ORDER BY Board, Section_Name, Pair_Number_NS"
 					}
 				],
 				"i18n": {
