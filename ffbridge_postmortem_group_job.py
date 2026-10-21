@@ -322,7 +322,7 @@ def start_run_group(
 def _execute_statement(con: Any, sql: str, meta: Dict[str, Any], limit: int) -> Dict[str, Any]:
     prepared = svc.prepare_postmortem_sql(sql, meta)
     try:
-        result = con.execute(prepared).pl()
+        result = svc.polars_result(con.execute(prepared))
     except Exception as exc:
         return {
             "error": str(exc),

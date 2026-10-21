@@ -196,5 +196,40 @@ class OpeningLeadTests(unittest.TestCase):
         self.assertIsNone(attached["Lead"][0])
 
 
+class DuckDbResultTests(unittest.TestCase):
+    def test_reads_arrow_when_the_connection_has_no_polars_method(self) -> None:
+        class _Result:
+            def fetch_arrow_table(self):
+                return pl.DataFrame({"Board": [7], "Contract": ["4S"]}).to_arrow()
+
+        frame = svc.polars_result(_Result())
+        self.assertEqual(frame.to_dicts(), [{"Board": 7, "Contract": "4S"}])
+
+    def test_run_sql_reads_a_connection_without_pl(self) -> None:
+        class _Result:
+            def fetch_arrow_table(self):
+                return pl.DataFrame({"Board": [1]}).to_arrow()
+
+        class _Connection:
+            def register(self, name, frame):
+                return None
+
+            def execute(self, sql):
+                return _Result()
+
+            def close(self):
+                return None
+
+        with patch.object(svc.duckdb, "connect", return_value=_Connection()):
+            payload = svc.run_sql(
+                pl.DataFrame({"Board": [1]}),
+                "SELECT Board FROM self",
+                {},
+                limit=10,
+            )
+        self.assertEqual(payload["rows"], [{"Board": 1}])
+        self.assertEqual(payload["row_count"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

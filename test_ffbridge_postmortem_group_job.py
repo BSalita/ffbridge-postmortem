@@ -250,5 +250,25 @@ class GroupJobTests(unittest.TestCase):
         self.assertEqual(args[2], "Summarize")
 
 
+class DuckDbStatementTests(unittest.TestCase):
+    def test_statement_reads_arrow_when_connection_has_no_pl(self) -> None:
+        class _Result:
+            def fetch_arrow_table(self):
+                return pl.DataFrame({"Board": [1], "Contract": ["3NT"]}).to_arrow()
+
+        class _Connection:
+            def execute(self, sql):
+                return _Result()
+
+        payload = group_job._execute_statement(
+            _Connection(),
+            "SELECT Board, Contract FROM self",
+            _meta(),
+            10,
+        )
+        self.assertNotIn("error", payload)
+        self.assertEqual(payload["rows"], [{"Board": 1, "Contract": "3NT"}])
+
+
 if __name__ == "__main__":
     unittest.main()

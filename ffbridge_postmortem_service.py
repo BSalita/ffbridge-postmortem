@@ -586,6 +586,28 @@ def prepare_postmortem_sql(sql: str, meta: Dict[str, Any]) -> str:
     return prepared
 
 
+def polars_result(result: Any) -> pl.DataFrame:
+    """Read a DuckDB result. Older connections have Arrow but no ``.pl()``."""
+    to_polars = getattr(result, "pl", None)
+    if callable(to_polars):
+        frame = to_polars()
+        if isinstance(frame, pl.DataFrame):
+            return frame
+    for name in ("fetch_arrow_table", "to_arrow_table", "arrow"):
+        method = getattr(result, name, None)
+        if callable(method):
+            return pl.from_arrow(method())
+    fetchall = getattr(result, "fetchall", None)
+    description = getattr(result, "description", None)
+    if callable(fetchall) and description:
+        rows = fetchall()
+        columns = [item[0] for item in description]
+        return pl.DataFrame(
+            {name: [row[index] for row in rows] for index, name in enumerate(columns)}
+        )
+    raise AttributeError(f"{type(result).__name__} has no Polars or Arrow result")
+
+
 def sql_result_payload(result: pl.DataFrame, sql: str, limit: int) -> Dict[str, Any]:
     """JSON rows for one query. row_count is the number of rows returned."""
     truncated = result.height > limit
@@ -616,7 +638,7 @@ def run_sql(df: pl.DataFrame, sql: str, meta: Dict[str, Any], limit: Optional[in
     )
     try:
         con.register(CON_REGISTER_NAME, df)
-        result = con.execute(sql).pl()
+        result = polars_result(con.execute(sql))
     finally:
         con.close()
     payload = sql_result_payload(result, sql, limit)
