@@ -1376,7 +1376,7 @@
 			},
 			"Board_Results_Predictions": {
 				"title": "Board Results Predictions",
-				"help": "**Every table on every board: contract, predicted contract, declarer, predicted declarer, North-South percentage, predicted percentage, and Pct_Diff (actual minus predicted).**",
+				"help": "**Every table on every board: contract, predicted contract, declarer, predicted declarer, North-South percentage, predicted percentage, and Pct_Diff (actual minus predicted). Board_Tables is the tables that played the board; Contract_Pred_Tables and Declarer_Direction_Pred_Tables are how many of them played the predicted contract and declared from the predicted seat, so 8 of 13 means the room mostly agreed with the model.**",
 				"prompts": [
 					{
 						"prompt": "",
@@ -1388,20 +1388,20 @@
 								"Contract Predictions Statistics Per Table": "@Contract_Predictions_Statistics_By_Board"
 							}
 						],
-						"sql": "SELECT Board, CONCAT(Section_Name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_NS, CONCAT(Section_Name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_EW, Contract, Contract_Pred, Declarer_Direction, Declarer_Direction_Pred, Pct_NS, Pct_NS_Pred, Pct_Diff FROM self ORDER BY Board, Pair_NS"
+						"sql": "SELECT Board, CONCAT(Section_Name, Pair_Number_NS, ' - ', Player_Name_N, ' - ', Player_Name_S) AS Pair_NS, CONCAT(Section_Name, Pair_Number_EW, ' - ', Player_Name_E, ' - ', Player_Name_W) AS Pair_EW, Board_Tables, Contract, Contract_Pred, Contract_Pred_Tables, Declarer_Direction, Declarer_Direction_Pred, Declarer_Direction_Pred_Tables, Pct_NS, Pct_NS_Pred, Pct_Diff FROM self ORDER BY Board, Pair_NS"
 					}
 				],
 				"i18n": {
 					"fr": {
 						"title": "Prédictions des résultats de donne",
-						"help": "**Chaque table, chaque donne : contrat, contrat prédit, déclarant, déclarant prédit, pourcentage Nord-Sud, pourcentage prédit, et Pct_Diff (réel moins prédit).**"
+						"help": "**Chaque table, chaque donne : contrat, contrat prédit, déclarant, déclarant prédit, pourcentage Nord-Sud, pourcentage prédit, et Pct_Diff (réel moins prédit). Board_Tables est le nombre de tables qui ont joué la donne ; Contract_Pred_Tables et Declarer_Direction_Pred_Tables indiquent combien d'entre elles ont joué le contrat prédit et déclaré depuis la position prédite, donc 8 sur 13 signifie que la salle était surtout d'accord avec le modèle.**"
 					}
 				}
 			},
 			"Board_Results_Predictions_Boards_We_Played": {
 				"title": "Board Results Predictions for Boards We Played",
 				"row_click": "Show every score on board {Board}.",
-				"help": "**Predicted board results percentages. Only boards our partnership played. Predictions made before game starts.**",
+				"help": "**Predicted board results percentages. Only boards our partnership played. Board_Tables is the tables that played the board; Contract_Pred_Tables and Declarer_Direction_Pred_Tables are how many of them played the predicted contract and declared from the predicted seat. Predictions made before game starts.**",
 				"prompts": [
 					{
 						"prompt": "",
@@ -1416,13 +1416,13 @@
 								"Every score": "Show every score on board {Board}."
 							}
 						],
-						"sql": "SELECT Board, Contract, Contract_Pred, Declarer_Direction, Declarer_Direction_Pred, Pct_NS, Pct_NS_Pred, Pct_Diff FROM self WHERE Boards_We_Played = TRUE ORDER BY Board"
+						"sql": "SELECT Board, Board_Tables, Contract, Contract_Pred, Contract_Pred_Tables, Declarer_Direction, Declarer_Direction_Pred, Declarer_Direction_Pred_Tables, Pct_NS, Pct_NS_Pred, Pct_Diff FROM self WHERE Boards_We_Played = TRUE ORDER BY Board"
 					}
 				],
 				"i18n": {
 					"fr": {
 						"title": "Prédictions des résultats des donnes que nous avons jouées",
-						"help": "**Pourcentages prédits des résultats de donne. Seulement les donnes jouées par notre paire. Prédictions faites avant le début de la partie.**"
+						"help": "**Pourcentages prédits des résultats de donne. Seulement les donnes jouées par notre paire. Board_Tables est le nombre de tables qui ont joué la donne ; Contract_Pred_Tables et Declarer_Direction_Pred_Tables indiquent combien d'entre elles ont joué le contrat prédit et déclaré depuis la position prédite. Prédictions faites avant le début de la partie.**"
 					}
 				}
 			},

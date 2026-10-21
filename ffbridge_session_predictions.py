@@ -83,16 +83,20 @@ PRE_SESSION_SOURCE = "pre_session_elo"
 FALLBACK_SOURCE = "fallback_latest_elo"
 BOARD_COLUMNS = (
     "Board",
+    "Board_Tables",
     "Pair_NS",
     "Pair_EW",
     "Contract",
     "Contract_Pred",
+    "Contract_Pred_Tables",
     "Declarer_Direction",
     "Declarer_Direction_Pred",
+    "Declarer_Direction_Pred_Tables",
     "Pct_NS",
     "Pct_NS_Pred",
     "Pct_Diff",
 )
+ROOM_COUNT_COLUMNS = ("Board_Tables", "Contract_Pred_Tables", "Declarer_Direction_Pred_Tables")
 # Same ordered codes as ffbridge_prediction_data.CT_CODES. The postmortem
 # stores the words; the checkpoints were trained on the numbers.
 _CT_CODES = {"Pass": 0.0, "Partial": 1.0, "Game": 2.0, "SSlam": 3.0, "GSlam": 4.0}
@@ -1176,6 +1180,49 @@ def _match_prediction(predicted: pl.DataFrame, official: Dict[str, Any]) -> Opti
     return same_table.to_dicts()[0]
 
 
+def _attach_room_counts(frame: pl.DataFrame) -> pl.DataFrame:
+    """How many tables on the board played this row's predicted contract and seat.
+
+    ``Board_Tables`` is the tables with a contract on the board.
+    ``Contract_Pred_Tables`` is the tables whose contract, doubles included,
+    is this row's ``Contract_Pred``. ``Declarer_Direction_Pred_Tables`` is
+    the tables declared from ``Declarer_Direction_Pred``; a predicted
+    pass-out (``NULL``) counts the passed-out tables. Both counts are null
+    when the row has no prediction.
+    """
+    contract = pl.col("Contract").cast(pl.Utf8)
+    seat = (
+        pl.when(contract == "PASS")
+        .then(pl.lit("NULL"))
+        .otherwise(pl.col("Declarer_Direction").cast(pl.Utf8))
+    )
+    room = frame.select("Board", contract.alias("_played"), seat.alias("_seat"))
+    out = frame.drop(ROOM_COUNT_COLUMNS, strict=False).with_columns(
+        contract.is_not_null().sum().over("Board").cast(pl.Int32).alias("Board_Tables")
+    )
+    for pred_column, played, count_column in (
+        ("Contract_Pred", "_played", "Contract_Pred_Tables"),
+        ("Declarer_Direction_Pred", "_seat", "Declarer_Direction_Pred_Tables"),
+    ):
+        counts = (
+            room.filter(pl.col(played).is_not_null())
+            .group_by("Board", played)
+            .agg(pl.len().cast(pl.Int32).alias(count_column))
+            .rename({played: pred_column})
+        )
+        out = out.join(
+            counts,
+            on=["Board", pred_column],
+            how="left",
+            maintain_order="left",
+        ).with_columns(
+            pl.when(pl.col(pred_column).is_not_null())
+            .then(pl.col(count_column).fill_null(0))
+            .alias(count_column)
+        )
+    return out
+
+
 def board_prediction_rows(boards: pl.DataFrame) -> pl.DataFrame:
     frame = boards
     if "Declarer_Direction" not in frame.columns and "Declarer" in frame.columns:
@@ -1243,6 +1290,7 @@ def apply_session_predictions(
         predicted = _attach_prior_sessions(predicted, session_id)
     if "Declarer_Direction" not in predicted.columns and "Declarer" in predicted.columns:
         predicted = predicted.with_columns(pl.col("Declarer").cast(pl.Utf8).alias("Declarer_Direction"))
+    predicted = _attach_room_counts(predicted)
     source = ratings_as_of = None
     if "Prediction_Source" in predicted.columns and predicted.height:
         source = predicted["Prediction_Source"][0]

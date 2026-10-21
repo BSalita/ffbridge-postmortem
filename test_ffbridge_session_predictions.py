@@ -203,6 +203,29 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(rows["Declarer_Direction"][0], "N")
         self.assertAlmostEqual(rows["Pct_Diff"][0], 0.1)
 
+    def test_room_counts_say_how_many_tables_played_the_predicted_contract_and_seat(self):
+        boards = pl.DataFrame(
+            {
+                "Board": [14, 14, 14, 14, 14, 3, 3],
+                "Contract": ["4SW", "4SW", "4SXW", "PASS", "3NE", "PASS", None],
+                "Declarer_Direction": ["W", "W", "W", None, "E", None, None],
+                "Contract_Pred": ["4SW", "4SW", "3NE", "4SW", None, "PASS", "PASS"],
+                "Declarer_Direction_Pred": ["W", "W", "E", "W", None, "NULL", "NULL"],
+            }
+        )
+        counted = predictions._attach_room_counts(boards)
+        self.assertEqual(counted["Contract"].to_list(), boards["Contract"].to_list())
+        self.assertEqual(counted["Board_Tables"].to_list(), [5, 5, 5, 5, 5, 1, 1])
+        # The doubled 4SXW is a different contract from 4SW, but the same seat.
+        self.assertEqual(counted["Contract_Pred_Tables"].to_list(), [2, 2, 1, 2, None, 1, 1])
+        self.assertEqual(counted["Declarer_Direction_Pred_Tables"].to_list(), [3, 3, 1, 3, None, 1, 1])
+        again = predictions._attach_room_counts(counted)
+        self.assertEqual(again.columns, counted.columns)
+        rows = predictions.board_prediction_rows(counted)
+        columns = list(rows.columns)
+        self.assertEqual(columns[:2], ["Board", "Board_Tables"])
+        self.assertEqual(columns.index("Contract_Pred") + 1, columns.index("Contract_Pred_Tables"))
+
     def test_missing_models_still_return_published_ranks(self):
         boards = pl.DataFrame(
             {
@@ -210,6 +233,8 @@ class RankingTests(unittest.TestCase):
                 "section_name": ["A"],
                 "Pair_Number_NS": [1],
                 "Pair_Number_EW": [1],
+                "Contract": ["3NN"],
+                "Declarer_Direction": ["N"],
                 "Pct_NS": [0.6],
                 "Player_Name_N": ["Ann"],
                 "Player_Name_S": ["Sue"],
@@ -283,6 +308,8 @@ class RankingTests(unittest.TestCase):
                 "section_name": ["A", "A"],
                 "Pair_Number_NS": [1, 2],
                 "Pair_Number_EW": [1, 2],
+                "Contract": ["3NN", "4SE"],
+                "Declarer_Direction": ["N", "E"],
                 "Pct_NS": [0.6, 0.4],
             }
         )
