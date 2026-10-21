@@ -2,7 +2,7 @@
 	"temp": "SELECT Board, Contract, Score_NS, Pct_NS, DD_N_H, DD_Pct_NS, Par_NS, Par_Pct_NS, EV_Max_NS, EV_Max_EW, EV_Max_Col_NS, EV_Max_Col_EW ORDER BY Board",
 	"Buttons": {
 		"Summarize": {
-			"title": "**Summarize**",
+			"title": "Full Postmortem",
 			"chip": "Full Postmortem",
 			"help": "Summarize the game's results",
 			"comment": "@ in prompt means prompt is a key into ['SelectBoxes']['Vetted_Prompts'] list. Optional prompt key Output is Grid, Deal, or Info; missing Output stays Grid.",
@@ -47,14 +47,14 @@
 			],
 			"i18n": {
 				"fr": {
-					"title": "**Résumé**",
+					"title": "Postmortem complet",
 					"chip": "Postmortem complet",
 					"help": "Résumer les résultats de la partie"
 				}
 			}
 		},
 		"Summarize_Briefly": {
-			"title": "Summarize Briefly",
+			"title": "Brief Postmortem",
 			"chip": "Brief Postmortem",
 			"help": "Summarize the game's results. Expert statistics only.",
 			"comment": "@ in prompt means prompt is a key into ['SelectBoxes']['Vetted_Prompts'] list. Optional prompt key Output is Grid, Deal, or Info; missing Output stays Grid.",
@@ -73,7 +73,7 @@
 			],
 			"i18n": {
 				"fr": {
-					"title": "Résumé bref",
+					"title": "Postmortem bref",
 					"chip": "Postmortem bref",
 					"help": "Résumer les résultats de la partie. Statistiques pour experts seulement."
 				}
