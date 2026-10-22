@@ -12,7 +12,7 @@ streamlit-aggrid==1.1.8.post1
 pandas
 polars
 numpy
-duckdb
+duckdb>=1.5,<2
 
 # Web scraping and automation
 playwright
