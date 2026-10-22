@@ -1931,8 +1931,7 @@ def _finalize_mldf_for_report(df: pl.DataFrame) -> bool:
         st.session_state.df = filter_dataframe(df) #, st.session_state.group_id, st.session_state.session_id, st.session_state.player_id, st.session_state.partner_id)
 
         # Register DataFrame as 'self' view in the session-specific connection
-        con = get_session_duckdb_connection()
-        con.register('self', st.session_state.df)
+        set_session_self_table(st.session_state.df)
         print(f"st.session_state.df:{st.session_state.df.columns}")
 
     return False
@@ -1967,7 +1966,7 @@ def _attach_session_predictions() -> None:
         and st.session_state.get("predictions_session_id") == str(session_id)
     ):
         return
-    predicted, info = session_predictions.apply_session_predictions(
+    predicted, info = session_predictions.cached_session_predictions(
         df,
         session_id,
         pm_create.DEFAULT_CACHE_DIR,
@@ -1976,7 +1975,7 @@ def _attach_session_predictions() -> None:
     st.session_state.predictions_cached = True
     st.session_state.predictions_available = bool(info.get("predictions_available"))
     st.session_state.predictions_session_id = str(session_id)
-    get_session_duckdb_connection().register("self", predicted)
+    set_session_self_table(predicted)
     warning = info.get("warning")
     if warning:
         st.sidebar.warning(warning)
@@ -2031,8 +2030,7 @@ def _change_game_state_lancelot(player_id: str, session_id: Optional[int]) -> bo
         st.session_state.predictions_cached = False
         st.session_state.pop("predictions_session_id", None)
         _ensure_game_results_url(st.session_state.df)
-        con = get_session_duckdb_connection()
-        con.register("self", st.session_state.df)
+        set_session_self_table(st.session_state.df)
 
     st.session_state.pop("report_error", None)
     print(f"=== change_game_state END: SUCCESS - player_id={st.session_state.player_id}, session_id={st.session_state.session_id} ===")
@@ -2431,6 +2429,24 @@ def create_ui() -> None:
             if st.session_state.session_id is not None:
                 write_report()
         ask_sql_query()
+
+
+def set_session_self_table(df: pl.DataFrame) -> None:
+    """Make df the session's DuckDB table "self".
+
+    A native table, not a registered Polars frame: a session frame has
+    ~6,800 columns, and each report query on the registered frame costs
+    ~0.1 s against ~0.01 s on the table. The copy costs ~0.3 s once per
+    load, and a report runs ~40 queries.
+    """
+    con = get_session_duckdb_connection()
+    con.unregister("self")
+    con.execute('DROP TABLE IF EXISTS "self"')
+    con.register("_self_frame", df)
+    try:
+        con.execute('CREATE TABLE "self" AS SELECT * FROM _self_frame')
+    finally:
+        con.unregister("_self_frame")
 
 
 # Legacy function - now handled by the base class
