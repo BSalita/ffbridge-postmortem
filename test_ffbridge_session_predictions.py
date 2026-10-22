@@ -387,6 +387,29 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(ranks["Global_Scratch_Pct"].null_count(), 4)
         self.assertEqual(ranks["Club_Rank"].null_count(), 4)
         self.assertEqual(ranks["Global_Scratch_Rank"].null_count(), 4)
+        self.assertIsNone(info["provenance"]["actuals_source"])
+
+    def test_unpublished_field_gives_no_predicted_global_rank(self):
+        # Nothing published: a prediction cannot be placed in the national
+        # field, so every pair gets null rather than first place.
+        boards = pl.DataFrame(
+            {
+                "Board": [1, 1],
+                "section_name": ["A", "A"],
+                "Pair_Number_NS": [1, 2],
+                "Pair_Number_EW": [1, 2],
+                "Contract": ["3NN", "4SE"],
+                "Declarer_Direction": ["N", "E"],
+                "Pct_NS": [0.6, 0.4],
+                "Pct_NS_Pred": [0.55, 0.45],
+            }
+        )
+        with patch.object(predictions, "_published_session_actuals", return_value=None):
+            ranked = predictions.ranking_rows(boards, None, "288737")
+        predicted = ranked.filter(pl.col("Global_Scratch_Pct_Pred").is_not_null())
+        self.assertGreater(predicted.height, 0)
+        self.assertEqual(predicted["Global_Scratch_Rank_Pred"].null_count(), predicted.height)
+        self.assertEqual(predicted["Rank_Diff"].null_count(), predicted.height)
 
     def test_same_table_number_at_two_clubs_keeps_this_clubs_rank(self):
         ranking = pl.DataFrame(

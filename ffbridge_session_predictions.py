@@ -1183,10 +1183,6 @@ def ranking_rows(
     if official.is_empty() and predicted.is_empty():
         return pl.DataFrame({name: [] for name in RANKING_COLUMNS})
 
-    national_scores = [
-        float(value)
-        for value in (official["Global_Scratch_Pct"].drop_nulls().to_list() if official.height else [])
-    ]
     rows: List[Dict[str, Any]] = []
     club_groups: Dict[str, List[Dict[str, Any]]] = {}
     keys_seen = set()
@@ -1256,13 +1252,18 @@ def ranking_rows(
             raw.update(_prediction_spread(0.0, None, None))
             continue
         pred_score = float(pred_score)
-        national_pred_field = []
-        for item in rows:
-            if item is raw:
-                national_pred_field.append(pred_score)
-            elif item.get("Global_Scratch_Pct") is not None:
-                national_pred_field.append(float(item["Global_Scratch_Pct"]))
-        raw["Global_Scratch_Rank_Pred"] = _rank_against(pred_score, national_pred_field or national_scores)
+        published_others = [
+            float(item["Global_Scratch_Pct"])
+            for item in rows
+            if item is not raw and item.get("Global_Scratch_Pct") is not None
+        ]
+        # With no published field there is nothing to place the prediction
+        # in; ranking it against itself would put every pair first.
+        raw["Global_Scratch_Rank_Pred"] = (
+            _rank_against(pred_score, [pred_score, *published_others])
+            if published_others
+            else None
+        )
         official_rank = raw.get("Global_Scratch_Rank")
         raw["Rank_Diff"] = (
             None if official_rank is None or raw["Global_Scratch_Rank_Pred"] is None
@@ -1581,14 +1582,15 @@ def apply_session_predictions(
     predicted = _broadcast_ranks(predicted, ranks)
     # Actuals come from the Elo results once that build has the session
     # (same figures as ffbridge_session_ranking), else from Lancelot.
-    if _published_session_actuals(session_id) is not None:
+    # No published ranking means no actuals are shown at all.
+    if ranking is None:
+        actuals_source = actuals_built_at = None
+    elif _published_session_actuals(session_id) is not None:
         actuals_source = "elo_results"
         actuals_built_at = _file_built_at(_elo_results_path())
-    elif ranking is not None:
+    else:
         actuals_source = "lancelot_ranking"
         actuals_built_at = _file_built_at(Path(cache_dir) / "rankings" / f"{session_id}.json")
-    else:
-        actuals_source = actuals_built_at = None
     info = {
         "warning": " ".join(text for text in (warning, fallback_note, ranking_warning) if text) or None,
         "prediction_source": source,
