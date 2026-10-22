@@ -510,7 +510,7 @@ def ShowDataFrameTable(df: pl.DataFrame, key: str, query: str = 'SELECT * FROM s
         
         try:
             con = get_session_duckdb_connection()
-            result_df = con.execute(query).pl()
+            result_df = con.sql(query).pl()
             st.text(f"Result is a dataframe of {len(result_df)} rows.")
             streamlitlib.ShowDataFrameTable(result_df, key, height_rows=height_rows)
         except Exception as e:
