@@ -6,7 +6,11 @@ The MCP server and Streamlit app are HTTP clients of this API.
   python ffbridge_postmortem_api_server.py
   GET http://127.0.0.1:8517/docs
 
-Session predictions:
+Session predictions, with no player and nothing saved under a player:
+  GET /predictions/boards?session_id= or ?club=&date=
+  GET /predictions/rankings?session_id= or ?club=&date=
+  date is YYYY-MM-DD. Omit it for the club's latest session.
+  The player routes still read one cached postmortem:
   GET /postmortems/{player_id}/predictions/boards
   GET /postmortems/{player_id}/predictions/rankings
 
@@ -50,7 +54,10 @@ app = FastAPI(
     description=(
         "Cached postmortem reads plus on-demand Lancelot generate "
         "(same path Streamlit used to run in-process). "
-        "Predictions: /postmortems/{player_id}/predictions/boards and "
+        "Predictions for a session or a club and date, with no player: "
+        "/predictions/boards and /predictions/rankings. "
+        "A cached player's postmortem is "
+        "/postmortems/{player_id}/predictions/boards and "
         "/postmortems/{player_id}/predictions/rankings. "
         "A brief, full, or predictions report is a job: "
         "POST /postmortems/{player_id}/run-group, then "
@@ -329,6 +336,44 @@ def postmortem_boards(
             pass
     df, meta = svc.load_postmortem(player_id, session_id)
     return svc.board_results(df, meta, only_my_boards=only_my_boards, columns=cols, limit=limit)
+
+
+def _session_prediction(
+    view: str,
+    session_id: Optional[str],
+    club: Optional[str],
+    on_date: Optional[str],
+    limit: int,
+) -> dict:
+    return svc.prediction_by_session(
+        session_id=session_id,
+        club=club,
+        on_date=on_date,
+        view=view,
+        limit=limit,
+    )
+
+
+@app.get("/predictions/boards")
+def session_prediction_boards(
+    session_id: Optional[str] = Query(None, description="FFBridge session id. Enough on its own."),
+    club: Optional[str] = Query(None, description="Club code or club name. Used when session_id is omitted."),
+    date: Optional[str] = Query(None, description="YYYY-MM-DD. Omit for the club's latest session."),
+    limit: int = Query(svc.DEFAULT_SQL_ROW_LIMIT, ge=1, le=svc.MAX_SQL_ROW_LIMIT),
+) -> dict:
+    """Board predictions for a session, or for a club on a date. No player is saved."""
+    return _session_prediction("boards", session_id, club, date, limit)
+
+
+@app.get("/predictions/rankings")
+def session_prediction_rankings(
+    session_id: Optional[str] = Query(None, description="FFBridge session id. Enough on its own."),
+    club: Optional[str] = Query(None, description="Club code or club name. Used when session_id is omitted."),
+    date: Optional[str] = Query(None, description="YYYY-MM-DD. Omit for the club's latest session."),
+    limit: int = Query(svc.DEFAULT_SQL_ROW_LIMIT, ge=1, le=svc.MAX_SQL_ROW_LIMIT),
+) -> dict:
+    """Club prediction leaderboard for a session, or for a club on a date."""
+    return _session_prediction("rankings", session_id, club, date, limit)
 
 
 @app.get("/postmortems/{player_id}/predictions/boards")

@@ -231,5 +231,52 @@ class DuckDbResultTests(unittest.TestCase):
         self.assertEqual(payload["row_count"], 1)
 
 
+class SessionPredictionTests(unittest.TestCase):
+    def test_club_and_date_load_the_archive_without_a_player(self):
+        frame = pl.DataFrame({"Board": [1], "Player_ID_N": ["213857"]})
+        meta = {"session_id": "282864", "player_id": None, "data_source": "hierarchical_archive"}
+        with (
+            patch.object(svc, "load_session_for_predictions", return_value=(frame, dict(meta))) as load,
+            patch(
+                "ffbridge_session_predictions.resolve_club_session",
+                return_value={"session_id": "282864", "date": "2026-10-21", "club_code": "5802079"},
+            ) as resolve,
+            patch(
+                "ffbridge_session_predictions.archive_club_code",
+                return_value="5802079",
+            ),
+            patch(
+                "ffbridge_session_predictions.prediction_payload",
+                return_value={"rows": [], "view": "rankings"},
+            ) as payload,
+        ):
+            result = svc.prediction_by_session(club="5802079", on_date="2026-10-21", view="rankings", limit=10)
+        resolve.assert_called_once_with("5802079", "2026-10-21")
+        load.assert_called_once_with("282864")
+        payload.assert_called_once()
+        self.assertIsNone(result["meta"]["player_id"])
+        self.assertIsNone(result["meta"]["cache_file"] if "cache_file" in result["meta"] else None)
+        self.assertEqual(result["session_id"], "282864")
+        self.assertEqual(result["meta"]["club_code"], "5802079")
+
+    def test_session_predictions_fail_when_the_archive_is_missing(self):
+        with patch.object(svc, "HIERARCHICAL_DIR", None):
+            with self.assertRaisesRegex(FileNotFoundError, "not configured"):
+                svc.load_session_for_predictions("282864")
+
+    def test_a_different_clubs_archive_is_not_returned(self):
+        frame = pl.DataFrame({"Board": [1]})
+        with (
+            patch.object(
+                svc,
+                "load_session_for_predictions",
+                return_value=(frame, {"session_id": "282864", "player_id": None}),
+            ),
+            patch("ffbridge_session_predictions.archive_club_code", return_value="111"),
+        ):
+            with self.assertRaisesRegex(FileNotFoundError, "not 5802079"):
+                svc.prediction_by_session(session_id="282864", club="5802079", view="rankings", limit=5)
+
+
 if __name__ == "__main__":
     unittest.main()

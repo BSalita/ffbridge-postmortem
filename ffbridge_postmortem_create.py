@@ -415,19 +415,110 @@ def ensure_lancelot_auth(*, force: bool = False) -> LancelotAuth:
         return auth
 
 
-def resolve_player(player_id: str, *, token: Optional[str] = None) -> ResolvedPlayer:
+def _id_text(value: Any) -> str:
+    text = str(value or "").strip()
+    if text.endswith(".0"):
+        text = text[:-2]
+    if text.isdigit():
+        return text.lstrip("0") or "0"
+    return text
+
+
+def _index_session_player_ids(session_id: str) -> set[str]:
+    try:
+        index_dir = _find_player_session_index_dir()
+    except FileNotFoundError:
+        return set()
+    path = index_dir / mlBridgeFFIndexLib.SESSIONS_FILENAME
+    if not path.is_file():
+        return set()
+    frame = (
+        pl.scan_parquet(path)
+        .filter(pl.col("session_id").cast(pl.Utf8) == str(session_id))
+        .select("lancelot_person_id")
+        .collect()
+    )
+    return {
+        token
+        for value in frame["lancelot_person_id"].to_list()
+        if (token := _id_text(value))
+    }
+
+
+def _session_player_ids(session_id: str) -> set[str]:
+    """Lancelot ids of players in one session, from the index and the Elo build."""
+    found = _index_session_player_ids(session_id)
+    import ffbridge_session_predictions as session_predictions
+
+    found.update(session_predictions.session_lancelot_ids(session_id))
+    return found
+
+
+def _person_who_played(
+    persons: pl.DataFrame,
+    player_id: str,
+    session_id: str,
+) -> Optional[Dict[str, Any]]:
+    """The one ambiguous candidate who played ``session_id``, or None."""
+    matches = mlBridgeFFIndexLib.lookup_person_matches(persons, player_id)
+    played = _session_player_ids(session_id)
+    if not played:
+        return None
+    chosen = [
+        row
+        for row in matches.to_dicts()
+        if _id_text(row.get("lancelot_person_id")) in played
+    ]
+    if len(chosen) == 1:
+        return chosen[0]
+    if len(chosen) > 1:
+        names = ", ".join(
+            f"lancelot:{row.get('lancelot_person_id')} = {row.get('display_name')}"
+            for row in chosen
+        )
+        raise ValueError(
+            f"Player identifier {player_id!r} matches {len(chosen)} players in "
+            f"session {session_id}: {names}."
+        )
+    return None
+
+
+def _resolved_from_person(person: Dict[str, Any], requested_id: str) -> ResolvedPlayer:
+    return ResolvedPlayer(
+        lancelot_id=str(person["lancelot_person_id"]),
+        license_number=(
+            str(person["license_number"])
+            if person.get("license_number") is not None
+            else None
+        ),
+        requested_id=str(requested_id),
+        classic_person_id=(
+            str(person["classic_person_id"])
+            if person.get("classic_person_id") is not None
+            else None
+        ),
+    )
+
+
+def resolve_player(
+    player_id: str,
+    *,
+    token: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> ResolvedPlayer:
     """Map a Lancelot, Classic/migration, or license id to one player.
 
     ``9500754`` (license) and ``246273`` (Lancelot id) resolve to the same
     person when they belong to the same Lancelot record. Explicit ``license:``,
     ``classic:``, and ``lancelot:`` prefixes disambiguate numeric collisions.
+    A bare collision with ``session_id`` uses the player who played that session.
     """
     requested = str(player_id).strip()
     if not requested:
         raise ValueError("player_id is required")
 
     try:
-        indexed = _resolve_player_from_index(requested)
+        indexed = _resolve_player_from_index(requested, session_id=session_id)
     except FileNotFoundError:
         indexed = None
     if indexed is not None:
@@ -615,26 +706,23 @@ def _find_player_session_index_dir() -> pathlib.Path:
     )
 
 
-def _resolve_player_from_index(player_id: str) -> Optional[ResolvedPlayer]:
+def _resolve_player_from_index(
+    player_id: str,
+    session_id: Optional[str] = None,
+) -> Optional[ResolvedPlayer]:
     index_dir = _find_player_session_index_dir()
     persons = mlBridgeFFIndexLib.load_persons(index_dir)
-    person = mlBridgeFFIndexLib.lookup_person(persons, player_id)
+    try:
+        person = mlBridgeFFIndexLib.lookup_person(persons, player_id)
+    except ValueError:
+        if not session_id or ":" in str(player_id):
+            raise
+        person = _person_who_played(persons, player_id, session_id)
+        if person is None:
+            raise
     if person is None:
         return None
-    return ResolvedPlayer(
-        lancelot_id=str(person["lancelot_person_id"]),
-        license_number=(
-            str(person["license_number"])
-            if person.get("license_number") is not None
-            else None
-        ),
-        requested_id=str(player_id),
-        classic_person_id=(
-            str(person["classic_person_id"])
-            if person.get("classic_person_id") is not None
-            else None
-        ),
-    )
+    return _resolved_from_person(person, player_id)
 
 
 def resolve_player_from_index_query(
@@ -2015,7 +2103,10 @@ def generate_postmortems(
     _log(f"start generate player={player_id} session={session_id} at {started.isoformat(timespec='seconds')}")
     directory = pathlib.Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
     initialize_generate_jobs(directory)
-    resolved = resolve_player(player_id)
+    lookup_session = str(session_id or "").strip()
+    if lookup_session.lower() == "latest":
+        lookup_session = ""
+    resolved = resolve_player(player_id, session_id=lookup_session or None)
     active_job = _active_job_for_player(resolved.lancelot_id, directory)
     if active_job is not None:
         pending = _remaining_session_ids(active_job)

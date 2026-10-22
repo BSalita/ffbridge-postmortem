@@ -800,5 +800,36 @@ class JsonNormalizeApiTests(unittest.TestCase):
         )
 
 
+class AmbiguousPlayerTests(unittest.TestCase):
+    def setUp(self):
+        self.persons = pl.DataFrame(
+            {
+                "lancelot_person_id": ["93150", "777"],
+                "classic_person_id": ["229130", "93150"],
+                "license_number": ["111", "222"],
+                "display_name": ["Michel RICHARD", "Someone Else"],
+            }
+        )
+
+    def _resolve(self, player_id: str, session_id: str | None, played: set[str]):
+        with (
+            patch.object(create, "_find_player_session_index_dir", return_value=pathlib.Path(".")),
+            patch.object(create.mlBridgeFFIndexLib, "load_persons", return_value=self.persons),
+            patch.object(create, "_session_player_ids", return_value=played),
+        ):
+            return create.resolve_player(player_id, session_id=session_id)
+
+    def test_session_picks_the_player_who_played_and_a_prefix_does_not_need_one(self):
+        played = self._resolve("93150", "282864", {"93150"})
+        self.assertEqual(played.lancelot_id, "93150")
+        self.assertEqual(played.classic_person_id, "229130")
+        prefixed = self._resolve("classic:93150", None, set())
+        self.assertEqual(prefixed.lancelot_id, "777")
+        with self.assertRaisesRegex(ValueError, "ambiguous"):
+            self._resolve("93150", None, {"93150"})
+        with self.assertRaisesRegex(ValueError, "ambiguous"):
+            self._resolve("93150", "282864", {"1"})
+
+
 if __name__ == "__main__":
     unittest.main()

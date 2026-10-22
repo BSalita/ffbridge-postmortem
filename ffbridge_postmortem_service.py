@@ -203,8 +203,13 @@ def dataset_info() -> Dict[str, Any]:
             "is not in the historical archive yet. List playable sessions with "
             "ffbridge_postmortem_list_source_sessions. Streamlit "
             "(https://ffbridge.postmortem.chat) reads and writes the same cache. "
-            "Session predictions are GET /postmortems/{player_id}/predictions/boards "
-            "and /postmortems/{player_id}/predictions/rankings. "
+            "Session predictions are GET /predictions/boards and "
+            "/predictions/rankings with a session_id, or a club and an optional "
+            "date (the club's latest session when the date is omitted). "
+            "A player_id is not required and nothing is written under a player. "
+            "GET /postmortems/{player_id}/predictions/boards and "
+            "/postmortems/{player_id}/predictions/rankings still read one "
+            "player's cached postmortem. "
             "A brief, full, or predictions report is POST /postmortems/{player_id}/run-group, "
             "then GET /run-group/{job_id}, then GET /run-group/{job_id}/result. "
             "MCP clients call ffbridge_postmortem_report_start, "
@@ -418,6 +423,53 @@ def _load_hierarchical_postmortem(
         }
     )
     return frame, meta
+
+
+def load_session_for_predictions(session_id: str) -> Tuple[pl.DataFrame, Dict[str, Any]]:
+    """Every board in one archived session, with no player and nothing written."""
+    sid = str(session_id).strip()
+    if HIERARCHICAL_DIR is None:
+        raise FileNotFoundError("Hierarchical postmortem archive is not configured")
+    if not (HIERARCHICAL_DIR / "metadata.json").is_file():
+        raise FileNotFoundError(
+            f"Hierarchical postmortem archive is unavailable: {HIERARCHICAL_DIR}"
+        )
+    if not normalized.hierarchical_has_session(HIERARCHICAL_DIR, sid):
+        raise FileNotFoundError(
+            f"Session {sid} is not in the postmortem archive, so there are no boards to predict"
+        )
+    metadata = json.loads((HIERARCHICAL_DIR / "metadata.json").read_text(encoding="utf-8"))
+    mapping = metadata.get("column_mapping")
+    if not isinstance(mapping, dict) or not mapping:
+        raise FileNotFoundError(
+            f"Hierarchical archive metadata lacks column_mapping: {HIERARCHICAL_DIR}"
+        )
+    columns = [column for column in mapping if column not in {"session_id", "_result_row_id"}]
+    frame = normalized.normalized_player_report(
+        HIERARCHICAL_DIR,
+        session_id=sid,
+        player_ids=[],
+        columns=columns,
+        only_player_rows=False,
+    )
+    if frame.is_empty():
+        raise FileNotFoundError(f"Hierarchical archive has no rows for session {sid}")
+    game_date = None
+    if "Date" in frame.columns:
+        raw_date = frame["Date"].drop_nulls()
+        if raw_date.len():
+            game_date = str(raw_date[0])[:10]
+    return frame, {
+        "player_id": None,
+        "session_id": sid,
+        "game_date": game_date,
+        "cache_file": None,
+        "data_source": "hierarchical_archive",
+        "archive_file": None,
+        "requested_id": None,
+        "cache_player_id": None,
+        "hierarchical_dir": str(HIERARCHICAL_DIR),
+    }
 
 
 def _id_token(value: Any) -> Optional[str]:
@@ -696,6 +748,62 @@ def prediction_report(
         limit=limit,
     )
     payload["meta"] = meta
+    return payload
+
+
+def prediction_by_session(
+    *,
+    session_id: Optional[str] = None,
+    club: Optional[str] = None,
+    on_date: Optional[str] = None,
+    view: str,
+    limit: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Club prediction boards or rankings for a session, or for a club and date.
+
+    No player is required and no postmortem is saved.
+    """
+    import ffbridge_session_predictions as session_predictions
+
+    if view not in ("boards", "rankings"):
+        raise ValueError("view must be boards or rankings")
+    limit = max(1, min(limit or DEFAULT_SQL_ROW_LIMIT, MAX_SQL_ROW_LIMIT))
+    requested_club = str(club).strip() if club is not None and str(club).strip() else None
+    if session_id is not None and str(session_id).strip():
+        sid = str(session_id).strip()
+        if not sid.isdigit():
+            raise ValueError("session_id must contain only digits")
+        found: Dict[str, Any] = {"session_id": sid}
+    elif requested_club:
+        found = session_predictions.resolve_club_session(requested_club, on_date)
+        sid = str(found["session_id"])
+    else:
+        raise ValueError("session_id or club is required")
+    frame, meta = load_session_for_predictions(sid)
+    archive_club = session_predictions.archive_club_code(frame, sid)
+    wanted = None
+    if requested_club and requested_club.isdigit():
+        wanted = requested_club.lstrip("0") or "0"
+    elif requested_club:
+        wanted = found.get("club_code")
+    if wanted and archive_club and archive_club != wanted:
+        raise FileNotFoundError(
+            f"Session {sid} archive is club {archive_club}, not {wanted}"
+        )
+    if found.get("date"):
+        meta["game_date"] = found["date"]
+    meta["club_code"] = found.get("club_code") or archive_club
+    if found.get("tournament_name"):
+        meta["tournament_name"] = found["tournament_name"]
+    payload = session_predictions.prediction_payload(
+        frame,
+        sid,
+        CACHE_DIR,
+        view=view,
+        limit=limit,
+    )
+    payload["meta"] = meta
+    payload["session_id"] = sid
     return payload
 
 

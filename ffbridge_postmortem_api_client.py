@@ -265,6 +265,32 @@ def postmortem_boards(
     )
 
 
+def session_prediction_boards(
+    session_id: Optional[str] = None,
+    club: Optional[str] = None,
+    date: Optional[str] = None,
+    limit: int = 500,
+) -> Dict[str, Any]:
+    """Board predictions for a session, or a club and date. No player."""
+    return _get_json(
+        "/predictions/boards",
+        {"session_id": session_id, "club": club, "date": date, "limit": limit},
+    )
+
+
+def session_prediction_rankings(
+    session_id: Optional[str] = None,
+    club: Optional[str] = None,
+    date: Optional[str] = None,
+    limit: int = 500,
+) -> Dict[str, Any]:
+    """Club prediction leaderboard for a session, or a club and date. No player."""
+    return _get_json(
+        "/predictions/rankings",
+        {"session_id": session_id, "club": club, "date": date, "limit": limit},
+    )
+
+
 def postmortem_prediction_boards(
     player_id: str,
     session_id: Optional[str] = None,

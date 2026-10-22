@@ -292,6 +292,48 @@ class RankingTests(unittest.TestCase):
         self.assertGreaterEqual(payload["row_count"], 1)
         self.assertEqual(payload["rows"][0]["Global_Scratch_Rank"], 3)
 
+    def test_provenance_names_where_the_actuals_came_from_and_when(self):
+        boards = pl.DataFrame(
+            {
+                "Board": [1],
+                "section_name": ["A"],
+                "Pair_Number_NS": [1],
+                "Pair_Number_EW": [1],
+                "Contract": ["3NN"],
+                "Declarer_Direction": ["N"],
+                "Pct_NS": [0.6],
+            }
+        )
+        ranking = [
+            {"sessionScore": 60.0, "rank": 3, "orientation": "NS", "tableNumber": 1},
+            {"sessionScore": 40.0, "rank": 8, "orientation": "EW", "tableNumber": 1},
+        ]
+        published = pl.DataFrame({"tournament_id": ["1"], "National_Scratch_Pct": [60.0]})
+        with tempfile.TemporaryDirectory() as cache:
+            elo_path = Path(cache) / "elo_results.parquet"
+            elo_path.write_bytes(b"")
+            os.utime(elo_path, (1760900000, 1760900000))
+            with (
+                patch.object(predictions, "models_dir", return_value=Path("missing-models")),
+                patch.object(predictions, "_fetch_ranking", return_value=ranking),
+                patch.object(predictions, "_elo_results_path", return_value=elo_path),
+                patch.object(predictions, "_published_session_actuals", return_value=published),
+            ):
+                _, from_elo = predictions.apply_session_predictions(boards, "1", Path(cache))
+            with (
+                patch.object(predictions, "models_dir", return_value=Path("missing-models")),
+                patch.object(predictions, "_fetch_ranking", return_value=ranking),
+                patch.object(predictions, "_published_session_actuals", return_value=None),
+            ):
+                _, from_lancelot = predictions.apply_session_predictions(boards, "1", Path(cache))
+        self.assertEqual(from_elo["provenance"]["actuals_source"], "elo_results")
+        self.assertEqual(from_elo["provenance"]["actuals_built_at"], "2025-10-19T18:53:20+00:00")
+        self.assertEqual(from_lancelot["provenance"]["actuals_source"], "lancelot_ranking")
+        self.assertRegex(
+            from_lancelot["provenance"]["actuals_built_at"],
+            r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\+00:00$",
+        )
+
     def test_a_ranking_cached_before_publication_is_downloaded_again(self):
         placeholder = [
             {"sessionScore": 0.0, "rank": 1, "orientation": "NS", "tableNumber": 1},
@@ -831,6 +873,139 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(row["SL_E_C"], 4.0)
         self.assertEqual(row["Fit_NS_S"], 7.0)
         self.assertEqual(session.schema["SL_N_S"], pl.Int64)
+
+
+class PublishedActualTests(unittest.TestCase):
+    def test_elo_actuals_replace_the_lancelot_ranking_and_can_reorder_the_club(self):
+        ranking = pl.DataFrame(
+            {
+                "sessionScore": [57.03, 57.00],
+                "rank": [103, 104],
+                "simultaneousId": ["5802079", "5802079"],
+                "orientation": ["EW", "NS"],
+                "section": ["A", "A"],
+                "tableNumber": [3, 8],
+                "team_player1_id": ["41778", "78143"],
+                "team_player2_id": ["116035", "175668"],
+                "team_player1_firstName": ["Gerard", "Pierre"],
+                "team_player1_lastName": ["LE CLERRE", "FOURQUET"],
+                "team_player2_firstName": ["Kazuko", "Brigitte"],
+                "team_player2_lastName": ["OWADA", "HATCHIKIAN"],
+            }
+        )
+        boards = pl.DataFrame(
+            {
+                "section_name": ["A", "A"],
+                "Pair_Number_NS": [1, 8],
+                "Pair_Number_EW": [3, 1],
+                "Player_ID_N": ["1", "78143"],
+                "Player_ID_S": ["2", "175668"],
+                "Player_ID_E": ["41778", "3"],
+                "Player_ID_W": ["116035", "4"],
+                "Player_Name_N": ["X", "Pierre FOURQUET"],
+                "Player_Name_S": ["Y", "Brigitte HATCHIKIAN"],
+                "Player_Name_E": ["Gerard LE CLERRE", "E"],
+                "Player_Name_W": ["Kazuko OWADA", "W"],
+                "Pct_NS_Pred": [0.40, 0.55],
+                "Board": [1, 1],
+            }
+        )
+        published = pl.DataFrame(
+            {
+                "player1_id": ["119367", "196446"],
+                "player2_id": ["263258", "520154"],
+                "player1_lancelot_id": ["41778", "78143"],
+                "player2_lancelot_id": ["116035", "175668"],
+                "National_Scratch_Pct": [56.70, 57.25],
+                "National_Scratch_Rank": [54, 48],
+                "National_Handicap_Pct": [None, None],
+                "National_Handicap_Rank": [None, None],
+                "club_code": ["5802079", "5802079"],
+            }
+        )
+        with patch.object(predictions, "_published_session_actuals", return_value=published):
+            ranked = predictions.ranking_rows(boards, ranking, "282864")
+        first = ranked.filter(pl.col("Club_Rank") == 1).row(0, named=True)
+        second = ranked.filter(pl.col("Club_Rank") == 2).row(0, named=True)
+        self.assertAlmostEqual(first["Global_Scratch_Pct"], 57.25)
+        self.assertEqual(first["Global_Scratch_Rank"], 48)
+        self.assertIn("FOURQUET", first["Pair"])
+        self.assertAlmostEqual(second["Global_Scratch_Pct"], 56.70)
+        self.assertEqual(second["Global_Scratch_Rank"], 54)
+        self.assertIn("LE CLERRE", second["Pair"])
+
+    def test_missing_elo_session_keeps_the_lancelot_score(self):
+        ranking = pl.DataFrame(
+            {
+                "sessionScore": [63.41],
+                "rank": [15],
+                "simultaneousId": ["5802079"],
+                "orientation": ["NS"],
+                "section": ["A"],
+                "tableNumber": [13],
+                "team_player1_id": ["213857"],
+                "team_player2_id": ["231528"],
+            }
+        )
+        boards = pl.DataFrame(
+            {
+                "section_name": ["A"],
+                "Pair_Number_NS": [13],
+                "Pair_Number_EW": [1],
+                "Player_ID_N": ["213857"],
+                "Player_ID_S": ["231528"],
+                "Pct_NS_Pred": [0.46],
+                "Board": [1],
+            }
+        )
+        with patch.object(predictions, "_published_session_actuals", return_value=None):
+            ranked = predictions.ranking_rows(boards, ranking, "282864")
+        self.assertAlmostEqual(ranked["Global_Scratch_Pct"][0], 63.41)
+        self.assertEqual(ranked["Global_Scratch_Rank"][0], 15)
+
+
+class ClubSessionTests(unittest.TestCase):
+    def _results(self, path: Path) -> None:
+        pl.DataFrame(
+            {
+                "tournament_id": ["100", "282864", "282900", "282864"],
+                "date": ["2026-10-14", "2026-10-21", "2026-10-21", "2026-10-21"],
+                "tournament_name": ["Earlier", "Rondes", "Other", "Rondes"],
+                "club_code": ["5802079", "5802079", "5802079", "111"],
+                "club_name": ["Levallois", "Levallois", "Levallois", "Elsewhere"],
+                "player1_lancelot_id": ["1", "1", "1", "9"],
+                "player2_lancelot_id": ["2", "2", "2", "8"],
+            }
+        ).write_parquet(path)
+
+    def test_date_selects_that_day_and_no_date_selects_the_latest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "elo.parquet"
+            self._results(path)
+            with patch.object(predictions, "_elo_results_path", return_value=path):
+                on_day = predictions.resolve_club_session("5802079", "2026-10-14")
+                latest = predictions.resolve_club_session("Levallois")
+                with self.assertRaisesRegex(ValueError, "282864, 282900|282900, 282864"):
+                    predictions.resolve_club_session("5802079", "2026-10-21")
+                with self.assertRaisesRegex(ValueError, "YYYY-MM-DD"):
+                    predictions.resolve_club_session("5802079", "21 Oct 2026")
+        self.assertEqual(on_day["session_id"], "100")
+        self.assertEqual(on_day["date"], "2026-10-14")
+        self.assertEqual(latest["session_id"], "282900")
+        self.assertEqual(latest["club_code"], "5802079")
+
+    def test_archive_club_follows_the_players_in_the_boards(self):
+        frame = pl.DataFrame({"Player_ID_N": ["213857"], "Player_ID_S": ["231528"]})
+        published = pl.DataFrame(
+            {
+                "player1_lancelot_id": ["213857", "1"],
+                "player2_lancelot_id": ["231528", "2"],
+                "club_code": ["05802079", "111"],
+                "National_Scratch_Pct": [63.36, 50.0],
+            }
+        )
+        with patch.object(predictions, "_published_session_actuals", return_value=published):
+            self.assertEqual(predictions.archive_club_code(frame, "282864"), "5802079")
 
 
 if __name__ == "__main__":

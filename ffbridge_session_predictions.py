@@ -2,10 +2,13 @@
 
 Club rank is the place among pairs at the same club. Predicted club rank
 is the place of the pair's predicted session percentage among those pairs.
-Pairs with the same predicted percentage share a place. ``Global_Scratch_Rank`` is
-the official ``rank`` on FFBridge's session ranking. ``Global_Scratch_Rank_Pred`` is
-where the predicted percentage would sit among the other pairs' published
-percentages in the national field.
+Pairs with the same predicted percentage share a place. ``Global_Scratch_Rank``
+and ``Global_Scratch_Pct`` are the published national scratch rank and
+percentage from the Elo results, the same figures as
+``ffbridge_session_ranking``. Until that build includes the session they fall
+back to the Lancelot ranking, which can still change.
+``Global_Scratch_Rank_Pred`` is where the predicted percentage would sit among
+the other pairs' published percentages in the national field.
 
 Every diff is actual minus predicted: ``Rank_Diff`` is ``Global_Scratch_Rank`` minus
 ``Global_Scratch_Rank_Pred`` and ``Pct_Diff`` is the published percentage minus the
@@ -176,6 +179,170 @@ def _lancelot_results() -> pl.LazyFrame:
     if missing:
         raise ValueError(f"FFBridge Elo results lack {missing}")
     return results
+
+
+def _club_code_text(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text or text.lower() == "null":
+        return ""
+    if text.endswith(".0"):
+        text = text[:-2]
+    if text.isdigit():
+        return text.lstrip("0") or "0"
+    return text
+
+
+def _parse_iso_date(value: Optional[str]) -> Optional[str]:
+    if value is None or not str(value).strip():
+        return None
+    day = str(value).strip()[:10]
+    try:
+        datetime.strptime(day, "%Y-%m-%d")
+    except ValueError as exc:
+        raise ValueError("date must be YYYY-MM-DD") from exc
+    return day
+
+
+def resolve_club_session(club: str, on_date: Optional[str] = None) -> Dict[str, Any]:
+    """The club's session on ``on_date``, or its latest session when the date is omitted.
+
+    A club code or a club name is accepted. Two sessions on the same day is an
+    error; pass ``session_id`` instead of guessing.
+    """
+    query = str(club or "").strip()
+    if not query:
+        raise ValueError("club is required when session_id is omitted")
+    day = _parse_iso_date(on_date)
+    path = _elo_results_path()
+    if path is None:
+        raise FileNotFoundError("FFBridge Elo results parquet was not found")
+    results = pl.scan_parquet(path)
+    names = set(results.collect_schema().names())
+    if "tournament_id" not in names or "club_code" not in names or "date" not in names:
+        raise ValueError("FFBridge Elo results lack tournament_id, date, or club_code")
+    club_code = (
+        pl.col("club_code")
+        .cast(pl.Utf8, strict=False)
+        .fill_null("")
+        .str.strip_chars()
+        .str.replace(r"\.0$", "")
+        .str.replace(r"^0+", "")
+    )
+    filtered = results.with_columns(club_code.alias("_club"))
+    if query.isdigit():
+        filtered = filtered.filter(pl.col("_club") == _club_code_text(query))
+    elif "club_name" not in names:
+        raise ValueError("club must be a club code")
+    else:
+        filtered = filtered.filter(
+            pl.col("club_name").cast(pl.Utf8, strict=False).str.to_lowercase() == query.casefold()
+        )
+    if day:
+        filtered = filtered.filter(_ELO_DAY == day)
+    label = (
+        pl.col("tournament_name").cast(pl.Utf8)
+        if "tournament_name" in names
+        else pl.lit(None, dtype=pl.Utf8)
+    )
+    sessions = (
+        filtered.select(
+            pl.col("tournament_id").cast(pl.Utf8).alias("session_id"),
+            _ELO_DAY.alias("date"),
+            label.alias("tournament_name"),
+            pl.col("_club").alias("club_code"),
+        )
+        .unique(subset=["session_id"])
+        .sort(["date", "session_id"], descending=True)
+        .collect()
+    )
+    if sessions.is_empty():
+        when = f" on {day}" if day else ""
+        raise FileNotFoundError(f"No FFBridge session for club {query}{when}")
+    if day and sessions.height > 1:
+        ids = ", ".join(sessions["session_id"].to_list())
+        raise ValueError(
+            f"Club {query} has {sessions.height} sessions on {day}: {ids}. Pass session_id."
+        )
+    clubs = [code for code in sessions["club_code"].unique().to_list() if code]
+    if not query.isdigit() and len(clubs) > 1:
+        raise ValueError(f"Club name {query!r} matches {sorted(clubs)}. Pass a club code.")
+    row = sessions.row(0, named=True)
+    return {
+        "session_id": row["session_id"],
+        "date": row["date"],
+        "club_code": row["club_code"],
+        "tournament_name": row["tournament_name"],
+    }
+
+
+_PUBLISHED_ID_COLUMNS = (
+    "player1_id",
+    "player2_id",
+    "player1_lancelot_id",
+    "player2_lancelot_id",
+    "player1_license_number",
+    "player2_license_number",
+)
+_PUBLISHED_SCORE_COLUMNS = (
+    "National_Scratch_Pct",
+    "National_Scratch_Rank",
+    "National_Handicap_Pct",
+    "National_Handicap_Rank",
+    "club_code",
+)
+
+
+def _published_session_actuals(session_id: Any) -> Optional[pl.DataFrame]:
+    """Official scratch and handicap figures for one session, or None if unpublished there."""
+    path = _elo_results_path()
+    if path is None:
+        return None
+    results = pl.scan_parquet(path)
+    names = set(results.collect_schema().names())
+    if "tournament_id" not in names or "National_Scratch_Pct" not in names:
+        return None
+    keep = [
+        column
+        for column in ("tournament_id", *_PUBLISHED_ID_COLUMNS, *_PUBLISHED_SCORE_COLUMNS)
+        if column in names
+    ]
+    frame = (
+        results.filter(pl.col("tournament_id").cast(pl.Utf8) == str(session_id))
+        .select(keep)
+        .collect()
+    )
+    if frame.is_empty():
+        return None
+    return frame
+
+
+def _id_token_value(value: Any) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text or text.lower() == "null":
+        return ""
+    if text.endswith(".0"):
+        text = text[:-2]
+    if text.isdigit():
+        return text.lstrip("0") or "0"
+    return text
+
+
+def session_lancelot_ids(session_id: Any) -> set[str]:
+    """Lancelot person ids on the published ranking for one session."""
+    frame = _published_session_actuals(session_id)
+    if frame is None:
+        return set()
+    found: set[str] = set()
+    for column in ("player1_lancelot_id", "player2_lancelot_id"):
+        if column not in frame.columns:
+            continue
+        for value in frame[column].to_list():
+            token = _id_token_value(value)
+            if token:
+                found.add(token)
+    return found
 
 
 def _session_day(results: pl.LazyFrame, session_id: Any, frame: pl.DataFrame) -> str:
@@ -886,13 +1053,132 @@ def _prediction_spread(
     }
 
 
-def ranking_rows(boards: pl.DataFrame, ranking: Optional[pl.DataFrame]) -> pl.DataFrame:
+def _published_identity_keys(row: Dict[str, Any]) -> List[str]:
+    lefts = [
+        row.get(name)
+        for name in ("player1_id", "player1_lancelot_id", "player1_license_number")
+    ]
+    rights = [
+        row.get(name)
+        for name in ("player2_id", "player2_lancelot_id", "player2_license_number")
+    ]
+    keys: List[str] = []
+    seen: set[str] = set()
+    for left in lefts:
+        for right in rights:
+            key = _canonical_key(left, right)
+            if key and key not in seen:
+                seen.add(key)
+                keys.append(key)
+    return keys
+
+
+def _number_or_none(value: Any, *, digits: Optional[int] = None) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number != number:
+        return None
+    if digits is None:
+        return number
+    return round(number, digits)
+
+
+def _overlay_published_actuals(official: pl.DataFrame, session_id: Any) -> pl.DataFrame:
+    """Replace Lancelot session scores with the Elo results the session ranking uses.
+
+    An unpublished Lancelot placeholder is left alone. A pair the Elo build
+    does not contain keeps the Lancelot figure.
+    """
+    if official.is_empty() or "Left_Id" not in official.columns:
+        return official
+    published = _published_session_actuals(session_id)
+    if published is None or published.is_empty():
+        return official
+    has_rank = "National_Scratch_Rank" in published.columns
+    has_handicap = "National_Handicap_Pct" in published.columns
+    has_handicap_rank = "National_Handicap_Rank" in published.columns
+    by_key: Dict[str, Dict[str, Any]] = {}
+    for row in published.to_dicts():
+        scores = {
+            "Global_Scratch_Pct": _number_or_none(row.get("National_Scratch_Pct"), digits=2),
+            "Global_Scratch_Rank": (
+                None
+                if not has_rank or _number_or_none(row.get("National_Scratch_Rank")) is None
+                else int(row.get("National_Scratch_Rank"))
+            ),
+            "Handicap_Pct": (
+                _number_or_none(row.get("National_Handicap_Pct"), digits=2) if has_handicap else None
+            ),
+            "Handicap_Global_Rank": (
+                None
+                if not has_handicap_rank or _number_or_none(row.get("National_Handicap_Rank")) is None
+                else int(row.get("National_Handicap_Rank"))
+            ),
+            "matched_handicap": has_handicap,
+        }
+        for key in _published_identity_keys(row):
+            by_key[key] = scores
+    rows: List[Dict[str, Any]] = []
+    for raw in official.to_dicts():
+        hit = by_key.get(_canonical_key(raw.get("Left_Id"), raw.get("Right_Id")) or "")
+        if hit is not None and hit["Global_Scratch_Pct"] is not None:
+            raw["Global_Scratch_Pct"] = hit["Global_Scratch_Pct"]
+            raw["Global_Scratch_Rank"] = hit["Global_Scratch_Rank"]
+            if hit["matched_handicap"]:
+                raw["Handicap_Pct"] = hit["Handicap_Pct"]
+                raw["Handicap_Global_Rank"] = hit["Handicap_Global_Rank"]
+        rows.append(raw)
+    return pl.DataFrame(rows)
+
+
+def archive_club_code(frame: pl.DataFrame, session_id: Any) -> Optional[str]:
+    """Club code of the pairs in a session archive, from the published ranking."""
+    published = _published_session_actuals(session_id)
+    if published is None or "club_code" not in published.columns:
+        return None
+    seat_ids = {
+        _id_token_value(value)
+        for seat in "NESW"
+        if f"Player_ID_{seat}" in frame.columns
+        for value in frame[f"Player_ID_{seat}"].to_list()
+    }
+    seat_ids.discard("")
+    if not seat_ids:
+        return None
+    counts: Dict[str, int] = {}
+    id_columns = [
+        column
+        for column in ("player1_lancelot_id", "player2_lancelot_id", "player1_id", "player2_id")
+        if column in published.columns
+    ]
+    for row in published.to_dicts():
+        tokens = {_id_token_value(row.get(column)) for column in id_columns}
+        if tokens & seat_ids:
+            code = _club_code_text(row.get("club_code"))
+            if code:
+                counts[code] = counts.get(code, 0) + 1
+    if not counts:
+        return None
+    return max(counts, key=counts.get)
+
+
+def ranking_rows(
+    boards: pl.DataFrame,
+    ranking: Optional[pl.DataFrame],
+    session_id: Any = None,
+) -> pl.DataFrame:
     """One row per ranked pair: club ranks, then global ranks, then percentages.
 
     The actual percentages and ranks are scratch, like the predictions. In a
     handicapped session FFBridge's published figures follow as Handicap_*.
     """
     official = _official_pairs(ranking)
+    if session_id is not None:
+        official = _overlay_published_actuals(official, session_id)
     predicted = _predicted_pair_scores(boards)
     if official.is_empty() and predicted.is_empty():
         return pl.DataFrame({name: [] for name in RANKING_COLUMNS})
@@ -1291,8 +1577,18 @@ def apply_session_predictions(
         else None
     )
     ranking, ranking_warning = load_ranking(session_id, Path(cache_dir))
-    ranks = ranking_rows(predicted, ranking)
+    ranks = ranking_rows(predicted, ranking, session_id)
     predicted = _broadcast_ranks(predicted, ranks)
+    # Actuals come from the Elo results once that build has the session
+    # (same figures as ffbridge_session_ranking), else from Lancelot.
+    if _published_session_actuals(session_id) is not None:
+        actuals_source = "elo_results"
+        actuals_built_at = _file_built_at(_elo_results_path())
+    elif ranking is not None:
+        actuals_source = "lancelot_ranking"
+        actuals_built_at = _file_built_at(Path(cache_dir) / "rankings" / f"{session_id}.json")
+    else:
+        actuals_source = actuals_built_at = None
     info = {
         "warning": " ".join(text for text in (warning, fallback_note, ranking_warning) if text) or None,
         "prediction_source": source,
@@ -1301,6 +1597,8 @@ def apply_session_predictions(
         "provenance": {
             **prediction_provenance(models_dir()),
             "predicted_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "actuals_source": actuals_source,
+            "actuals_built_at": actuals_built_at,
         },
         "predictions_available": warning is None and "Pct_NS_Pred" in predicted.columns and predicted["Pct_NS_Pred"].null_count() < predicted.height,
         "results_published": ranking is not None,
