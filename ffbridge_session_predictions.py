@@ -683,20 +683,24 @@ def _align_features(
     taken from the filled pair ratings, and the ``*_Missing`` flags must
     already be on the frame (see ``_add_elo_missing_flags``).
     """
-    missing = [column for column in required if column != "Elo_Gap" and column not in frame.columns]
+    # One schema read and one with_columns: the session frame has ~6,800
+    # columns, and frame.schema rebuilds it on every call. Each expression
+    # reads only its own column, so applying them together is the same.
+    schema = frame.schema
+    missing = [column for column in required if column != "Elo_Gap" and column not in schema]
     if missing:
         raise ValueError(f"Model input is missing {missing}")
-    aligned = frame
-    for column in required:
+    exprs: List[pl.Expr] = []
+    for column in dict.fromkeys(required):
         if column == "Elo_Gap":
             continue
         expected = _dtype_from_schema(str(feature_dtypes.get(column, "Float32")))
-        dtype = aligned.schema[column]
+        dtype = schema[column]
         if column.startswith("Elo_") and expected in (pl.Float32, pl.Float64):
             mean = (scaling_params or {}).get(column, {}).get("mean")
             if mean is None:
                 raise ValueError(f"Model schema has no neutral value for {column}")
-            aligned = aligned.with_columns(
+            exprs.append(
                 pl.col(column)
                 .cast(expected, strict=False)
                 .fill_null(float(mean))
@@ -705,7 +709,7 @@ def _align_features(
             )
             continue
         if expected in (pl.Float32, pl.Float64) and dtype in (pl.Utf8, pl.String):
-            aligned = aligned.with_columns(
+            exprs.append(
                 pl.col(column)
                 .cast(pl.Utf8)
                 .replace_strict(_CT_CODES, default=None)
@@ -715,9 +719,10 @@ def _align_features(
             )
             continue
         if dtype != expected and expected == pl.Utf8:
-            aligned = aligned.with_columns(pl.col(column).cast(pl.Utf8, strict=False))
+            exprs.append(pl.col(column).cast(pl.Utf8, strict=False))
         elif dtype != expected and expected in (pl.Float32, pl.Float64) and dtype.is_numeric():
-            aligned = aligned.with_columns(pl.col(column).cast(expected))
+            exprs.append(pl.col(column).cast(expected))
+    aligned = frame.with_columns(exprs) if exprs else frame
     if "Elo_Gap" in required:
         if "Elo_NS" not in required or "Elo_EW" not in required:
             raise ValueError("Model uses Elo_Gap without Elo_NS and Elo_EW")
