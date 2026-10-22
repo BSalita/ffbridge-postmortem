@@ -749,6 +749,11 @@ def normalized_player_report(
     mapping = metadata["column_mapping"]
     manifest = latest_hierarchical_manifest(output)
     session_rows = manifest.filter(pl.col("session_id") == str(session_id))
+    # One session's files are small (about 2k rows) but very wide (about 7k
+    # columns). The in-memory engine reads them 10x faster than streaming
+    # (1.8 s vs 19 s on Polars 1.44, 29 s on 2.0) with identical output.
+    # Streaming is kept for the scan over every file.
+    engine = "in-memory" if session_rows.height else "streaming"
     if session_rows.height:
         row = session_rows.row(0, named=True)
         results_files = [output / row["results_path"]]
@@ -835,7 +840,7 @@ def normalized_player_report(
     return (
         result.sort("_result_row_id")
         .select(*output_columns)
-        .collect(engine="streaming")
+        .collect(engine=engine)
     )
 
 
