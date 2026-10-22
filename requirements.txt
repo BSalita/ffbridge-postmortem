@@ -10,9 +10,9 @@ streamlit-aggrid==1.1.8.post1
 
 # Data processing and analysis
 pandas
-polars
+polars==1.44.2
 numpy
-duckdb>=1.5,<2
+duckdb==1.5.6
 
 # Web scraping and automation
 playwright
