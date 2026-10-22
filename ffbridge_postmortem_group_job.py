@@ -342,7 +342,7 @@ def _prepare_frame(df: Any, meta: Dict[str, Any], statements: List[Dict[str, str
     if not any(session_predictions.sql_needs_predictions(item["sql"]) for item in statements):
         return df, None
     try:
-        predicted, info = session_predictions.apply_session_predictions(
+        predicted, info = session_predictions.cached_session_predictions(
             df, meta.get("session_id"), svc.CACHE_DIR
         )
     except Exception as exc:
@@ -364,7 +364,11 @@ def _run_job(job_id: str) -> None:
             con.execute(f"SET threads={_DUCKDB_THREADS}")
             with _LOCK:
                 _CONNECTIONS[job_id] = con
-            con.register(svc.CON_REGISTER_NAME, frame)
+            # A native table: queries on the ~6,800-column registered Polars
+            # frame cost ~0.1 s each, on the table ~0.02 s; the copy ~0.3 s.
+            con.register("_frame", frame)
+            con.execute(f"CREATE TABLE {svc.CON_REGISTER_NAME} AS SELECT * FROM _frame")
+            con.unregister("_frame")
             for statement in job["statements"]:
                 if _cancelled(job_id):
                     _mark(

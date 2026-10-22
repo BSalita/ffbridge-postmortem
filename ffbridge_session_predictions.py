@@ -32,7 +32,9 @@ import functools
 import json
 import math
 import os
-from collections import Counter
+import threading
+import time
+from collections import Counter, OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -1607,6 +1609,40 @@ def apply_session_predictions(
         "ranking_pairs": ranks.height,
         "ranks": ranks,
     }
+    return predicted, info
+
+
+# apply_session_predictions costs ~2.6 s per session (Elo features, three
+# models, rankings). A report and the chat's per-statement SQL ask for the
+# same player's session again and again, so the API reuses the result for
+# 10 minutes. The key hashes the input frame: another player, or new scores
+# for the session, miss. The TTL bounds staleness of live Lancelot rankings
+# and nightly model retrains.
+PREDICTION_CACHE_TTL_S = 10 * 60
+_PREDICTION_CACHE_MAX = 16
+_PREDICTION_CACHE: "OrderedDict[Tuple[str, str, int, int], Tuple[float, pl.DataFrame, Dict[str, Any]]]" = OrderedDict()
+_PREDICTION_CACHE_LOCK = threading.Lock()
+
+
+def cached_session_predictions(
+    boards: pl.DataFrame,
+    session_id: Any,
+    cache_dir: Path,
+) -> Tuple[pl.DataFrame, Dict[str, Any]]:
+    """apply_session_predictions, reused for PREDICTION_CACHE_TTL_S per input frame."""
+    key = (str(session_id), str(cache_dir), boards.height, int(boards.hash_rows().sum()))
+    now = time.monotonic()
+    with _PREDICTION_CACHE_LOCK:
+        hit = _PREDICTION_CACHE.get(key)
+        if hit is not None and now - hit[0] < PREDICTION_CACHE_TTL_S:
+            _PREDICTION_CACHE.move_to_end(key)
+            return hit[1], hit[2]
+    predicted, info = apply_session_predictions(boards, session_id, cache_dir)
+    with _PREDICTION_CACHE_LOCK:
+        _PREDICTION_CACHE[key] = (now, predicted, info)
+        _PREDICTION_CACHE.move_to_end(key)
+        while len(_PREDICTION_CACHE) > _PREDICTION_CACHE_MAX:
+            _PREDICTION_CACHE.popitem(last=False)
     return predicted, info
 
 

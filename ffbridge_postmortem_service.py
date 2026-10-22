@@ -681,7 +681,7 @@ def run_sql(df: pl.DataFrame, sql: str, meta: Dict[str, Any], limit: Optional[in
     sql = prepare_postmortem_sql(sql, meta)
     prediction_info = None
     if session_predictions.sql_needs_predictions(sql):
-        df, prediction_info = session_predictions.apply_session_predictions(
+        df, prediction_info = session_predictions.cached_session_predictions(
             df, meta.get("session_id"), CACHE_DIR
         )
     # external access off: only the registered dataframe is queryable.

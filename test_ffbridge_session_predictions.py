@@ -1031,5 +1031,36 @@ class ClubSessionTests(unittest.TestCase):
             self.assertEqual(predictions.archive_club_code(frame, "282864"), "5802079")
 
 
+
+class PredictionCacheTests(unittest.TestCase):
+    def setUp(self):
+        predictions._PREDICTION_CACHE.clear()
+
+    def _boards(self, pct=0.5):
+        return pl.DataFrame({"Board": [1, 2], "Pct_NS": [pct, 1 - pct]})
+
+    def test_same_frame_reuses_predictions(self):
+        with patch.object(predictions, "apply_session_predictions", return_value=(self._boards(), {"warning": None})) as apply:
+            predictions.cached_session_predictions(self._boards(), "1", Path("c"))
+            predictions.cached_session_predictions(self._boards(), "1", Path("c"))
+        self.assertEqual(apply.call_count, 1)
+
+    def test_changed_scores_or_session_recompute(self):
+        with patch.object(predictions, "apply_session_predictions", return_value=(self._boards(), {"warning": None})) as apply:
+            predictions.cached_session_predictions(self._boards(), "1", Path("c"))
+            predictions.cached_session_predictions(self._boards(0.6), "1", Path("c"))
+            predictions.cached_session_predictions(self._boards(), "2", Path("c"))
+        self.assertEqual(apply.call_count, 3)
+
+    def test_expired_entry_recomputes(self):
+        with patch.object(predictions, "apply_session_predictions", return_value=(self._boards(), {"warning": None})) as apply:
+            predictions.cached_session_predictions(self._boards(), "1", Path("c"))
+            key = next(iter(predictions._PREDICTION_CACHE))
+            stamp, frame, info = predictions._PREDICTION_CACHE[key]
+            predictions._PREDICTION_CACHE[key] = (stamp - predictions.PREDICTION_CACHE_TTL_S - 1, frame, info)
+            predictions.cached_session_predictions(self._boards(), "1", Path("c"))
+        self.assertEqual(apply.call_count, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
