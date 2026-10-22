@@ -925,7 +925,7 @@ def archive_rows(
                 known = pl.concat(id_frames, how="vertical_relaxed")
                 recent_lf = recent_lf.with_columns(
                     pl.col("session_id").cast(pl.String)
-                ).join(known, on="session_id", how="anti")
+                ).join(known, on="session_id", how="anti", maintain_order="left")
         lazy_frames.append(recent_lf)
     query = pl.concat(lazy_frames, how="diagonal_relaxed")
     if date_from is not None:
