@@ -10,6 +10,8 @@ Session predictions, with no player and nothing saved under a player:
   GET /predictions/boards?session_id= or ?club=&date=
   GET /predictions/rankings?session_id= or ?club=&date=
   POST /predictions/entries  (ranking predicted from the entered pairs, before play)
+  GET  /predictions/entries  (same, from the entry list read live on FFBridge)
+  GET  /entries/upcoming  (the service account's upcoming entries)
   date is YYYY-MM-DD. Omit it for the club's latest session.
   The player routes still read one cached postmortem:
   GET /postmortems/{player_id}/predictions/boards
@@ -37,6 +39,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
 import ffbridge_entries_predictions as entries_predictions
+import ffbridge_entry_list as entry_list
 import ffbridge_postmortem_create as create
 import ffbridge_postmortem_group_job as group_job
 import ffbridge_postmortem_service as svc
@@ -394,6 +397,27 @@ def session_prediction_entries(payload: dict = Body(...)) -> dict:
         payload.get("date"),
         sims=int(payload.get("sims") or entries_predictions.DEFAULT_SIMS),
     )
+
+
+@app.get("/predictions/entries")
+def session_prediction_entry_list(
+    group_session_id: Optional[str] = Query(
+        None,
+        description="Lancelot group session id. Omit for the service account's next entered session.",
+    ),
+    sims: int = Query(entries_predictions.DEFAULT_SIMS, ge=100, le=entries_predictions.MAX_SIMS),
+) -> dict:
+    """The same forecast, from the session's entry list read live on FFBridge."""
+    return entry_list.predict_group_session(group_session_id, sims=sims)
+
+
+@app.get("/entries/upcoming")
+def upcoming_entries(
+    date_from: Optional[str] = Query(None, description="YYYY-MM-DD. Omit for today."),
+) -> dict:
+    """The service account's upcoming entries (group sessions), soonest first."""
+    rows = entry_list.upcoming_entries(date_from)
+    return {"sessions": rows, "count": len(rows)}
 
 
 @app.get("/postmortems/{player_id}/predictions/boards")
