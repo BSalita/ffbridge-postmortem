@@ -2282,7 +2282,6 @@ def _render_upcoming_entries_sidebar() -> None:
     if not lancelot_id:
         return
     st.sidebar.markdown("---")
-    st.sidebar.markdown(f"**{chrome_text('upcoming_entries', 'Upcoming entries')}**")
     with st.sidebar:
         with st.spinner(chrome_text("entries_loading", "Reading entries and forecasting...")):
             try:
@@ -2297,8 +2296,6 @@ def _render_upcoming_entries_sidebar() -> None:
     if not rows:
         st.sidebar.caption(chrome_text("no_entries", "No upcoming entries."))
         return
-    for row in rows:
-        st.sidebar.caption(_entry_label(row))
     none_label = chrome_text("entry_none", "— show the game report —")
     options = {none_label: None}
     for row in rows:
@@ -2308,7 +2305,7 @@ def _render_upcoming_entries_sidebar() -> None:
         st.session_state.entry_forecast_selectbox = none_label
         st.session_state.entry_forecast_gsid = None
     st.sidebar.selectbox(
-        chrome_text("entry_pick", "Forecast for an entry"),
+        chrome_text("entry_pick", "Upcoming Game Forecasts"),
         options=list(options),
         key="entry_forecast_selectbox",
         on_change=_entry_forecast_on_change,
