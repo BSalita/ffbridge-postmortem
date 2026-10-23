@@ -2233,6 +2233,7 @@ def player_search_input_on_change() -> None:
 
 
 ENTRY_FORECAST_SIMS = 5000
+ENTRY_FORECAST_COLUMNS = ["Rank_Pred", "Pair", "Pct_Pred", "P_Win", "P_Top3", "Pair_Elo"]
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -2335,18 +2336,11 @@ def _render_entry_forecast(group_session_id: str) -> None:
     import ffbridge_entry_list as entry_list
 
     own = entry_list.player_row(forecast, str(st.session_state.get("lancelot_player_id") or ""))
-    columns = [c for c in forecast.get("columns") or [] if c in rows[0]]
-    df = pl.DataFrame(rows).select(columns)
-    # Orientation and similar fields are empty before seating.
-    df = df.select([name for name in df.columns if df[name].null_count() < df.height])
+    df = pl.DataFrame(rows).select(ENTRY_FORECAST_COLUMNS).sort("Rank_Pred")
     if own is not None:
         st.markdown(chrome_text(
             "entry_forecast_you", "**Your pair:** {pair} — rank {rank}, {pct:.1f}%"
         ).format(pair=own["Pair"], rank=own["Rank_Pred"], pct=own["Pct_Pred"]))
-        df = df.select(
-            pl.when(pl.col("Pair") == own["Pair"]).then(pl.lit("▶")).otherwise(pl.lit("")).alias(" "),
-            pl.all(),
-        )
     st.dataframe(df, hide_index=True, use_container_width=True)
     for warning in forecast.get("warnings") or []:
         st.caption(str(warning))
