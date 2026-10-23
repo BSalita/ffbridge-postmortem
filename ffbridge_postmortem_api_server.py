@@ -9,6 +9,7 @@ The MCP server and Streamlit app are HTTP clients of this API.
 Session predictions, with no player and nothing saved under a player:
   GET /predictions/boards?session_id= or ?club=&date=
   GET /predictions/rankings?session_id= or ?club=&date=
+  POST /predictions/entries  (ranking predicted from the entered pairs, before play)
   date is YYYY-MM-DD. Omit it for the club's latest session.
   The player routes still read one cached postmortem:
   GET /postmortems/{player_id}/predictions/boards
@@ -35,6 +36,7 @@ from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
+import ffbridge_entries_predictions as entries_predictions
 import ffbridge_postmortem_create as create
 import ffbridge_postmortem_group_job as group_job
 import ffbridge_postmortem_service as svc
@@ -374,6 +376,24 @@ def session_prediction_rankings(
 ) -> dict:
     """Club prediction leaderboard for a session, or for a club on a date."""
     return _session_prediction("rankings", session_id, club, date, limit)
+
+
+@app.post("/predictions/entries")
+def session_prediction_entries(payload: dict = Body(...)) -> dict:
+    """Predicted ranking from a session's entries, before it is played.
+
+    Body: {"entries": [["licence or name", "licence or name"], ...],
+    "date": "YYYY-MM-DD", "sims": 20000}. An entry may also be
+    "A / B" or {"players": [a, b], "orientation": "NS"|"EW", "label": "..."}.
+    """
+    entries = payload.get("entries")
+    if not isinstance(entries, list):
+        raise ValueError("entries must be a list of pairs")
+    return entries_predictions.predict_entries(
+        entries,
+        payload.get("date"),
+        sims=int(payload.get("sims") or entries_predictions.DEFAULT_SIMS),
+    )
 
 
 @app.get("/postmortems/{player_id}/predictions/boards")
