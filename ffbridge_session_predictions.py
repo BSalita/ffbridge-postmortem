@@ -42,8 +42,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import polars as pl
 
 _HOST_MODELS_DIR = Path(r"E:\bridge\data\ffbridge\SavedModels")
-# postmortem_start.ps1 stages the host checkpoints onto the /data mount.
-_STAGED_MODELS_DIR = Path("/data/_wslc_host/ffbridge-SavedModels")
+# elo\u.bat publishes the checkpoints to src\data\ffbridge\SavedModels, which
+# the container sees in place on the /data mount.
 _PUBLISHED_MODELS_DIR = Path("/data/ffbridge/SavedModels")
 _ELO_CACHE_DIRS = (
     Path("/data/ffbridge/elo_cache"),
@@ -127,13 +127,13 @@ def models_dir() -> Path:
     """First directory that actually contains the club checkpoints.
 
     A configured path that does not exist is skipped. The container cannot
-    see ``E:\\bridge\\data``, so the staged mount is checked as well.
+    see ``E:\\bridge\\data``, so the published /data copy is checked first.
     """
     configured = os.environ.get("FFBRIDGE_SAVED_MODELS")
     candidates = []
     if configured:
         candidates.append(Path(configured))
-    candidates.extend((_STAGED_MODELS_DIR, _PUBLISHED_MODELS_DIR, _HOST_MODELS_DIR))
+    candidates.extend((_PUBLISHED_MODELS_DIR, _HOST_MODELS_DIR))
     for directory in candidates:
         if _checkpoints_present(directory):
             return directory

@@ -723,12 +723,7 @@ class RankingTests(unittest.TestCase):
             ).write_text("{}", encoding="utf-8")
             with (
                 patch.dict(os.environ, {"FFBRIDGE_SAVED_MODELS": str(empty)}),
-                patch.object(
-                    predictions,
-                    "_STAGED_MODELS_DIR",
-                    found,
-                ),
-                patch.object(predictions, "_PUBLISHED_MODELS_DIR", root / "absent"),
+                patch.object(predictions, "_PUBLISHED_MODELS_DIR", found),
                 patch.object(predictions, "_HOST_MODELS_DIR", root / "also-absent"),
             ):
                 self.assertEqual(predictions.models_dir(), found)
