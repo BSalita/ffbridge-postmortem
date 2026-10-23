@@ -2344,7 +2344,7 @@ def _render_entry_forecast(group_session_id: str) -> None:
         st.markdown(chrome_text(
             "entry_forecast_you", "**Your pair:** {pair} — rank {rank}, {pct:.1f}%"
         ).format(pair=own["Pair"], rank=own["Rank_Pred"], pct=own["Pct_Pred"]))
-    st.dataframe(df, hide_index=True, use_container_width=True)
+    streamlitlib.ShowDataFrameTable(df, key=f"entry_forecast_{group_session_id}", height_rows=min(df.height, 25))
     for warning in forecast.get("warnings") or []:
         st.caption(str(warning))
 
