@@ -96,6 +96,55 @@ class EntryListTests(unittest.TestCase):
         self.assertEqual([row["group_session_id"] for row in rows], ["422517", "422522"])
         self.assertEqual(rows[0]["partner"], "DAS Ramendra")
 
+    def test_403_means_private_entries(self):
+        import requests
+
+        response = requests.Response()
+        response.status_code = 403
+        error = requests.HTTPError(response=response)
+        with patch.object(entry_list, "_api_get", side_effect=error), \
+                patch.object(entry_list.create, "ensure_lancelot_auth", return_value=_FakeAuth()):
+            with self.assertRaises(entry_list.EntriesPrivate):
+                entry_list.upcoming_entries("2026-10-23", person_id="77119")
+
+    def test_another_players_entries_name_their_partner(self):
+        upcoming = {"items": [
+            {"players": [_person("77119", "DAS", "Ramendra", "2"), _person("246273", "SALITA", "Robert", "9500754")],
+             "teamEntries": [{"groupSession": {"id": 422517}}]},
+        ]}
+
+        def fake(path, params=None):
+            self.assertTrue(path.startswith("/persons/77119/") or path.startswith("/competitions/"))
+            return upcoming if path.startswith("/persons/") else SESSION
+
+        with patch.object(entry_list, "_api_get", side_effect=fake), \
+                patch.object(entry_list.create, "ensure_lancelot_auth", return_value=_FakeAuth()):
+            rows = entry_list.upcoming_entries("2026-10-23", person_id="77119")
+        self.assertEqual(rows[0]["partner"], "SALITA Robert")
+
+    def test_entries_with_forecast_pick_the_players_own_row(self):
+        rows = [{"group_session_id": "422517", "date": "2026-10-23T14:00:00+02:00"},
+                {"group_session_id": "422999", "date": "2026-10-24T14:00:00+02:00"}]
+        forecast = {
+            "pairs": 2,
+            "rows": [{"Pair": "BRUN Bernard - MAMOU MANI Claude", "Rank_Pred": 1, "Pct_Pred": 61.0, "Orientation": None},
+                     {"Pair": "DAS Ramendra - SALITA Robert", "Rank_Pred": 2, "Pct_Pred": 55.5, "Orientation": None}],
+            "pair_of_player": {"246273": "DAS Ramendra - SALITA Robert"},
+            "entry_list_read_at": "2026-10-23T10:00:00+00:00",
+        }
+
+        def fake_predict(gsid, sims):
+            if gsid == "422999":
+                raise ValueError("Group session 422999 has 1 registered pairs")
+            return forecast
+
+        with patch.object(entry_list, "upcoming_entries", return_value=rows), \
+                patch.object(entry_list, "predict_group_session", side_effect=fake_predict):
+            out = entry_list.entries_with_forecast("246273", "2026-10-23", sims=500)
+        self.assertEqual((out[0]["forecast_rank"], out[0]["forecast_pct"], out[0]["pairs"]), (2, 55.5, 2))
+        self.assertEqual(out[0]["pair"], "DAS Ramendra - SALITA Robert")
+        self.assertIn("1 registered pairs", out[1]["forecast_error"])
+
     def test_fewer_than_two_pairs_fails(self):
         def fake(path, params=None):
             return SESSION if path.startswith("/competitions/groupSessions/") else {"items": []}

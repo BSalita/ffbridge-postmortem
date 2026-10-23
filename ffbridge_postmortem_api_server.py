@@ -414,9 +414,21 @@ def session_prediction_entry_list(
 @app.get("/entries/upcoming")
 def upcoming_entries(
     date_from: Optional[str] = Query(None, description="YYYY-MM-DD. Omit for today."),
+    player_id: Optional[str] = Query(None, description="Lancelot person id. Omit for the service account."),
+    with_forecast: bool = Query(False, description="Add the player's forecast rank and pct to each entry."),
+    sims: int = Query(5000, ge=500, le=100000),
 ) -> dict:
-    """The service account's upcoming entries (group sessions), soonest first."""
-    rows = entry_list.upcoming_entries(date_from)
+    """A player's upcoming entries (group sessions), soonest first.
+
+    403 when FFBridge keeps that player's entries private.
+    """
+    try:
+        if with_forecast:
+            rows = entry_list.entries_with_forecast(player_id, date_from, sims=sims)
+        else:
+            rows = entry_list.upcoming_entries(date_from, person_id=player_id)
+    except entry_list.EntriesPrivate as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return {"sessions": rows, "count": len(rows)}
 
 

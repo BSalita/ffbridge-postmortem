@@ -88,24 +88,37 @@ def session_entrants(group_session_id: str) -> List[Dict[str, Any]]:
         page += 1
 
 
-def upcoming_entries(date_from: Optional[str] = None) -> List[Dict[str, Any]]:
-    """The service account's own upcoming entries, soonest first."""
+class EntriesPrivate(PermissionError):
+    """FFBridge does not show this player's entries to the service account."""
+
+
+def upcoming_entries(date_from: Optional[str] = None, person_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """A player's upcoming entries, soonest first (default: the service account).
+
+    FFBridge answers 403 for some players; that raises EntriesPrivate.
+    """
     auth = create.ensure_lancelot_auth()
-    raw = _api_get(
-        f"/persons/{auth.lancelot_id}/teams",
-        {
-            "dateFrom": date_from or date.today().isoformat(),
-            "includePreEntries": 1,
-            "currentPage": 1,
-            "maxPerPage": 80,
-        },
-    )
+    person = str(person_id or auth.lancelot_id)
+    try:
+        raw = _api_get(
+            f"/persons/{person}/teams",
+            {
+                "dateFrom": date_from or date.today().isoformat(),
+                "includePreEntries": 1,
+                "currentPage": 1,
+                "maxPerPage": 80,
+            },
+        )
+    except requests.HTTPError as exc:
+        if exc.response is not None and exc.response.status_code == 403:
+            raise EntriesPrivate(f"FFBridge does not show the entries of player {person}") from exc
+        raise
     sessions: List[Dict[str, Any]] = []
     for team in raw.get("items") or []:
         partners = [
-            _person_name(person)
-            for person in team.get("players") or []
-            if str(person.get("id")) != auth.lancelot_id
+            _person_name(member)
+            for member in team.get("players") or []
+            if str(member.get("id")) != person
         ]
         for entry in team.get("teamEntries") or []:
             group_session = (entry.get("groupSession") or {}).get("id")
@@ -148,4 +161,46 @@ def predict_group_session(
     result["team_iv"] = {
         " - ".join(player["name"] for player in pair["players"]): pair["team_iv"] for pair in entrants
     }
+    # Pair label for each entered player, to find a player's own row.
+    result["pair_of_player"] = {
+        player["lancelot_id"]: " - ".join(p["name"] for p in pair["players"])
+        for pair in entrants
+        for player in pair["players"]
+    }
     return result
+
+
+def player_row(forecast: Dict[str, Any], person_id: str) -> Optional[Dict[str, Any]]:
+    """The forecast row of the pair that ``person_id`` entered with, if any."""
+    label = (forecast.get("pair_of_player") or {}).get(str(person_id))
+    if label is None:
+        return None
+    return next((row for row in forecast.get("rows") or [] if row.get("Pair") == label), None)
+
+
+def entries_with_forecast(
+    person_id: Optional[str] = None,
+    date_from: Optional[str] = None,
+    sims: int = 5000,
+) -> List[Dict[str, Any]]:
+    """A player's upcoming entries, each with that player's forecast rank and pct.
+
+    A session with fewer than two registered pairs gets ``forecast_error``.
+    Raises EntriesPrivate when FFBridge keeps the player's entries private.
+    """
+    person = str(person_id or create.ensure_lancelot_auth().lancelot_id)
+    rows = upcoming_entries(date_from, person_id=person)
+    for row in rows:
+        try:
+            forecast = predict_group_session(row["group_session_id"], sims=sims)
+        except ValueError as exc:
+            row["forecast_error"] = str(exc)
+            continue
+        own = player_row(forecast, person)
+        row["pairs"] = forecast.get("pairs")
+        row["pair"] = own.get("Pair") if own else None
+        row["orientation"] = own.get("Orientation") if own else None
+        row["forecast_rank"] = own.get("Rank_Pred") if own else None
+        row["forecast_pct"] = own.get("Pct_Pred") if own else None
+        row["entry_list_read_at"] = forecast.get("entry_list_read_at")
+    return rows

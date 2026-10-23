@@ -2232,8 +2232,131 @@ def player_search_input_on_change() -> None:
 
 
 
+ENTRY_FORECAST_SIMS = 5000
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _cached_entries_with_forecast(lancelot_id: str, day: str) -> Dict[str, Any]:
+    """A player's upcoming entries with forecasts, re-read every 10 minutes.
+
+    Returns {"private": True} when FFBridge hides the player's entries.
+    """
+    import ffbridge_entry_list as entry_list
+
+    try:
+        rows = entry_list.entries_with_forecast(lancelot_id, day, sims=ENTRY_FORECAST_SIMS)
+    except entry_list.EntriesPrivate:
+        return {"private": True, "rows": []}
+    return {"private": False, "rows": rows}
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _cached_session_forecast(group_session_id: str) -> Dict[str, Any]:
+    import ffbridge_entry_list as entry_list
+
+    return entry_list.predict_group_session(group_session_id, sims=ENTRY_FORECAST_SIMS)
+
+
+def _entry_label(row: Mapping[str, Any]) -> str:
+    """One line per entry: date, session, and the player's forecast."""
+    when = str(row.get("date") or "")[:16].replace("T", " ")
+    name = row.get("label") or row.get("club_name") or row.get("group_session_id")
+    if row.get("forecast_error"):
+        return f"{when} · {name} · {chrome_text('entry_too_few', 'too few pairs entered yet')}"
+    if row.get("forecast_rank") is None:
+        return f"{when} · {name}"
+    return chrome_text(
+        "entry_line", "{when} · {name} · rank {rank}/{pairs} · {pct:.1f}%"
+    ).format(when=when, name=name, rank=row["forecast_rank"], pairs=row.get("pairs") or "?", pct=row["forecast_pct"])
+
+
+def _entry_forecast_on_change() -> None:
+    choice = st.session_state.get("entry_forecast_selectbox")
+    options = st.session_state.get("entry_forecast_options") or {}
+    st.session_state.entry_forecast_gsid = options.get(choice)
+
+
+def _render_upcoming_entries_sidebar() -> None:
+    """Sidebar: the player's upcoming entries and a picker for one session's forecast."""
+    lancelot_id = st.session_state.get("lancelot_player_id")
+    if not lancelot_id:
+        return
+    st.sidebar.markdown("---")
+    st.sidebar.markdown(f"**{chrome_text('upcoming_entries', 'Upcoming entries')}**")
+    with st.sidebar:
+        with st.spinner(chrome_text("entries_loading", "Reading entries and forecasting...")):
+            try:
+                data = _cached_entries_with_forecast(str(lancelot_id), datetime.now().date().isoformat())
+            except Exception as e:
+                st.error(f"Could not read entries from FFBridge: {e}")
+                return
+    if data["private"]:
+        st.sidebar.info(chrome_text("entries_private", "This player's entries aren't visible on FFBridge."))
+        return
+    rows = data["rows"]
+    if not rows:
+        st.sidebar.caption(chrome_text("no_entries", "No upcoming entries."))
+        return
+    for row in rows:
+        st.sidebar.caption(_entry_label(row))
+    none_label = chrome_text("entry_none", "— show the game report —")
+    options = {none_label: None}
+    for row in rows:
+        options[_entry_label(row)] = str(row["group_session_id"])
+    st.session_state.entry_forecast_options = options
+    if st.session_state.get("entry_forecast_selectbox") not in options:
+        st.session_state.entry_forecast_selectbox = none_label
+        st.session_state.entry_forecast_gsid = None
+    st.sidebar.selectbox(
+        chrome_text("entry_pick", "Forecast for an entry"),
+        options=list(options),
+        key="entry_forecast_selectbox",
+        on_change=_entry_forecast_on_change,
+    )
+
+
+def _render_entry_forecast(group_session_id: str) -> None:
+    """Main area: the full forecast grid for one entered session."""
+    with st.spinner(chrome_text("entries_loading", "Reading entries and forecasting...")):
+        forecast = _cached_session_forecast(group_session_id)
+    session = forecast.get("session") or {}
+    when = str(session.get("date") or "")[:16].replace("T", " ")
+    st.subheader(chrome_text("entry_forecast_title", "Pre-game forecast: {name}").format(
+        name=session.get("label") or session.get("club_name") or group_session_id))
+    st.caption(chrome_text(
+        "entry_forecast_caption",
+        "{when} · {club} · {pairs} pairs entered · entry list read {read_at} UTC",
+    ).format(
+        when=when,
+        club=session.get("club_name") or "",
+        pairs=forecast.get("pairs"),
+        read_at=str(forecast.get("entry_list_read_at") or "")[:19].replace("T", " "),
+    ))
+    rows = forecast.get("rows") or []
+    if not rows:
+        return
+    import ffbridge_entry_list as entry_list
+
+    own = entry_list.player_row(forecast, str(st.session_state.get("lancelot_player_id") or ""))
+    columns = [c for c in forecast.get("columns") or [] if c in rows[0]]
+    df = pl.DataFrame(rows).select(columns)
+    if own is not None:
+        st.markdown(chrome_text(
+            "entry_forecast_you", "**Your pair:** {pair} — rank {rank}, {pct:.1f}%"
+        ).format(pair=own["Pair"], rank=own["Rank_Pred"], pct=own["Pct_Pred"]))
+        df = df.select(
+            pl.when(pl.col("Pair") == own["Pair"]).then(pl.lit("▶")).otherwise(pl.lit("")).alias(" "),
+            pl.all(),
+        )
+    st.dataframe(df, hide_index=True, use_container_width=True)
+    for warning in forecast.get("warnings") or []:
+        st.caption(str(warning))
+
+
 def club_session_id_on_change() -> None:
     #st.session_state.tournament_session_ids_selectbox = None # clear tournament index whenever club index changes. todo: doesn't seem to update selectbox with new index.
+    st.session_state.entry_forecast_gsid = None
+    st.session_state.pop("entry_forecast_selectbox", None)
     selection = st.session_state.club_session_ids_selectbox
     if selection is not None:
         session_id = _session_id_from_game_option(selection)
@@ -2769,6 +2892,11 @@ class FFBridgeApp(PostmortemBase):
                 
                 show_morty_intro()
                 app_info()
+            elif st.session_state.get("entry_forecast_gsid"):
+                try:
+                    _render_entry_forecast(str(st.session_state.entry_forecast_gsid))
+                except Exception as e:
+                    st.error(f"Entry forecast failed for group session {st.session_state.entry_forecast_gsid}: {e}")
             elif st.session_state.session_id is not None:
                 st.session_state.report_rendering = True
                 # Hidden machine-readable metadata for automation tools
@@ -3027,6 +3155,8 @@ class FFBridgeApp(PostmortemBase):
         # Download Personalized Report PDF button placeholder (below the link button)
         st.session_state.pdf_link = st.sidebar.empty()
 
+        _render_upcoming_entries_sidebar()
+
         if st.session_state.get("favorites") and st.session_state.get("df") is not None:
             st.sidebar.markdown("---")
             st.sidebar.write(chrome_text(
@@ -3038,6 +3168,7 @@ class FFBridgeApp(PostmortemBase):
                 help_text = localized_field(button, "help", str(button.get("help") or ""))
                 if st.sidebar.button(label, help=help_text or None, key=key):
                     st.session_state.sql_query_mode = False
+                    st.session_state.entry_forecast_gsid = None
                     st.session_state.button_title = key
                     if key == "AI_Predictions":
                         _attach_session_predictions()
