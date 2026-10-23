@@ -2290,11 +2290,14 @@ def _render_upcoming_entries_sidebar() -> None:
             except Exception as e:
                 st.error(f"Could not read entries from FFBridge: {e}")
                 return
+    title = chrome_text("entry_pick", "Upcoming Game Forecasts")
     if data["private"]:
+        st.sidebar.markdown(f"**{title}**")
         st.sidebar.info(chrome_text("entries_private", "This player's entries aren't visible on FFBridge."))
         return
     rows = data["rows"]
     if not rows:
+        st.sidebar.markdown(f"**{title}**")
         st.sidebar.caption(chrome_text("no_entries", "No upcoming entries."))
         return
     none_label = chrome_text("entry_none", "— show the game report —")
@@ -2306,7 +2309,7 @@ def _render_upcoming_entries_sidebar() -> None:
         st.session_state.entry_forecast_selectbox = none_label
         st.session_state.entry_forecast_gsid = None
     st.sidebar.selectbox(
-        chrome_text("entry_pick", "Upcoming Game Forecasts"),
+        title,
         options=list(options),
         key="entry_forecast_selectbox",
         on_change=_entry_forecast_on_change,
