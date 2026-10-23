@@ -167,6 +167,29 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(body["provenance"]["sims"], 1000)
         self.assertEqual(bad.status_code, 400)
 
+    def test_upcoming_entries_resolve_a_licence_and_report_private(self):
+        from unittest.mock import patch
+
+        try:
+            from fastapi.testclient import TestClient
+            import ffbridge_postmortem_api_server as server
+        except ImportError as exc:
+            self.skipTest(f"API server not importable here: {exc}")
+        person = server.create.ResolvedPlayer(
+            lancelot_id="246273", license_number="9500754", requested_id="9500754", classic_person_id=None
+        )
+        client = TestClient(server.app)
+        with patch.object(server.create, "resolve_player", return_value=person), \
+                patch.object(server.entry_list, "upcoming_entries", return_value=[{"group_session_id": "422517"}]) as listed:
+            ok = client.get("/entries/upcoming", params={"player_id": "9500754", "date_from": "2026-10-23"})
+        self.assertEqual(ok.status_code, 200, ok.text)
+        self.assertEqual(listed.call_args.kwargs["person_id"], "246273")
+        self.assertEqual(ok.json()["player"], {"lancelot_id": "246273", "license_number": "9500754"})
+        with patch.object(server.create, "resolve_player", return_value=person), \
+                patch.object(server.entry_list, "upcoming_entries", side_effect=server.entry_list.EntriesPrivate("hidden")):
+            private = client.get("/entries/upcoming", params={"player_id": "4958370"})
+        self.assertEqual(private.status_code, 403)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -417,22 +417,31 @@ def entries_forecast_from_entry_list(
 @app.get("/entries/upcoming")
 def upcoming_entries(
     date_from: Optional[str] = Query(None, description="YYYY-MM-DD. Omit for today."),
-    player_id: Optional[str] = Query(None, description="Lancelot person id. Omit for the service account."),
+    player_id: Optional[str] = Query(
+        None, description="Licence number or Lancelot person id. Omit for the service account."
+    ),
     with_forecast: bool = Query(False, description="Add the player's forecast rank and pct to each entry."),
     sims: int = Query(5000, ge=500, le=100000),
 ) -> dict:
-    """A player's upcoming entries (group sessions), soonest first.
+    """A player's entries (group sessions) from date_from on, soonest first.
 
-    403 when FFBridge keeps that player's entries private.
+    Sessions earlier on date_from are included. 403 when FFBridge keeps that
+    player's entries private.
     """
+    person = create.resolve_player(player_id) if player_id else None
+    lancelot_id = person.lancelot_id if person else None
     try:
         if with_forecast:
-            rows = entry_list.entries_with_forecast(player_id, date_from, sims=sims)
+            rows = entry_list.entries_with_forecast(lancelot_id, date_from, sims=sims)
         else:
-            rows = entry_list.upcoming_entries(date_from, person_id=player_id)
+            rows = entry_list.upcoming_entries(date_from, person_id=lancelot_id)
     except entry_list.EntriesPrivate as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
-    return {"sessions": rows, "count": len(rows)}
+    return {
+        "player": {"lancelot_id": person.lancelot_id, "license_number": person.license_number} if person else None,
+        "sessions": rows,
+        "count": len(rows),
+    }
 
 
 @app.get("/postmortems/{player_id}/predictions/boards")
