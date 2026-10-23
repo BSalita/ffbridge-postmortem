@@ -2340,6 +2340,8 @@ def _render_entry_forecast(group_session_id: str) -> None:
     own = entry_list.player_row(forecast, str(st.session_state.get("lancelot_player_id") or ""))
     columns = [c for c in forecast.get("columns") or [] if c in rows[0]]
     df = pl.DataFrame(rows).select(columns)
+    # Orientation and similar fields are empty before seating.
+    df = df.select([name for name in df.columns if df[name].null_count() < df.height])
     if own is not None:
         st.markdown(chrome_text(
             "entry_forecast_you", "**Your pair:** {pair} — rank {rank}, {pct:.1f}%"
