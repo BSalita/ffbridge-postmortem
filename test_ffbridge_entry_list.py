@@ -50,7 +50,7 @@ class EntryListTests(unittest.TestCase):
         self.assertEqual(meta["label"], "Atout Simultane")
         self.assertEqual(meta["expected_boards"], 24)
 
-    def test_predict_group_session_passes_lancelot_ids_and_the_session_day(self):
+    def test_forecast_group_session_passes_lancelot_ids_and_the_session_day(self):
         teams = {"items": [
             _team(1, [_person("77119", "DAS", "Ramendra", "2207977"), _person("246273", "SALITA", "Robert", "9500754")], 106),
             _team(2, [_person("14948", "BRUN", "Bernard", "663642"), _person("16915", "MAMOU MANI", "Claude", "757594")], 160),
@@ -66,8 +66,8 @@ class EntryListTests(unittest.TestCase):
             return {"rows": [], "warnings": []}
 
         with patch.object(entry_list, "_api_get", side_effect=fake), \
-                patch.object(entry_list.entries_predictions, "predict_entries", side_effect=fake_predict):
-            out = entry_list.predict_group_session("422517", sims=500)
+                patch.object(entry_list.entries_forecast, "forecast_entries", side_effect=fake_predict):
+            out = entry_list.forecast_group_session("422517", sims=500)
         self.assertEqual(captured["on_date"], "2026-10-23")
         self.assertEqual(captured["sims"], 500)
         self.assertEqual(captured["entries"][0], {"players": ["77119", "246273"], "label": "DAS Ramendra - SALITA Robert"})
@@ -127,8 +127,8 @@ class EntryListTests(unittest.TestCase):
                 {"group_session_id": "422999", "date": "2026-10-24T14:00:00+02:00"}]
         forecast = {
             "pairs": 2,
-            "rows": [{"Pair": "BRUN Bernard - MAMOU MANI Claude", "Rank_Pred": 1, "Pct_Pred": 61.0, "Orientation": None},
-                     {"Pair": "DAS Ramendra - SALITA Robert", "Rank_Pred": 2, "Pct_Pred": 55.5, "Orientation": None}],
+            "rows": [{"Pair": "BRUN Bernard - MAMOU MANI Claude", "Rank_Forecast": 1, "Pct_Forecast": 61.0, "Orientation": None},
+                     {"Pair": "DAS Ramendra - SALITA Robert", "Rank_Forecast": 2, "Pct_Forecast": 55.5, "Orientation": None}],
             "pair_of_player": {"246273": "DAS Ramendra - SALITA Robert"},
             "entry_list_read_at": "2026-10-23T10:00:00+00:00",
         }
@@ -139,7 +139,7 @@ class EntryListTests(unittest.TestCase):
             return forecast
 
         with patch.object(entry_list, "upcoming_entries", return_value=rows), \
-                patch.object(entry_list, "predict_group_session", side_effect=fake_predict):
+                patch.object(entry_list, "forecast_group_session", side_effect=fake_predict):
             out = entry_list.entries_with_forecast("246273", "2026-10-23", sims=500)
         self.assertEqual((out[0]["forecast_rank"], out[0]["forecast_pct"], out[0]["pairs"]), (2, 55.5, 2))
         self.assertEqual(out[0]["pair"], "DAS Ramendra - SALITA Robert")
@@ -151,7 +151,7 @@ class EntryListTests(unittest.TestCase):
 
         with patch.object(entry_list, "_api_get", side_effect=fake):
             with self.assertRaises(ValueError):
-                entry_list.predict_group_session("422517")
+                entry_list.forecast_group_session("422517")
 
 
 if __name__ == "__main__":

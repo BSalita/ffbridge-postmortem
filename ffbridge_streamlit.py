@@ -2233,7 +2233,7 @@ def player_search_input_on_change() -> None:
 
 
 ENTRY_FORECAST_SIMS = 5000
-ENTRY_FORECAST_COLUMNS = ["Rank_Pred", "Pair", "Pct_Pred", "P_Win", "P_Top3", "Pair_Elo"]
+ENTRY_FORECAST_COLUMNS = ["Rank_Forecast", "Pair", "Pct_Forecast", "P_Win", "P_Top3", "Pair_Elo"]
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -2255,7 +2255,7 @@ def _cached_entries_with_forecast(lancelot_id: str, day: str) -> Dict[str, Any]:
 def _cached_session_forecast(group_session_id: str) -> Dict[str, Any]:
     import ffbridge_entry_list as entry_list
 
-    return entry_list.predict_group_session(group_session_id, sims=ENTRY_FORECAST_SIMS)
+    return entry_list.forecast_group_session(group_session_id, sims=ENTRY_FORECAST_SIMS)
 
 
 def _entry_label(row: Mapping[str, Any]) -> str:
@@ -2339,11 +2339,11 @@ def _render_entry_forecast(group_session_id: str) -> None:
     import ffbridge_entry_list as entry_list
 
     own = entry_list.player_row(forecast, str(st.session_state.get("lancelot_player_id") or ""))
-    df = pl.DataFrame(rows).select(ENTRY_FORECAST_COLUMNS).sort("Rank_Pred")
+    df = pl.DataFrame(rows).select(ENTRY_FORECAST_COLUMNS).sort("Rank_Forecast")
     if own is not None:
         st.markdown(chrome_text(
             "entry_forecast_you", "**Your pair:** {pair} — rank {rank}, {pct:.1f}%"
-        ).format(pair=own["Pair"], rank=own["Rank_Pred"], pct=own["Pct_Pred"]))
+        ).format(pair=own["Pair"], rank=own["Rank_Forecast"], pct=own["Pct_Forecast"]))
     streamlitlib.ShowDataFrameTable(df, key=f"entry_forecast_{group_session_id}", height_rows=min(df.height, 25))
     for warning in forecast.get("warnings") or []:
         st.caption(str(warning))

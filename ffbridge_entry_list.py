@@ -2,8 +2,8 @@
 
 The list is what ffbridge.fr shows as "Liste des équipes inscrites". It comes
 from the Lancelot API with the service's own sign-in, so the forecast needs
-no pasted names: ``predict_group_session`` hands each pair's Lancelot person
-ids to ``ffbridge_entries_predictions.predict_entries``.
+no pasted names: ``forecast_group_session`` hands each pair's Lancelot person
+ids to ``ffbridge_entries_forecast.forecast_entries``.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-import ffbridge_entries_predictions as entries_predictions
+import ffbridge_entries_forecast as entries_forecast
 import ffbridge_postmortem_create as create
 
 LANCELOT_API = "https://api-lancelot.ffbridge.fr"
@@ -130,9 +130,9 @@ def upcoming_entries(date_from: Optional[str] = None, person_id: Optional[str] =
     return sorted(sessions, key=lambda row: row.get("date") or "")
 
 
-def predict_group_session(
+def forecast_group_session(
     group_session_id: Optional[str] = None,
-    sims: int = entries_predictions.DEFAULT_SIMS,
+    sims: int = entries_forecast.DEFAULT_SIMS,
 ) -> Dict[str, Any]:
     """Forecast for a group session's current entry list.
 
@@ -155,7 +155,7 @@ def predict_group_session(
         }
         for pair in entrants
     ]
-    result = entries_predictions.predict_entries(entries, str(meta["date"] or "")[:10] or None, sims=sims)
+    result = entries_forecast.forecast_entries(entries, str(meta["date"] or "")[:10] or None, sims=sims)
     result["session"] = meta
     result["entry_list_read_at"] = read_at
     result["team_iv"] = {
@@ -192,7 +192,7 @@ def entries_with_forecast(
     rows = upcoming_entries(date_from, person_id=person)
     for row in rows:
         try:
-            forecast = predict_group_session(row["group_session_id"], sims=sims)
+            forecast = forecast_group_session(row["group_session_id"], sims=sims)
         except ValueError as exc:
             row["forecast_error"] = str(exc)
             continue
@@ -200,7 +200,7 @@ def entries_with_forecast(
         row["pairs"] = forecast.get("pairs")
         row["pair"] = own.get("Pair") if own else None
         row["orientation"] = own.get("Orientation") if own else None
-        row["forecast_rank"] = own.get("Rank_Pred") if own else None
-        row["forecast_pct"] = own.get("Pct_Pred") if own else None
+        row["forecast_rank"] = own.get("Rank_Forecast") if own else None
+        row["forecast_pct"] = own.get("Pct_Forecast") if own else None
         row["entry_list_read_at"] = forecast.get("entry_list_read_at")
     return rows

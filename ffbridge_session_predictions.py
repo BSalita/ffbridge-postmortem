@@ -1317,7 +1317,7 @@ def ranking_rows(
 def _attach_field_forecast(club_rows: List[Dict[str, Any]]) -> None:
     """Pre-game forecast: Global_Scratch_Pct_Forecast and Club_Rank_Forecast.
 
-    The same Elo-only forecast as before play (ffbridge_entries_predictions),
+    The same Elo-only forecast as before play (ffbridge_entries_forecast),
     now with seating known: a pair's rating is the mean of its two players'
     pre-session scratch Elo, and the percentage is 50 + PCT_PER_ELO times its
     gap to the average of the club's pairs in the same direction. An unrated
@@ -1325,7 +1325,7 @@ def _attach_field_forecast(club_rows: List[Dict[str, Any]]) -> None:
     is used, which is what separates it from Global_Scratch_Pct_Pred. The
     rank is taken among the club's pairs, like Club_Rank.
     """
-    from ffbridge_entries_predictions import PCT_PER_ELO
+    from ffbridge_entries_forecast import PCT_PER_ELO
 
     rated = [
         float(value)

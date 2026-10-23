@@ -6,12 +6,15 @@ The MCP server and Streamlit app are HTTP clients of this API.
   python ffbridge_postmortem_api_server.py
   GET http://127.0.0.1:8517/docs
 
-Session predictions, with no player and nothing saved under a player:
+Session predictions (board model, after seating; *_Pred fields), with no
+player and nothing saved under a player:
   GET /predictions/boards?session_id= or ?club=&date=
   GET /predictions/rankings?session_id= or ?club=&date=
-  POST /predictions/entries  (ranking predicted from the entered pairs, before play)
-  GET  /predictions/entries  (same, from the entry list read live on FFBridge)
-  GET  /entries/upcoming  (the service account's upcoming entries)
+Pre-game forecasts (pair Elo against the entered field, before seating;
+*_Forecast fields):
+  POST /forecasts/entries  (forecast from the entered pairs)
+  GET  /forecasts/entries  (same, from the entry list read live on FFBridge)
+  GET  /entries/upcoming  (a player's upcoming entries, optionally with forecasts)
   date is YYYY-MM-DD. Omit it for the club's latest session.
   The player routes still read one cached postmortem:
   GET /postmortems/{player_id}/predictions/boards
@@ -38,7 +41,7 @@ from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
-import ffbridge_entries_predictions as entries_predictions
+import ffbridge_entries_forecast as entries_forecast
 import ffbridge_entry_list as entry_list
 import ffbridge_postmortem_create as create
 import ffbridge_postmortem_group_job as group_job
@@ -381,9 +384,9 @@ def session_prediction_rankings(
     return _session_prediction("rankings", session_id, club, date, limit)
 
 
-@app.post("/predictions/entries")
-def session_prediction_entries(payload: dict = Body(...)) -> dict:
-    """Predicted ranking from a session's entries, before it is played.
+@app.post("/forecasts/entries")
+def entries_forecast_from_pairs(payload: dict = Body(...)) -> dict:
+    """Pre-game forecast from a session's entered pairs, before seating.
 
     Body: {"entries": [["licence or name", "licence or name"], ...],
     "date": "YYYY-MM-DD", "sims": 20000}. An entry may also be
@@ -392,23 +395,23 @@ def session_prediction_entries(payload: dict = Body(...)) -> dict:
     entries = payload.get("entries")
     if not isinstance(entries, list):
         raise ValueError("entries must be a list of pairs")
-    return entries_predictions.predict_entries(
+    return entries_forecast.forecast_entries(
         entries,
         payload.get("date"),
-        sims=int(payload.get("sims") or entries_predictions.DEFAULT_SIMS),
+        sims=int(payload.get("sims") or entries_forecast.DEFAULT_SIMS),
     )
 
 
-@app.get("/predictions/entries")
-def session_prediction_entry_list(
+@app.get("/forecasts/entries")
+def entries_forecast_from_entry_list(
     group_session_id: Optional[str] = Query(
         None,
         description="Lancelot group session id. Omit for the service account's next entered session.",
     ),
-    sims: int = Query(entries_predictions.DEFAULT_SIMS, ge=100, le=entries_predictions.MAX_SIMS),
+    sims: int = Query(entries_forecast.DEFAULT_SIMS, ge=100, le=entries_forecast.MAX_SIMS),
 ) -> dict:
     """The same forecast, from the session's entry list read live on FFBridge."""
-    return entry_list.predict_group_session(group_session_id, sims=sims)
+    return entry_list.forecast_group_session(group_session_id, sims=sims)
 
 
 @app.get("/entries/upcoming")

@@ -1,4 +1,8 @@
-"""Predicted ranking for a session from its entries, before anyone plays.
+"""Pre-game forecast: a session's ranking from its entries, before anyone plays.
+
+Forecast (this module, ``*_Forecast`` fields) means before seating, from pair Elo
+against the entered field. Prediction (``ffbridge_session_predictions``,
+``*_Pred`` fields) means the board model, after the session is seated and played.
 
 The board-level models in ``ffbridge_session_predictions`` need the deals, so
 they only work once a session exists. This module needs only the field: the
@@ -17,9 +21,9 @@ For each pair:
   that line. The 95% range is the prediction plus or minus 1.96 of it.
 
 Ranks come from ``sims`` simulated sessions in which every pair's percentage
-is drawn independently around its prediction. ``Rank_Pred`` is the place of
-the predicted percentage in the field; ``Expected_Rank``, ``Rank_Pred_Low``
-and ``Rank_Pred_High`` (the 5th and 95th percentile places), ``P_Win`` and
+is drawn independently around its prediction. ``Rank_Forecast`` is the place of
+the predicted percentage in the field; ``Expected_Rank``, ``Rank_Forecast_Low``
+and ``Rank_Forecast_High`` (the 5th and 95th percentile places), ``P_Win`` and
 ``P_Top3`` come from the simulation. Ties in the predicted percentage share a
 place. With ``orientation`` set on every pair, places are within NS and EW.
 """
@@ -58,15 +62,15 @@ ORIENTATIONS = ("NS", "EW")
 ENTRY_COLUMNS = (
     "Pair",
     "Orientation",
-    "Rank_Pred",
+    "Rank_Forecast",
     "Expected_Rank",
-    "Rank_Pred_Low",
-    "Rank_Pred_High",
+    "Rank_Forecast_Low",
+    "Rank_Forecast_High",
     "P_Win",
     "P_Top3",
-    "Pct_Pred",
-    "Pct_Pred_Low",
-    "Pct_Pred_High",
+    "Pct_Forecast",
+    "Pct_Forecast_Low",
+    "Pct_Forecast_High",
     "Pair_Elo",
     "Player1",
     "Player2",
@@ -334,7 +338,7 @@ def _round(value: Optional[float], digits: int) -> Optional[float]:
     return round(float(value), digits)
 
 
-def predict_entries(
+def forecast_entries(
     entries: Sequence[Any],
     on_date: Optional[str] = None,
     *,
@@ -451,15 +455,15 @@ def predict_entries(
             {
                 "Pair": label or f"{names[0]} - {names[1]}",
                 "Orientation": orientation,
-                "Rank_Pred": int(rank_pred[position]),
+                "Rank_Forecast": int(rank_pred[position]),
                 "Expected_Rank": _round(expected[position], 1),
-                "Rank_Pred_Low": int(rank_low[position]),
-                "Rank_Pred_High": int(rank_high[position]),
+                "Rank_Forecast_Low": int(rank_low[position]),
+                "Rank_Forecast_High": int(rank_high[position]),
                 "P_Win": _round(100.0 * p_win[position], 1),
                 "P_Top3": _round(100.0 * p_top3[position], 1),
-                "Pct_Pred": _round(pct[position], 2),
-                "Pct_Pred_Low": _round(max(0.0, pct[position] - Z95 * PCT_RESIDUAL_SD), 2),
-                "Pct_Pred_High": _round(min(100.0, pct[position] + Z95 * PCT_RESIDUAL_SD), 2),
+                "Pct_Forecast": _round(pct[position], 2),
+                "Pct_Forecast_Low": _round(max(0.0, pct[position] - Z95 * PCT_RESIDUAL_SD), 2),
+                "Pct_Forecast_High": _round(min(100.0, pct[position] + Z95 * PCT_RESIDUAL_SD), 2),
                 "Pair_Elo": _round(pair_elo[position], 1),
                 "Player1": names[0],
                 "Player2": names[1],
@@ -474,7 +478,7 @@ def predict_entries(
                 "Ratings_Age_Days": age,
             }
         )
-    rows.sort(key=lambda item: (item["Orientation"] or "", item["Rank_Pred"], -(item["P_Win"] or 0.0), item["Pair"]))
+    rows.sort(key=lambda item: (item["Orientation"] or "", item["Rank_Forecast"], -(item["P_Win"] or 0.0), item["Pair"]))
     path = sp._elo_results_path()
     return {
         "date": day,

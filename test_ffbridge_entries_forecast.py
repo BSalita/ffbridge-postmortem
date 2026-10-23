@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 import polars as pl
 
-import ffbridge_entries_predictions as ep
+import ffbridge_entries_forecast as ep
 
 
 def _row(tid, day, p1, p2, e1, e2, *, lic1=None, lic2=None, lan1=None, lan2=None, n1=None, n2=None):
@@ -49,20 +49,20 @@ class NameTests(unittest.TestCase):
 
 class PredictEntriesTests(unittest.TestCase):
     def predict(self, entries, **kwargs):
-        return ep.predict_entries(entries, "2026-10-23", results=_results(), sims=4000, **kwargs)
+        return ep.forecast_entries(entries, "2026-10-23", results=_results(), sims=4000, **kwargs)
 
     def test_stronger_pair_is_predicted_first_and_field_averages_fifty(self):
         out = self.predict([["0011", "0012"], ["0021", "0022"], ["0031", "0032"]])
         rows = out["rows"]
-        self.assertEqual([row["Rank_Pred"] for row in rows], [1, 2, 3])
+        self.assertEqual([row["Rank_Forecast"] for row in rows], [1, 2, 3])
         self.assertTrue(rows[0]["Pair"].startswith("SALITA Robert"))
-        self.assertAlmostEqual(sum(row["Pct_Pred"] for row in rows) / 3, 50.0, places=1)
+        self.assertAlmostEqual(sum(row["Pct_Forecast"] for row in rows) / 3, 50.0, places=1)
         self.assertGreater(rows[0]["P_Win"], rows[1]["P_Win"])
         self.assertAlmostEqual(sum(row["P_Win"] for row in rows), 100.0, delta=0.5)
         for row in rows:
-            self.assertLessEqual(row["Rank_Pred_Low"], row["Rank_Pred_High"])
+            self.assertLessEqual(row["Rank_Forecast_Low"], row["Rank_Forecast_High"])
             self.assertAlmostEqual(
-                row["Pct_Pred_High"] - row["Pct_Pred"], ep.Z95 * ep.PCT_RESIDUAL_SD, places=1
+                row["Pct_Forecast_High"] - row["Pct_Forecast"], ep.Z95 * ep.PCT_RESIDUAL_SD, places=1
             )
 
     def test_uses_latest_rating_before_the_day_not_the_same_day(self):
@@ -76,7 +76,7 @@ class PredictEntriesTests(unittest.TestCase):
     def test_slope_matches_calibration(self):
         out = self.predict([["0011", "0012"], ["0031", "0032"]])
         gap = out["rows"][0]["Pair_Elo"] - out["rows"][1]["Pair_Elo"]
-        pct_gap = out["rows"][0]["Pct_Pred"] - out["rows"][1]["Pct_Pred"]
+        pct_gap = out["rows"][0]["Pct_Forecast"] - out["rows"][1]["Pct_Forecast"]
         self.assertAlmostEqual(pct_gap, ep.PCT_PER_ELO * gap, places=1)
 
     def test_players_by_licence_lancelot_id_person_id_and_name(self):
@@ -108,7 +108,7 @@ class PredictEntriesTests(unittest.TestCase):
             {"players": ["0021", "0022"], "orientation": "EW"},
         ])
         ew = [row for row in out["rows"] if row["Orientation"] == "EW"]
-        self.assertEqual(ew[0]["Rank_Pred"], 1)
+        self.assertEqual(ew[0]["Rank_Forecast"], 1)
         self.assertEqual(ew[0]["P_Win"], 100.0)
 
     def test_mixed_orientation_is_an_error(self):
@@ -151,10 +151,10 @@ class ApiRouteTests(unittest.TestCase):
             try:
                 client = TestClient(server.app)
                 ok = client.post(
-                    "/predictions/entries",
+                    "/forecasts/entries",
                     json={"entries": [["0011", "0012"], "0021 / 0022"], "date": "2026-10-23", "sims": 1000},
                 )
-                bad = client.post("/predictions/entries", json={"entries": [["0011"]]})
+                bad = client.post("/forecasts/entries", json={"entries": [["0011"]]})
             finally:
                 if old is None:
                     os.environ.pop("FFBRIDGE_ELO_RESULTS", None)
@@ -163,7 +163,7 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(ok.status_code, 200, ok.text)
         body = ok.json()
         self.assertEqual(body["pairs"], 2)
-        self.assertEqual(body["rows"][0]["Rank_Pred"], 1)
+        self.assertEqual(body["rows"][0]["Rank_Forecast"], 1)
         self.assertEqual(body["provenance"]["sims"], 1000)
         self.assertEqual(bad.status_code, 400)
 

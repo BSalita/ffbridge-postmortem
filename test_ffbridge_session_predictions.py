@@ -1060,7 +1060,7 @@ class PredictionCacheTests(unittest.TestCase):
 
 class FieldForecastTests(unittest.TestCase):
     def test_forecast_centres_each_direction_and_ranks_the_club(self):
-        from ffbridge_entries_predictions import PCT_PER_ELO
+        from ffbridge_entries_forecast import PCT_PER_ELO
 
         rows = [
             {"Orientation": "NS", "Elo_A": 2000.0, "Elo_B": 1800.0},
