@@ -32,6 +32,7 @@ import functools
 import json
 import math
 import os
+import statistics
 import threading
 import time
 from collections import Counter, OrderedDict
@@ -58,11 +59,13 @@ RANKING_COLUMNS = (
     "Orientation",
     "Club_Rank",
     "Club_Rank_Pred",
+    "Club_Rank_Forecast",
     "Global_Scratch_Rank",
     "Global_Scratch_Rank_Pred",
     "Rank_Diff",
     "Global_Scratch_Pct",
     "Global_Scratch_Pct_Pred",
+    "Global_Scratch_Pct_Forecast",
     "Pct_Diff",
     "Handicap_Pct",
     "Handicap_Club_Rank",
@@ -1215,7 +1218,7 @@ def ranking_rows(
                 pred = None
             raw["Global_Scratch_Pct_Pred"] = None if pred is None else pred.get("Global_Scratch_Pct_Pred")
             raw["Boards"] = None if pred is None else pred.get("Boards")
-            for name in ("Min_Prior_Sessions", "Pair_Prior_Sessions", "Ratings_Age_Days"):
+            for name in ("Min_Prior_Sessions", "Pair_Prior_Sessions", "Ratings_Age_Days", "Elo_A", "Elo_B"):
                 raw[name] = None if pred is None else pred.get(name)
             if pred is not None and pred.get("Pair"):
                 raw["Pair"] = pred["Pair"]
@@ -1289,6 +1292,9 @@ def ranking_rows(
             )
         )
 
+    for club_rows in club_groups.values():
+        _attach_field_forecast(club_rows)
+
     # Other clubs were needed to rank against the national field, but the
     # postmortem reports only the home club's pairs.
     if home_club is not None:
@@ -1306,6 +1312,45 @@ def ranking_rows(
         ["Club_Rank", "Global_Scratch_Rank", "Club_Rank_Pred"],
         nulls_last=True,
     )
+
+
+def _attach_field_forecast(club_rows: List[Dict[str, Any]]) -> None:
+    """Pre-game forecast: Global_Scratch_Pct_Forecast and Club_Rank_Forecast.
+
+    The same Elo-only forecast as before play (ffbridge_entries_predictions),
+    now with seating known: a pair's rating is the mean of its two players'
+    pre-session scratch Elo, and the percentage is 50 + PCT_PER_ELO times its
+    gap to the average of the club's pairs in the same direction. An unrated
+    player counts at the median rating of the club's rated players. No deal
+    is used, which is what separates it from Global_Scratch_Pct_Pred. The
+    rank is taken among the club's pairs, like Club_Rank.
+    """
+    from ffbridge_entries_predictions import PCT_PER_ELO
+
+    rated = [
+        float(value)
+        for raw in club_rows
+        for value in (raw.get("Elo_A"), raw.get("Elo_B"))
+        if value is not None
+    ]
+    if not rated:
+        for raw in club_rows:
+            raw["Global_Scratch_Pct_Forecast"] = None
+            raw["Club_Rank_Forecast"] = None
+        return
+    median = float(statistics.median(rated))
+    pair_elo: Dict[int, float] = {}
+    for raw in club_rows:
+        players = [raw.get("Elo_A"), raw.get("Elo_B")]
+        pair_elo[id(raw)] = statistics.fmean([median if value is None else float(value) for value in players])
+    for orientation in {raw.get("Orientation") for raw in club_rows}:
+        side = [raw for raw in club_rows if raw.get("Orientation") == orientation]
+        field = statistics.fmean([pair_elo[id(raw)] for raw in side])
+        for raw in side:
+            raw["Global_Scratch_Pct_Forecast"] = round(50.0 + PCT_PER_ELO * (pair_elo[id(raw)] - field), 2)
+    shown = [raw["Global_Scratch_Pct_Forecast"] for raw in club_rows]
+    for raw in club_rows:
+        raw["Club_Rank_Forecast"] = _rank_against(raw["Global_Scratch_Pct_Forecast"], shown)
 
 
 def _official_pairs(ranking: Optional[pl.DataFrame]) -> pl.DataFrame:
@@ -1417,7 +1462,11 @@ def _predicted_pair_scores(boards: pl.DataFrame) -> pl.DataFrame:
             if id_a in boards.columns and id_b in boards.columns
             else pl.lit(None).cast(pl.Utf8)
         )
+        elo_a = pl.col(f"Elo_{seat_a}") if f"Elo_{seat_a}" in boards.columns else pl.lit(None, dtype=pl.Float64)
+        elo_b = pl.col(f"Elo_{seat_b}") if f"Elo_{seat_b}" in boards.columns else pl.lit(None, dtype=pl.Float64)
         work = boards.with_columns(
+            elo_a.cast(pl.Float64).alias("_elo_a"),
+            elo_b.cast(pl.Float64).alias("_elo_b"),
             section.fill_null("").alias("Section"),
             pl.col(number_col).cast(pl.Utf8).alias("Table"),
             pred.alias("_pred"),
@@ -1438,6 +1487,8 @@ def _predicted_pair_scores(boards: pl.DataFrame) -> pl.DataFrame:
                 pl.col("_prior").min().alias("Min_Prior_Sessions"),
                 pl.col("_pair_prior").min().alias("Pair_Prior_Sessions"),
                 pl.col("_age").max().alias("Ratings_Age_Days"),
+                pl.col("_elo_a").drop_nulls().first().alias("Elo_A"),
+                pl.col("_elo_b").drop_nulls().first().alias("Elo_B"),
             )
             .with_columns(
                 pl.lit(orientation).alias("Orientation"),
@@ -1449,7 +1500,7 @@ def _predicted_pair_scores(boards: pl.DataFrame) -> pl.DataFrame:
             .select(
                 "Pair", "Orientation", "Section", "Table", "Pair_Key",
                 "Global_Scratch_Pct_Pred", "Boards", "Min_Prior_Sessions",
-                "Pair_Prior_Sessions", "Ratings_Age_Days",
+                "Pair_Prior_Sessions", "Ratings_Age_Days", "Elo_A", "Elo_B",
             )
         )
         frames.append(piece)

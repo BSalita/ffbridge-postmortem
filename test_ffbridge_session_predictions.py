@@ -1057,5 +1057,33 @@ class PredictionCacheTests(unittest.TestCase):
         self.assertEqual(apply.call_count, 2)
 
 
+
+class FieldForecastTests(unittest.TestCase):
+    def test_forecast_centres_each_direction_and_ranks_the_club(self):
+        from ffbridge_entries_predictions import PCT_PER_ELO
+
+        rows = [
+            {"Orientation": "NS", "Elo_A": 2000.0, "Elo_B": 1800.0},
+            {"Orientation": "NS", "Elo_A": 1400.0, "Elo_B": 1600.0},
+            {"Orientation": "EW", "Elo_A": 1700.0, "Elo_B": None},
+            {"Orientation": "EW", "Elo_A": 1500.0, "Elo_B": 1500.0},
+        ]
+        predictions._attach_field_forecast(rows)
+        # NS pairs 1900 and 1500 average 1700: +/- 200 points.
+        self.assertEqual(rows[0]["Global_Scratch_Pct_Forecast"], round(50 + PCT_PER_ELO * 200, 2))
+        self.assertEqual(rows[1]["Global_Scratch_Pct_Forecast"], round(50 - PCT_PER_ELO * 200, 2))
+        # The unrated player counts at the median of the seven rated players (1600).
+        ew_first = (1700.0 + 1600.0) / 2
+        ew_mean = (ew_first + 1500.0) / 2
+        self.assertEqual(rows[2]["Global_Scratch_Pct_Forecast"], round(50 + PCT_PER_ELO * (ew_first - ew_mean), 2))
+        self.assertEqual([row["Club_Rank_Forecast"] for row in rows], [1, 4, 2, 3])
+
+    def test_no_rated_player_leaves_the_forecast_blank(self):
+        rows = [{"Orientation": "NS", "Elo_A": None, "Elo_B": None}]
+        predictions._attach_field_forecast(rows)
+        self.assertIsNone(rows[0]["Global_Scratch_Pct_Forecast"])
+        self.assertIsNone(rows[0]["Club_Rank_Forecast"])
+
+
 if __name__ == "__main__":
     unittest.main()
