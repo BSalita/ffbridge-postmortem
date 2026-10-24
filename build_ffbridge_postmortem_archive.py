@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import json
+import os
 import pathlib
 import sys
 import time
@@ -238,12 +239,27 @@ def backfill_raw(
 ) -> dict[str, int]:
     pipeline = _load_quality_pipeline()
     training_path = source_dir / "ffbridge_training_data_df.parquet"
-    audit = pipeline.audit_historical_cache(source_dir, training_path, cutoff)
+    # Stage 1's audit manifest lists sessions already known complete, so their
+    # ranking and team-score files are not read again.
+    manifest_path = pipeline.default_audit_manifest_path(source_dir)
+    metadata_by_session = pipeline.load_session_metadata(source_dir, cutoff)
+    audit = pipeline.audit_historical_cache(
+        source_dir,
+        training_path,
+        cutoff,
+        manifest_path=manifest_path,
+        metadata=metadata_by_session,
+    )
     fetched = 0
     if fetch_missing:
         fetched = pipeline.fetch_missing_artifacts(audit)
-        audit = pipeline.audit_historical_cache(source_dir, training_path, cutoff)
-    metadata_by_session = pipeline.load_session_metadata(source_dir, cutoff)
+        audit = pipeline.audit_historical_cache(
+            source_dir,
+            training_path,
+            cutoff,
+            manifest_path=manifest_path,
+            metadata=metadata_by_session,
+        )
     flat_manifest = archive.latest_manifest(archive_dir)
     flat_rows = {
         row["session_id"]: row for row in flat_manifest.iter_rows(named=True)
@@ -288,6 +304,14 @@ def backfill_raw(
         for session in selected
     ]
     pending_batch: list[dict[str, Any]] = []
+    # Workers inherit this at spawn; ddss reads it when it loads.
+    if "DDSS_MAX_THREADS" not in os.environ:
+        os.environ["DDSS_MAX_THREADS"] = str(max(1, (os.cpu_count() or 1) // workers))
+    print(
+        f"[archive-builder] DDSS_MAX_THREADS={os.environ['DDSS_MAX_THREADS']} "
+        f"x {workers} workers",
+        flush=True,
+    )
     with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as executor:
         futures = [executor.submit(_prepare_session_worker, task) for task in tasks]
         with tqdm(total=len(futures), desc="Archiving FFBridge postmortems") as progress:
