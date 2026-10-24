@@ -389,11 +389,14 @@ def _pack_with_mapping(
     table: str,
     mapping: Mapping[str, Mapping[str, str | None]],
 ) -> pl.DataFrame:
-    keys = [column for column in (*KEY_COLUMNS, "_result_row_id") if column in frame]
+    # A set taken once: frame.columns rebuilds the column list on each access.
+    present = set(frame.columns)
+    keys = [column for column in (*KEY_COLUMNS, "_result_row_id") if column in present]
+    key_set = set(keys)
     table_columns = [
         column
         for column, entry in mapping.items()
-        if entry["table"] == table and column in frame.columns and column not in keys
+        if entry["table"] == table and column in present and column not in key_set
     ]
     direct = [
         column

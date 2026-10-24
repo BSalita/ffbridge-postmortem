@@ -224,10 +224,14 @@ def _cast_to_reference(
     A Bridge+ sheet leaves the unused seats null. Polars then infers Null and
     List(Null), and wider score types, which the archive rejects.
     """
+    # Take the schema once: frame.schema and frame.columns rebuild every
+    # column on each access, which made this loop over ~6,800 columns cost
+    # 80+ seconds per session.
+    schema = frame.schema
     expressions = [
         pl.col(name).cast(dtype, strict=True)
         for name, dtype in reference.items()
-        if name in frame.columns and frame.schema[name] != dtype
+        if name in schema and schema[name] != dtype
     ]
     if not expressions:
         return frame

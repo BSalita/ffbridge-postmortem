@@ -36,6 +36,26 @@ def _session_frame(pair_direction: str = "NS", contract: str = "3NT") -> pl.Data
 
 
 class ArchiveWriteTests(unittest.TestCase):
+    def test_cast_to_reference_casts_only_columns_whose_type_differs(self):
+        frame = pl.DataFrame(
+            {
+                "a": pl.Series([1, 2], dtype=pl.Int64),
+                "b": [None, None],  # Null dtype, as an unused Bridge+ seat infers
+                "c": ["x", "y"],
+                "extra": [1.5, 2.5],
+            }
+        )
+        reference = {"a": pl.Int16, "b": pl.String, "c": pl.String, "missing": pl.Int8}
+        out = archive._cast_to_reference(frame, reference)
+        self.assertEqual(out.columns, frame.columns)
+        self.assertEqual(out.schema["a"], pl.Int16)
+        self.assertEqual(out.schema["b"], pl.String)
+        self.assertEqual(out.schema["c"], pl.String)
+        self.assertEqual(out.schema["extra"], pl.Float64)
+        self.assertEqual(out["a"].to_list(), [1, 2])
+        # Nothing to cast returns the frame unchanged.
+        self.assertIs(archive._cast_to_reference(out, reference), out)
+
     def test_player_perspective_does_not_create_duplicate_revision(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
