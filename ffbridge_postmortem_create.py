@@ -1206,8 +1206,14 @@ def augment_and_cache_mldf(
     progress: Any = None,
     lock_func: Optional[Callable[..., Any]] = None,
     write_cache: bool = True,
+    hrs_cache_df: Optional[pl.DataFrame] = None,
 ) -> pl.DataFrame:
-    """Reduce to core columns, augment (unless cached), write parquet."""
+    """Reduce to core columns, augment (unless cached), write parquet.
+
+    ``hrs_cache_df`` is a hand-records cache (DD, Par, SD per PBN/Dealer/Vul).
+    Deals found there are not solved again; rows with a null ParScore get Par
+    recomputed from their cached DD table.
+    """
     if df["Contract"].is_null().all():
         raise ValueError("No Contract data available. Unable to proceed.")
     df = reduce_mldf_for_augment(df)
@@ -1221,7 +1227,7 @@ def augment_and_cache_mldf(
     t_aug = time.time()
     augmenter = AllAugmentations(
         df,
-        None,
+        hrs_cache_df,
         sd_productions=sd_productions,
         progress=progress,
         lock_func=lock_func,

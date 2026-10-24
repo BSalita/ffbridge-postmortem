@@ -28,6 +28,46 @@ class UnsupportedSessionError(ValueError):
     """The source session cannot produce a full augmented postmortem."""
 
 
+# Stage 1's hand-records cache, loaded once per worker process.
+_WORKER_HRS_CACHE: pl.DataFrame | None = None
+PAR_COLUMNS = ("ParScore", "ParNumber", "ParContracts")
+
+
+def load_dd_sd_cache(hrs_cache_path: pathlib.Path) -> pl.DataFrame:
+    """Stage 1's cached DD and SD results, with Par cleared.
+
+    The cache holds the same ddss DD tables and SD samples (seed 42, 10
+    productions) the archive would compute, but stage 1 counts ParNumber
+    differently. Clearing Par makes mlBridge recompute it from the cached DD
+    table, so the archive keeps its own Par values while the solving (mostly
+    single-dummy) is skipped.
+    """
+    pipeline = _load_quality_pipeline()
+    cache = pipeline.load_hrs_cache(hrs_cache_path)
+    if cache is None:
+        raise FileNotFoundError(
+            f"Hand-records cache not found: {hrs_cache_path} "
+            "(stage 1 build_ffbridge_quality_parquets.py writes it)"
+        )
+    return cache.with_columns(
+        pl.lit(None, dtype=cache.schema[column]).alias(column) for column in PAR_COLUMNS
+    )
+
+
+def _init_worker(hrs_cache_path_text: str) -> None:
+    global _WORKER_HRS_CACHE
+    _WORKER_HRS_CACHE = load_dd_sd_cache(pathlib.Path(hrs_cache_path_text))
+
+
+def _session_hrs_cache(prepared: pl.DataFrame) -> pl.DataFrame:
+    """Cache rows for this session's deals only, so the joins stay small."""
+    if _WORKER_HRS_CACHE is None:
+        raise RuntimeError("Worker started without the hand-records cache")
+    return _WORKER_HRS_CACHE.join(
+        prepared.select("PBN").unique(), on="PBN", how="semi"
+    )
+
+
 def _load_quality_pipeline() -> Any:
     if not ELO_RATINGS_DIR.is_dir():
         raise FileNotFoundError(f"elo source directory not found: {ELO_RATINGS_DIR}")
@@ -157,6 +197,7 @@ def _prepare_session_worker(task: tuple[Any, ...]) -> dict[str, Any]:
                 session_id,
                 "archive",
                 write_cache=False,
+                hrs_cache_df=_session_hrs_cache(prepared),
             )
             context = _session_context(metadata, raw)
             flat_record = archive.prepare_archive_session(
@@ -304,15 +345,21 @@ def backfill_raw(
         for session in selected
     ]
     pending_batch: list[dict[str, Any]] = []
+    hrs_cache_path = pipeline.default_hrs_cache_path(source_dir)
+    load_dd_sd_cache(hrs_cache_path)  # fail before starting workers if missing
     # Workers inherit this at spawn; ddss reads it when it loads.
     if "DDSS_MAX_THREADS" not in os.environ:
         os.environ["DDSS_MAX_THREADS"] = str(max(1, (os.cpu_count() or 1) // workers))
     print(
-        f"[archive-builder] DDSS_MAX_THREADS={os.environ['DDSS_MAX_THREADS']} "
-        f"x {workers} workers",
+        f"[archive-builder] DD/SD from {hrs_cache_path} (Par recomputed); "
+        f"DDSS_MAX_THREADS={os.environ['DDSS_MAX_THREADS']} x {workers} workers",
         flush=True,
     )
-    with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as executor:
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=workers,
+        initializer=_init_worker,
+        initargs=(str(hrs_cache_path),),
+    ) as executor:
         futures = [executor.submit(_prepare_session_worker, task) for task in tasks]
         with tqdm(total=len(futures), desc="Archiving FFBridge postmortems") as progress:
             for future in concurrent.futures.as_completed(futures):
