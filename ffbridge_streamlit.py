@@ -1796,6 +1796,14 @@ def _clear_selected_session(*, clear_games: bool = False) -> None:
     st.session_state.session_id = None
     st.session_state.pop("club_session_ids_selectbox", None)
     st.session_state.pop("_url_loaded_session_key", None)
+    _clear_entry_forecast()
+
+
+def _clear_entry_forecast() -> None:
+    """Forget the picked upcoming-game forecast so the game report shows instead."""
+    st.session_state.entry_forecast_gsid = None
+    st.session_state.pop("entry_forecast_selectbox", None)
+    st.session_state.pop("entry_forecast_options", None)
 
 
 def _populate_game_urls_for_player_lancelot(player_id: str) -> bool:
@@ -2281,6 +2289,7 @@ def _render_upcoming_entries_sidebar() -> None:
     """Sidebar: the player's upcoming entries and a picker for one session's forecast."""
     lancelot_id = st.session_state.get("lancelot_player_id")
     if not lancelot_id:
+        _clear_entry_forecast()
         return
     st.sidebar.markdown("---")
     with st.sidebar:
@@ -2288,15 +2297,18 @@ def _render_upcoming_entries_sidebar() -> None:
             try:
                 data = _cached_entries_with_forecast(str(lancelot_id), datetime.now().date().isoformat())
             except Exception as e:
+                _clear_entry_forecast()
                 st.error(f"Could not read entries from FFBridge: {e}")
                 return
     title = chrome_text("entry_pick", "Upcoming Game Forecasts")
     if data["private"]:
+        _clear_entry_forecast()
         st.sidebar.markdown(f"**{title}**")
         st.sidebar.info(chrome_text("entries_private", "This player's entries aren't visible on FFBridge."))
         return
     rows = data["rows"]
     if not rows:
+        _clear_entry_forecast()
         st.sidebar.markdown(f"**{title}**")
         st.sidebar.caption(chrome_text("no_entries", "No upcoming entries."))
         return
@@ -2351,8 +2363,7 @@ def _render_entry_forecast(group_session_id: str) -> None:
 
 def club_session_id_on_change() -> None:
     #st.session_state.tournament_session_ids_selectbox = None # clear tournament index whenever club index changes. todo: doesn't seem to update selectbox with new index.
-    st.session_state.entry_forecast_gsid = None
-    st.session_state.pop("entry_forecast_selectbox", None)
+    _clear_entry_forecast()
     selection = st.session_state.club_session_ids_selectbox
     if selection is not None:
         session_id = _session_id_from_game_option(selection)
@@ -3039,7 +3050,6 @@ class FFBridgeApp(PostmortemBase):
         # Use a form so Enter and the Go button submit the current textbox value reliably.
         # (Outside a form, Streamlit may not commit text_input into session_state until Enter/blur,
         # which can make the Go button appear "disabled".)
-        # Name matches stay in this same form, between the search box and Go.
         matches = st.session_state.get('player_search_matches') or []
         show_match_selectbox = _name_search_has_multiple_matches()
         with st.sidebar.form(key="player_search_form", clear_on_submit=False):
@@ -3052,39 +3062,32 @@ class FFBridgeApp(PostmortemBase):
                     "Digits-only license or Lancelot id, or a fuzzy player name.",
                 ),
             )
-            if show_match_selectbox:
-                st.selectbox(
-                    chrome_text("matching_players", "Matching players ({count})").format(count=len(matches)),
-                    options=[match[0] for match in matches],
-                    index=None,
-                    placeholder=chrome_text("select_player", "Select the player"),
-                    key="player_search_match_selection",
-                    help=chrome_text(
-                        "select_player_help",
-                        "Several people matched. Pick one, then click Go.",
-                    ),
-                )
             submitted = st.form_submit_button(
                 chrome_text("go", "Go"),
                 type="primary",
                 use_container_width=True,
             )
 
+        # Name matches sit outside the form: widgets inside a form can't rerun on change,
+        # and picking a player should load that player's report right away.
+        if show_match_selectbox:
+            st.sidebar.selectbox(
+                chrome_text("matching_players", "Matching players ({count})").format(count=len(matches)),
+                options=[match[0] for match in matches],
+                index=None,
+                placeholder=chrome_text("select_player", "Select the player"),
+                key="player_search_match_selection",
+                on_change=player_search_match_change,
+                help=chrome_text(
+                    "select_player_help",
+                    "Several people matched. Pick one to load their report.",
+                ),
+            )
+
         if submitted:
             input_value = (st.session_state.get('player_search_input') or '').strip()
-            selected = st.session_state.get('player_search_match_selection')
-            same_query = input_value == (st.session_state.get('player_search_query') or '').strip()
             if not input_value:
                 _clear_player_search_matches()
-            elif (
-                show_match_selectbox
-                and selected
-                and same_query
-                and any(match[0] == selected for match in matches)
-            ):
-                player_search_match_change()
-                if st.session_state.get('insert_player_search_value'):
-                    st.rerun()
             elif input_value.isdigit():
                 # Numeric input - store for report generation (handled at top of this function)
                 _clear_player_search_matches()
