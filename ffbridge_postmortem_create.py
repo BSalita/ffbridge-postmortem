@@ -53,6 +53,7 @@ _ensure_mlbridge_on_path()
 
 import polars as pl
 
+import ffbridge_bridgeinter_postmortem as bridgeinter
 import ffbridge_bridgeplus_postmortem as bridgeplus
 import ffbridge_postmortem_archive as postmortem_archive
 import ffbridge_postmortem_normalized as postmortem_normalized
@@ -830,6 +831,21 @@ def fetch_other_player_source_sessions(
     return sessions_newest_first(sessions)
 
 
+_person_name_cache: Dict[str, Tuple[str, str]] = {}
+
+
+def _person_name_parts(license_number: str) -> Tuple[str, str]:
+    """(last name, first name) for a license, for organizer pages that list players by name only."""
+    key = _norm_digits(license_number)
+    if key not in _person_name_cache:
+        items = mlBridgeFFLib.search_persons(key, ensure_lancelot_auth().token)
+        match = next((item for item in items if _norm_digits(item.get("ffbId")) == key), None)
+        if match is None:
+            raise ValueError(f"No FFBridge person with license {license_number}")
+        _person_name_cache[key] = (str(match.get("lastName") or ""), str(match.get("firstName") or ""))
+    return _person_name_cache[key]
+
+
 def list_source_sessions(
     player_id: str,
     *,
@@ -886,6 +902,24 @@ def list_source_sessions(
             )
         except (requests.RequestException, ValueError, OSError) as exc:
             _log(f"Bridge+ organizer check failed: {exc}")
+            gaps = []
+        known = {row["session_id"] for row in sessions}
+        sessions.extend(row for row in gaps if row["session_id"] not in known)
+        sessions = sessions_newest_first(sessions)
+    if sessions and resolved.license_number:
+        try:
+            last_name, first_name = _person_name_parts(resolved.license_number)
+            gaps = bridgeinter.gap_session_entries(
+                player_id=resolved.lancelot_id,
+                license_number=resolved.license_number,
+                last_name=last_name,
+                first_name=first_name,
+                sessions=sessions,
+                date_from=date_from,
+                date_to=date_to,
+            )
+        except (requests.RequestException, ValueError, OSError) as exc:
+            _log(f"BridgeInterNet organizer check failed: {exc}")
             gaps = []
         known = {row["session_id"] for row in sessions}
         sessions.extend(row for row in gaps if row["session_id"] not in known)
@@ -1270,7 +1304,7 @@ def _bridgeplus_meta(resolved: ResolvedPlayer, entry: Dict[str, Any]) -> Lancelo
     )
 
 
-def _create_bridgeplus_postmortem(
+def _create_organizer_postmortem(
     resolved: ResolvedPlayer,
     game_entry: Dict[str, Any],
     *,
@@ -1283,13 +1317,15 @@ def _create_bridgeplus_postmortem(
     skip_build_if_cached: bool,
     started: datetime,
 ) -> Dict[str, Any]:
-    """Scrape the Bridge+ sheet once, then augment it like a Lancelot session."""
+    """Scrape an organizer's pages (Bridge+ or BridgeInterNet) once, then augment like a Lancelot session."""
+    source = str(game_entry.get("source"))
+    scrape = {"bridgeplus": bridgeplus.scrape_mldf, "bridgeinter": bridgeinter.scrape_mldf}[source]
     meta = _bridgeplus_meta(resolved, game_entry)
     already_cached = skip_build_if_cached and cache_file.exists() and not force
     if already_cached:
         frame = pl.read_parquet(cache_file)
     else:
-        built = bridgeplus.scrape_mldf(
+        built = scrape(
             {**game_entry, "player_id": resolved.lancelot_id},
             cache_dir=directory,
         )
@@ -1316,7 +1352,7 @@ def _create_bridgeplus_postmortem(
     )
     ended = datetime.now()
     _log(
-        f"end create session={meta.session_id} status=ok source=bridgeplus "
+        f"end create session={meta.session_id} status=ok source={source} "
         f"elapsed {(ended - started).total_seconds():.1f}s"
     )
     status = "cached" if already_cached else "ok"
@@ -1360,8 +1396,8 @@ def create_lancelot_postmortem(
         f"at {started.isoformat(timespec='seconds')}"
     )
 
-    if game_entry.get("source") == "bridgeplus":
-        return _create_bridgeplus_postmortem(
+    if game_entry.get("source") in ("bridgeplus", "bridgeinter"):
+        return _create_organizer_postmortem(
             resolved,
             game_entry,
             directory=directory,

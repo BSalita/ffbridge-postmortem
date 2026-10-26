@@ -1478,13 +1478,17 @@ def _usable_results_url(url: Any) -> Optional[str]:
     return text
 
 
+# Sources read from the organizer's website while ffbridge.fr has not published the session.
+ORGANIZER_SOURCES = ("bridgeplus", "bridgeinter")
+
+
 def _organizer_results_url(entry: Optional[Mapping[str, Any]]) -> Optional[str]:
-    """Bridge+ sheet for a session ffbridge.fr has not published yet."""
+    """Organizer sheet (Bridge+ or BridgeInterNet) for a session ffbridge.fr has not published yet."""
     if not entry:
         return None
     route = _usable_results_url(entry.get("route_url"))
     listed = _usable_results_url(entry.get("results_url") or entry.get("game_url"))
-    if entry.get("source") == "bridgeplus" or route:
+    if entry.get("source") in ORGANIZER_SOURCES or route:
         return route or listed
     return None
 
@@ -1552,7 +1556,7 @@ def _ensure_game_results_url(df: Optional[pl.DataFrame] = None) -> Optional[str]
     organizer = _organizer_results_url(entry)
     unpublished = bool(
         entry
-        and (entry.get("source") == "bridgeplus" or entry.get("route_url"))
+        and (entry.get("source") in ORGANIZER_SOURCES or entry.get("route_url"))
     )
     if organizer:
         st.session_state.game_url = organizer
