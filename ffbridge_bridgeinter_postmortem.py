@@ -16,9 +16,11 @@ Pages used, all public:
 
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse
@@ -165,6 +167,7 @@ def gap_session_entries(
                 session_date,
                 organizer=organizer,
                 clubs=clubs,
+                sessions=sessions,
                 player_id=player_id,
                 license_number=license_number,
                 last_name=last_name,
@@ -181,6 +184,7 @@ def _find_entry(
     *,
     organizer: Dict[str, Any],
     clubs: List[str],
+    sessions: List[Dict[str, Any]],
     player_id: str,
     license_number: Optional[str],
     last_name: str,
@@ -237,6 +241,12 @@ def _find_entry(
             "results_url": club_page_url,
             "route_url": bi.scorecard_url(session_code, row["pair_id"]),
             "bi_pair_id": row["pair_id"],
+            # FFBridge groups of the player's games at this club, to find the
+            # entry list (player ids) of the same game.
+            "club_group_ids": sorted({
+                str(s["group_id"]) for s in sessions
+                if s.get("group_id") and str(s.get("organization_name") or s.get("club") or "").strip() == ffb_club
+            }),
             "player_id": player_id,
             "player_license_number": bridgeplus._license_key(license_number) if license_number else None,
             "partner_license_number": None,
@@ -251,76 +261,83 @@ def _find_entry(
     return None
 
 
-def _opponent_tables(rows: List[Dict[str, Any]]) -> Dict[str, int]:
-    """``SININGE Catherine - ZABOTTO Guy`` -> that pair's table number, from the club page."""
-    tables = {}
-    for row in rows:
-        if not row.get("pair_id"):
-            continue
-        key = " ".join(_tokens(f"{row['player1_name']} {row['player2_name']}"))
-        tables[key] = bi.parse_pair_code(row["pair_id"])["table"]
-    return tables
+def _person_key(name: str) -> str:
+    return " ".join(sorted(_tokens(name)))
 
 
-def build_mldf(
-    card: Dict[str, Any],
+def _pair_key(text: str) -> str:
+    """Order-free key for a pair: club page ``name1 name2`` or a scorecard's ``A - B`` opponents."""
+    return " ".join(sorted(_tokens(text)))
+
+
+def build_club_mldf(
+    cards: Dict[str, Dict[str, Any]],
     deals: Dict[int, Dict[str, Any]],
     *,
     entry: Dict[str, Any],
-    opponent_tables: Dict[str, int],
+    club_rows: List[Dict[str, Any]],
+    player_ids: Dict[str, str],
 ) -> pl.DataFrame:
-    """One row per board for the entry's pair, in the shape Lancelot sessions are built to."""
-    direction = entry["pair_direction"]
-    our_number = int(entry["pair_number"])
-    seats = {
-        entry["player_direction"]: (str(entry["player_id"]), entry["player_name"]),
-        entry["partner_direction"]: (entry.get("partner_license_number"), entry["partner_name"]),
-    }
+    """One row per board and table at the club, built from the North-South pairs' scorecards.
+
+    Like a Lancelot club session, every pair's results are present, so every
+    pair can be predicted and ranked. ``player_ids`` maps ``_person_key(name)``
+    to a Lancelot id; players it lacks keep a null id.
+    """
+    by_pair_id = {row["pair_id"]: row for row in club_rows if row.get("pair_id")}
+    by_names = {_pair_key(f"{row['player1_name']} {row['player2_name']}"): row for row in by_pair_id.values()}
+    ids = dict(player_ids)
+    ids[_person_key(entry["player_name"])] = str(entry["player_id"])
+
     rows = []
-    for board in card["boards"]:
-        board_no = board["board"]
-        if board_no not in deals:
-            raise ValueError(f"BridgeInterNet deal page is missing board {board_no}")
-        deal = deals[board_no]
-        top = deal["played"] - 1
-        ours = board["pct"] / 100.0
-        theirs = 1.0 - ours
-        opponent = opponent_tables.get(" ".join(_tokens(board["opponents"] or "")))
-        if direction == "EW":
-            pct_ns, pct_ew = theirs, ours
-            pair_ns, pair_ew = opponent, our_number
-        else:
-            pct_ns, pct_ew = ours, theirs
-            pair_ns, pair_ew = our_number, opponent
-        row = {
-            "Date": entry["date"],
-            "Section_Name": entry.get("section_name"),
-            "Board": board_no,
-            "PBN": deal["pbn"],
-            "Pair_Direction": direction,
-            "Dealer": deal["dealer"],
-            "Vul": deal["vul"],
-            "Declarer": board["Declarer"],
-            "Contract": board["Contract"],
-            "Result": board["Result"],
-            "Lead": board["lead"],
-            "Score_NS": board["score_ns"],
-            "Score_EW": -board["score_ns"],
-            "Pct_NS": pct_ns,
-            "Pct_EW": pct_ew,
-            "MP_NS": round(pct_ns * top, 2),
-            "MP_EW": round(pct_ew * top, 2),
-            "MP_Top": top,
-            "Pair_Number_NS": pair_ns,
-            "Pair_Number_EW": pair_ew,
-        }
-        for seat in "NESW":
-            player_id, name = seats.get(seat, (None, None))
-            row[f"Player_ID_{seat}"] = player_id
-            row[f"Player_Name_{seat}"] = name
-        rows.append(row)
-    # Same dtypes as a Lancelot archive fragment; unused seats stay null but typed.
-    return pl.DataFrame(rows).with_columns(
+    for ns_pair_id, card in cards.items():
+        ns_row = by_pair_id[ns_pair_id]
+        ns_code = bi.parse_pair_code(ns_pair_id)
+        for board in card["boards"]:
+            board_no = board["board"]
+            if board_no not in deals:
+                raise ValueError(f"BridgeInterNet deal page is missing board {board_no}")
+            ew_row = by_names.get(_pair_key(board["opponents"] or ""))
+            if ew_row is None:
+                raise ValueError(
+                    f"Board {board_no}: opponents {board['opponents']!r} of {ns_pair_id} are not on the club page"
+                )
+            deal = deals[board_no]
+            top = deal["played"] - 1
+            pct_ns = board["pct"] / 100.0
+            row = {
+                "Date": entry["date"],
+                "Section_Name": ns_code["section"],
+                "Board": board_no,
+                "PBN": deal["pbn"],
+                "Pair_Direction": "NS",
+                "Dealer": deal["dealer"],
+                "Vul": deal["vul"],
+                "Declarer": board["Declarer"],
+                "Contract": board["Contract"],
+                "Result": board["Result"],
+                "Lead": board["lead"],
+                "Score_NS": board["score_ns"],
+                "Score_EW": -board["score_ns"],
+                "Pct_NS": pct_ns,
+                "Pct_EW": 1.0 - pct_ns,
+                "MP_NS": round(pct_ns * top, 2),
+                "MP_EW": round((1.0 - pct_ns) * top, 2),
+                "MP_Top": top,
+                "Pair_Number_NS": ns_code["table"],
+                "Pair_Number_EW": bi.parse_pair_code(ew_row["pair_id"])["table"],
+            }
+            for seat, name in (
+                ("N", ns_row["player1_name"]), ("S", ns_row["player2_name"]),
+                ("E", ew_row["player1_name"]), ("W", ew_row["player2_name"]),
+            ):
+                row[f"Player_ID_{seat}"] = ids.get(_person_key(name))
+                row[f"Player_Name_{seat}"] = name
+            rows.append(row)
+    if not rows:
+        raise ValueError(f"No BridgeInterNet scorecards for club {entry.get('bi_club_code')}")
+    # Same dtypes as a Lancelot archive fragment; unknown ids stay null but typed.
+    return pl.DataFrame(rows).sort(["Board", "Pair_Number_NS"]).with_columns(
         pl.col("Board").cast(pl.Int64),
         pl.col("Result").cast(pl.Int16),
         pl.col("Lead").cast(pl.String),
@@ -337,20 +354,99 @@ def build_mldf(
     )
 
 
+def ranking_payload(
+    session: Dict[str, Any],
+    *,
+    home_club_code: str,
+    player_ids: Dict[str, str],
+) -> List[Dict[str, Any]]:
+    """Every pair of every club, shaped like Lancelot ``results/sessions/{id}/ranking``.
+
+    Ranks are national, over every pair at every club, as on the national
+    ranking page; the club pages' rank columns are not that rank. With a
+    handicap ranking, sessionScore and rank are handicapped and the scratch
+    figures go in totalScoreWithoutHandicap / rankWithoutHandicap, as Lancelot
+    does. Pairs at other clubs get placeholder ids so they can never be taken
+    for a home pair with the same table number.
+    """
+    handicap = {row["pair_id"]: row for row in session["club_handicap"] if row.get("pair_id")}
+    scratch_field = [row["percentage"] for row in session["club_scratch"] if row.get("pair_id")]
+    handicap_field = [row["percentage"] for row in handicap.values()]
+
+    def national_rank(pct: float, field: List[float]) -> int:
+        return 1 + sum(1 for other in field if other > pct)
+
+    items = []
+    for row in session["club_scratch"]:
+        if not row.get("pair_id"):
+            continue
+        code = bi.parse_pair_code(row["pair_id"])
+        home = row["club_code"] == home_club_code
+        team = {}
+        for index, name in ((1, row["player1_name"]), (2, row["player2_name"])):
+            player_id = player_ids.get(_person_key(name)) if home else f"bi:{row['pair_id']}:{index}"
+            team[f"player{index}"] = {"id": player_id, "lastName": name, "firstName": ""}
+        item = {
+            "orientation": code["pair_direction"],
+            "section": code["section"],
+            "tableNumber": code["table"],
+            "simultaneousId": row["club_code"],
+            "team": team,
+        }
+        handicap_row = handicap.get(row["pair_id"])
+        if handicap_row is not None:
+            item.update(
+                sessionScore=handicap_row["percentage"],
+                rank=national_rank(handicap_row["percentage"], handicap_field),
+                totalScoreWithoutHandicap=row["percentage"],
+                rankWithoutHandicap=national_rank(row["percentage"], scratch_field),
+                totalBonus=round(handicap_row["percentage"] - row["percentage"], 2),
+            )
+        else:
+            item.update(sessionScore=row["percentage"], rank=national_rank(row["percentage"], scratch_field))
+        items.append(item)
+    return items
+
+
+def ranking_path(cache_dir: pathlib.Path, session_id: Any) -> pathlib.Path:
+    """Where load_ranking reads an organizer session's ranking."""
+    return pathlib.Path(cache_dir) / "rankings" / f"{session_id}.json"
+
+
+def _player_ids(entry: Dict[str, Any]) -> Dict[str, str]:
+    """``_person_key(name)`` -> Lancelot id, from FFBridge's entry list of the same club game."""
+    import ffbridge_entry_list as entry_list
+
+    pairs = entry_list.entrants_of_player_session(
+        str(entry["player_id"]), entry.get("club_group_ids") or [], str(entry["date"])
+    )
+    return {_person_key(p["name"]): p["lancelot_id"] for pair in pairs for p in pair["players"]}
+
+
 def scrape_mldf(
     entry: Dict[str, Any],
     *,
     fetch: Fetch = default_fetch,
     cache_dir: Optional[pathlib.Path] = None,
 ) -> pl.DataFrame:
-    """Read the pair's scorecard and each board's deal. Deals are cached; results are provisional, so not."""
+    """The whole club's boards from every North-South scorecard, plus the national ranking.
+
+    Deal pages are cached; results are provisional, so scorecards and rankings
+    are read fresh. The ranking is written where load_ranking finds it.
+    """
     session_code = str(entry["session_code"])
-    card = bi.parse_scorecard(fetch(str(entry["route_url"])))
-    club_rows = bi.parse_result_rows(fetch(str(entry["results_url"])), page_kind="club")
-    deals = {}
-    for board in card["boards"]:
-        board_no = board["board"]
-        deals[board_no] = bi.parse_deal_page(
+    session = bi.fetch_session_tables(entry["date"], get_text=fetch)
+    club_rows = [row for row in session["club_scratch"] if row["club_code"] == entry["bi_club_code"]]
+    ns_pair_ids = [
+        row["pair_id"] for row in club_rows
+        if row.get("pair_id") and bi.parse_pair_code(row["pair_id"])["pair_direction"] == "NS"
+    ]
+
+    def card(pair_id: str) -> Dict[str, Any]:
+        return bi.parse_scorecard(fetch(bi.scorecard_url(session_code, pair_id)))
+
+    def deal(board_no: int) -> Dict[str, Any]:
+        return bi.parse_deal_page(
             bridgeplus._page_cache(
                 cache_dir,
                 f"bridgeinter/{session_code}/donne_{board_no:02d}.html",
@@ -358,4 +454,16 @@ def scrape_mldf(
                 fetch,
             )
         )
-    return build_mldf(card, deals, entry=entry, opponent_tables=_opponent_tables(club_rows))
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        cards = dict(zip(ns_pair_ids, executor.map(card, ns_pair_ids)))
+        boards = sorted({board["board"] for c in cards.values() for board in c["boards"]})
+        deals = dict(zip(boards, executor.map(deal, boards)))
+    player_ids = _player_ids(entry)
+    frame = build_club_mldf(cards, deals, entry=entry, club_rows=club_rows, player_ids=player_ids)
+    if cache_dir is not None:
+        path = ranking_path(cache_dir, entry["session_id"])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = ranking_payload(session, home_club_code=entry["bi_club_code"], player_ids=player_ids)
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return frame

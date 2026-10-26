@@ -99,23 +99,63 @@ class BridgeInterSourceTests(unittest.TestCase):
         self.assertEqual((found["player2_name"], found["player_index"]), ("GELRUBIN Pauline", 0))
         self.assertIsNone(bix.find_pair(rows, "Collins", ""))  # two Collins: ambiguous
 
-    def test_build_mldf_uses_the_pairs_percent_and_field_top(self):
-        entry = {
-            "date": "2026-10-26", "section_name": "A", "pair_direction": "EW", "pair_number": "4",
-            "player_id": "56959", "player_name": "COLLINS Gilbert", "player_direction": "E",
-            "partner_license_number": None, "partner_name": "GELRUBIN Pauline", "partner_direction": "W",
-        }
-        card = bi.parse_scorecard(SCORECARD)
+    CLUB_ROWS = [
+        {"player1_name": "SININGE Catherine", "player2_name": "ZABOTTO Guy", "pair_id": "lo261026LEVA08NS", "club_code": "LEV", "percentage": 48.17, "global_rank": 70},
+        {"player1_name": "COLLINS Gilbert", "player2_name": "GELRUBIN Pauline", "pair_id": "lo261026LEVA04EO", "club_code": "LEV", "percentage": 52.06, "global_rank": 55},
+        {"player1_name": "AMAR Monique", "player2_name": "SUISSA Marie", "pair_id": "lo261026LEVA02EO", "club_code": "LEV", "percentage": 51.41, "global_rank": 60},
+    ]
+    ENTRY = {"date": "2026-10-26", "player_id": "56959", "player_name": "COLLINS Gilbert", "bi_club_code": "LEV"}
+
+    def test_club_frame_has_every_table_with_names_and_ids(self):
+        # North-South scorecard of SININGE-ZABOTTO: the % is North-South's.
+        ns_card = (
+            _card_row(1, "5C", "E", "10T", "-1", "50", "", "72.1", "COLLINS Gilbert - GELRUBIN Pauline")
+            + _card_row(2, "3SA", "N", "4P", "=", "400", "", "40.0", "")
+            + _card_row(3, "3SA", "N", "4P", "-1", "", "50", "69.1", "SUISSA Marie - AMAR Monique")
+        )
+        cards = {"lo261026LEVA08NS": bi.parse_scorecard(ns_card)}
         deal = bi.parse_deal_page(DEAL_PAGE)
-        deals = {board["board"]: deal for board in card["boards"]}
-        df = bix.build_mldf(card, deals, entry=entry, opponent_tables={"SININGE CATHERINE ZABOTTO GUY": 7})
+        df = bix.build_club_mldf(
+            cards, {1: deal, 2: deal, 3: deal}, entry=self.ENTRY, club_rows=self.CLUB_ROWS,
+            player_ids={bix._person_key("SININGE Catherine"): "61300", bix._person_key("GELRUBIN Pauline"): "999"},
+        )
         first = df.row(0, named=True)
         self.assertAlmostEqual(first["Pct_EW"], 0.279)
         self.assertEqual(first["MP_Top"], 4)
-        self.assertAlmostEqual(first["MP_EW"], 1.12)
-        self.assertEqual((first["Pair_Number_NS"], first["Pair_Number_EW"]), (7, 4))
-        self.assertEqual((first["Player_ID_E"], first["Player_Name_W"], first["Player_ID_N"]), ("56959", "GELRUBIN Pauline", None))
-        self.assertIsNone(df.row(2, named=True)["Pair_Number_NS"])  # opponent not on the club page
+        self.assertEqual((first["Pair_Number_NS"], first["Pair_Number_EW"]), (8, 4))
+        self.assertEqual(
+            [first[f"Player_Name_{s}"] for s in "NSEW"],
+            ["SININGE Catherine", "ZABOTTO Guy", "COLLINS Gilbert", "GELRUBIN Pauline"],
+        )
+        # The entry's player always has their id; others come from the entry list or stay null.
+        self.assertEqual([first[f"Player_ID_{s}"] for s in "NSEW"], ["61300", None, "56959", "999"])
+        # Opponent names in either order find the pair.
+        self.assertEqual(df.row(2, named=True)["Pair_Number_EW"], 2)
+
+    def test_unknown_opponents_fail_loudly(self):
+        card = bi.parse_scorecard(_card_row(1, "5C", "E", "10T", "-1", "50", "", "72.1", "NOBODY Here - SOMEONE Else"))
+        with self.assertRaises(ValueError):
+            bix.build_club_mldf(
+                {"lo261026LEVA08NS": card}, {1: bi.parse_deal_page(DEAL_PAGE)},
+                entry=self.ENTRY, club_rows=self.CLUB_ROWS, player_ids={},
+            )
+
+    def test_ranking_payload_is_lancelot_shaped_with_placeholder_ids_elsewhere(self):
+        other = {"player1_name": "CAUBET Jean-claude", "player2_name": "VIEL Jacqueline", "pair_id": "lo261026GREA22NS", "club_code": "GRE", "percentage": 65.65, "global_rank": 1}
+        session = {
+            "club_scratch": [*self.CLUB_ROWS, other],
+            "club_handicap": [{**self.CLUB_ROWS[1], "percentage": 55.06, "global_rank": 30}],
+        }
+        items = bix.ranking_payload(session, home_club_code="LEV", player_ids={bix._person_key("COLLINS Gilbert"): "56959"})
+        collins = next(i for i in items if i["tableNumber"] == 4)
+        self.assertEqual((collins["orientation"], collins["simultaneousId"], collins["team"]["player1"]["id"]), ("EW", "LEV", "56959"))
+        self.assertEqual((collins["sessionScore"], collins["totalScoreWithoutHandicap"], collins["totalBonus"]), (55.06, 52.06, 3.0))
+        grenade = next(i for i in items if i["simultaneousId"] == "GRE")
+        self.assertEqual(grenade["team"]["player1"]["id"], "bi:lo261026GREA22NS:1")
+        self.assertEqual((grenade["sessionScore"], grenade["rank"]), (65.65, 1))
+        # National scratch rank over every club's pairs: 65.65, 52.06, 51.41, 48.17.
+        self.assertEqual(collins["rankWithoutHandicap"], 2)
+        self.assertEqual(next(i for i in items if i["tableNumber"] == 8)["rank"], 4)
 
     def test_gap_entries_skip_published_dates_and_other_weekdays(self):
         organizer = {"lancelot_series_id": 27, "series_id": 386, "label": "Simultané Octopus",

@@ -944,12 +944,17 @@ def load_ranking(session_id: Any, cache_dir: Path) -> Tuple[Optional[pl.DataFram
     A ranking cached before publication is downloaded again, and the cache is
     rewritten once the published scores arrive.
     """
+    path = Path(cache_dir) / "rankings" / f"{session_id}.json"
     if is_organizer_session_id(session_id):
+        # Written from the organizer's pages when the session was built
+        # (BridgeInterNet); FFBridge has nothing under this id.
+        ranking = _ranking_frame(json.loads(path.read_text(encoding="utf-8"))) if path.is_file() else None
+        if ranking_is_published(ranking):
+            return ranking, None
         return None, (
             "Results come from the organizer's website until FFBridge publishes this session, "
-            "so actual percentages and ranks are not shown."
+            "and it has no ranking, so actual percentages and ranks are not shown."
         )
-    path = Path(cache_dir) / "rankings" / f"{session_id}.json"
     if path.is_file():
         ranking = _ranking_frame(json.loads(path.read_text(encoding="utf-8")))
         if ranking_is_published(ranking):

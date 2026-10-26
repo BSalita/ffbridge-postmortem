@@ -171,6 +171,26 @@ def entries_from_club_schedules(
     return sorted(found, key=lambda row: row.get("date") or "")
 
 
+def entrants_of_player_session(
+    person_id: str,
+    group_ids: Iterable[str],
+    day: str,
+) -> List[Dict[str, Any]]:
+    """The entry list of the session on ``day`` (in one of ``group_ids``) that ``person_id`` entered.
+
+    Empty when none of the groups has such a session.
+    """
+    person = str(person_id)
+    for group_id in sorted({str(g) for g in group_ids if g}):
+        for row in _api_get(f"/competitions/groups/{group_id}/groupSessions") or []:
+            if str(row.get("date") or "")[:10] != day or row.get("id") is None:
+                continue
+            pairs = session_entrants(str(row["id"]))
+            if any(p["lancelot_id"] == person for pair in pairs for p in pair["players"]):
+                return pairs
+    return []
+
+
 def forecast_group_session(
     group_session_id: Optional[str] = None,
     sims: int = entries_forecast.DEFAULT_SIMS,
