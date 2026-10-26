@@ -2241,11 +2241,19 @@ def player_search_input_on_change_with_query(query: str) -> None:
 
 
 def player_search_input_on_change() -> None:
-    """Handle player search input change - delegates to helper function"""
-    player_search_input = st.session_state.player_search_input
-    # Sync the value state with the input
-    st.session_state.player_search_value = player_search_input
-    player_search_input_on_change_with_query(player_search_input)
+    """Search as soon as the license/name box changes (Enter or leaving the box)."""
+    input_value = (st.session_state.get("player_search_input") or "").strip()
+    st.session_state.player_search_value = input_value
+    if not input_value:
+        _clear_player_search_matches()
+        return
+    if input_value.isdigit():
+        # License lookup runs at the top of create_sidebar so its messages land in the main window.
+        _clear_player_search_matches()
+        st.session_state.process_go_button_input = input_value
+        return
+    # A name: load a unique match, or list several for the selectbox below the box.
+    player_search_input_on_change_with_query(input_value)
 
 
 
@@ -2967,12 +2975,12 @@ class FFBridgeApp(PostmortemBase):
             key="report_language",
         )
         
-        # Process Go button input OUTSIDE sidebar context (so output goes to main window)
+        # Process a license typed in the search box OUTSIDE sidebar context (so output goes to main window)
         if hasattr(st.session_state, 'process_go_button_input'):
             input_value = st.session_state.process_go_button_input
             del st.session_state.process_go_button_input
             
-            # Processing Go button input in main context (so output goes to main window)
+            # Processing the license in main context (so output goes to main window)
             
             # If it's a license number (numeric), look up the player and generate report
             if input_value.isdigit():
@@ -3056,29 +3064,20 @@ class FFBridgeApp(PostmortemBase):
             st.session_state.player_search_value = ''
             del st.session_state.clear_player_search
             
-        # Use a form so Enter and the Go button submit the current textbox value reliably.
-        # (Outside a form, Streamlit may not commit text_input into session_state until Enter/blur,
-        # which can make the Go button appear "disabled".)
+        # The search runs when the box changes (Enter or leaving the box); there is no Go button.
+        # Several name matches are listed right under it, and picking one loads that report.
         matches = st.session_state.get('player_search_matches') or []
         show_match_selectbox = _name_search_has_multiple_matches()
-        with st.sidebar.form(key="player_search_form", clear_on_submit=False):
-            st.text_input(
-                chrome_text("license_label", "FFBridge license number or name"),
-                key='player_search_input',
-                placeholder=chrome_text("license_placeholder", "9500754 or Robert Salita"),
-                help=chrome_text(
-                    "license_help",
-                    "Digits-only license or Lancelot id, or a fuzzy player name.",
-                ),
-            )
-            submitted = st.form_submit_button(
-                chrome_text("go", "Go"),
-                type="primary",
-                use_container_width=True,
-            )
-
-        # Name matches sit outside the form: widgets inside a form can't rerun on change,
-        # and picking a player should load that player's report right away.
+        st.sidebar.text_input(
+            chrome_text("license_label", "FFBridge license number or name"),
+            key='player_search_input',
+            on_change=player_search_input_on_change,
+            placeholder=chrome_text("license_placeholder", "9500754 or Robert Salita"),
+            help=chrome_text(
+                "license_help",
+                "Digits-only license or Lancelot id, or a fuzzy player name.",
+            ),
+        )
         if show_match_selectbox:
             st.sidebar.selectbox(
                 chrome_text("matching_players", "Matching players ({count})").format(count=len(matches)),
@@ -3093,25 +3092,6 @@ class FFBridgeApp(PostmortemBase):
                 ),
             )
 
-        if submitted:
-            input_value = (st.session_state.get('player_search_input') or '').strip()
-            if not input_value:
-                _clear_player_search_matches()
-            elif input_value.isdigit():
-                # Numeric input - store for report generation (handled at top of this function)
-                _clear_player_search_matches()
-                st.session_state.process_go_button_input = input_value
-                st.rerun()
-            elif input_value:
-                # Non-numeric input - resolve a unique name or show a selectbox
-                player_search_input_on_change_with_query(input_value)
-                # If a name resolved to a license number, rerun so the textbox
-                # (already instantiated this render) picks up the inserted value.
-                if st.session_state.get('insert_player_search_value'):
-                    st.rerun()
-                if len(st.session_state.get('player_search_matches') or []) > 1:
-                    st.rerun()
-        
         # Display any search error in the sidebar
         if hasattr(st.session_state, 'player_search_error'):
             st.sidebar.error(st.session_state.player_search_error)
