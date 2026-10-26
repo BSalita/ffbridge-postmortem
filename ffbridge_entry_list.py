@@ -171,6 +171,20 @@ def entries_from_club_schedules(
     return sorted(found, key=lambda row: row.get("date") or "")
 
 
+def club_group_ids(club_codes: Iterable[str]) -> List[str]:
+    """Current-season FFBridge group ids of clubs given by FFB club code (e.g. 5802079).
+
+    The shared player-session index lists a game's club code but not its
+    group, and group schedules are where sessions and entry lists are found.
+    """
+    import ffbridge_player_game_service as games
+
+    codes = sorted({str(code) for code in club_codes if code})
+    if not codes:
+        return []
+    return sorted({str(row["group_id"]) for row in games.resolve_clubs(codes)})
+
+
 def entrants_of_player_session(
     person_id: str,
     group_ids: Iterable[str],

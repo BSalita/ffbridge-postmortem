@@ -2287,16 +2287,31 @@ def _cached_entries_with_forecast(lancelot_id: str, day: str, club_group_ids: Tu
 ENTRY_CLUB_SCAN_LOOKBACK_DAYS = 90
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _club_group_ids_for_codes(club_codes: Tuple[str, ...]) -> Tuple[str, ...]:
+    import ffbridge_entry_list as entry_list
+
+    return tuple(entry_list.club_group_ids(club_codes))
+
+
 def _recent_club_group_ids() -> Tuple[str, ...]:
-    """Club groups of the loaded player's games in the last 90 days, for the entry scan."""
+    """Club groups of the loaded player's games in the last 90 days, for the entry scan.
+
+    Games from the shared index carry the club code but no group, so club
+    codes are resolved to the club's current-season groups.
+    """
     player_id = st.session_state.get("player_id")
     games = (st.session_state.get("game_urls_d") or {}).get(str(player_id)) or {}
     since = (datetime.now().date() - timedelta(days=ENTRY_CLUB_SCAN_LOOKBACK_DAYS)).isoformat()
-    return tuple(sorted({
-        str(game["group_id"])
-        for game in games.values()
-        if game.get("group_id") and str(game.get("date") or "")[:10] >= since
+    recent = [game for game in games.values() if str(game.get("date") or "")[:10] >= since]
+    groups = {str(game["group_id"]) for game in recent if game.get("group_id")}
+    codes = tuple(sorted({
+        str(game["organization_id"]) for game in recent
+        if not game.get("group_id") and str(game.get("organization_id") or "").isdigit()
     }))
+    if codes:
+        groups.update(_club_group_ids_for_codes(codes))
+    return tuple(sorted(groups))
 
 
 @st.cache_data(ttl=600, show_spinner=False)

@@ -241,11 +241,16 @@ def _find_entry(
             "results_url": club_page_url,
             "route_url": bi.scorecard_url(session_code, row["pair_id"]),
             "bi_pair_id": row["pair_id"],
-            # FFBridge groups of the player's games at this club, to find the
-            # entry list (player ids) of the same game.
+            # FFBridge groups (or, when the game list has none, club codes) of
+            # the player's games at this club, to find the entry list (player
+            # ids) of the same game.
             "club_group_ids": sorted({
                 str(s["group_id"]) for s in sessions
                 if s.get("group_id") and str(s.get("organization_name") or s.get("club") or "").strip() == ffb_club
+            }),
+            "club_codes": sorted({
+                str(s["organization_id"]) for s in sessions
+                if s.get("organization_id") and str(s.get("organization_name") or s.get("club") or "").strip() == ffb_club
             }),
             "player_id": player_id,
             "player_license_number": bridgeplus._license_key(license_number) if license_number else None,
@@ -417,9 +422,8 @@ def _player_ids(entry: Dict[str, Any]) -> Dict[str, str]:
     """``_person_key(name)`` -> Lancelot id, from FFBridge's entry list of the same club game."""
     import ffbridge_entry_list as entry_list
 
-    pairs = entry_list.entrants_of_player_session(
-        str(entry["player_id"]), entry.get("club_group_ids") or [], str(entry["date"])
-    )
+    group_ids = entry.get("club_group_ids") or entry_list.club_group_ids(entry.get("club_codes") or [])
+    pairs = entry_list.entrants_of_player_session(str(entry["player_id"]), group_ids, str(entry["date"]))
     return {_person_key(p["name"]): p["lancelot_id"] for pair in pairs for p in pair["players"]}
 
 
