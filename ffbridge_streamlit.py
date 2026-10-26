@@ -2218,6 +2218,15 @@ def player_search_input_on_change_with_query(query: str) -> None:
             _clear_player_search_matches()
             return
 
+        # Several people matched: drop the previous player so their report
+        # doesn't stay on screen looking like the result of this search.
+        _clear_selected_session()
+        st.session_state.player_id = None
+        st.session_state.pop("lancelot_player_id", None)
+        st.session_state.pop("player_license_number", None)
+        st.session_state.pop("simultane_id", None)
+        st.session_state.deferred_start_report = False
+        st.session_state.sql_query_mode = False
         st.session_state.player_search_matches = matches
         st.session_state.player_search_query = query.strip()
         st.session_state.pop("player_search_error", None)
