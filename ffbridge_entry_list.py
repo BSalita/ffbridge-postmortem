@@ -8,8 +8,9 @@ ids to ``ffbridge_entries_forecast.forecast_entries``.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
-from typing import Any, Dict, List, Optional
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Dict, Iterable, List, Optional
 
 import requests
 
@@ -18,6 +19,8 @@ import ffbridge_postmortem_create as create
 
 LANCELOT_API = "https://api-lancelot.ffbridge.fr"
 PAGE_SIZE = 100
+# How far ahead the club-schedule scan looks for a player whose own entry list is hidden.
+CLUB_SCAN_DAYS = 14
 
 
 def _api_get(path: str, params: Optional[Dict[str, Any]] = None) -> Any:
@@ -130,6 +133,44 @@ def upcoming_entries(date_from: Optional[str] = None, person_id: Optional[str] =
     return sorted(sessions, key=lambda row: row.get("date") or "")
 
 
+def entries_from_club_schedules(
+    person_id: str,
+    group_ids: Iterable[str],
+    date_from: Optional[str] = None,
+    days: int = CLUB_SCAN_DAYS,
+) -> List[Dict[str, Any]]:
+    """A player's upcoming entries, found in the entry lists of the given club groups.
+
+    For players whose own entry list FFBridge hides (``EntriesPrivate``): every
+    session of those groups in the next ``days`` days is read, and the ones
+    the player is entered in are returned like ``upcoming_entries`` rows.
+    Games at clubs outside ``group_ids`` are not found.
+    """
+    person = str(person_id)
+    first_day = date.fromisoformat(date_from) if date_from else date.today()
+    last_day = first_day + timedelta(days=days)
+    candidates: Dict[str, str] = {}
+    for group_id in sorted({str(g) for g in group_ids if g}):
+        for row in _api_get(f"/competitions/groups/{group_id}/groupSessions") or []:
+            day = str(row.get("date") or "")[:10]
+            if row.get("id") is not None and first_day.isoformat() <= day <= last_day.isoformat():
+                candidates[str(row["id"])] = day
+
+    def entered(group_session_id: str) -> Optional[Dict[str, Any]]:
+        for pair in session_entrants(group_session_id):
+            ids = [player["lancelot_id"] for player in pair["players"]]
+            if person in ids:
+                meta = session_meta(group_session_id)
+                partners = [p["name"] for p in pair["players"] if p["lancelot_id"] != person]
+                meta["partner"] = ", ".join(partners) or None
+                return meta
+        return None
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        found = [row for row in executor.map(entered, candidates) if row is not None]
+    return sorted(found, key=lambda row: row.get("date") or "")
+
+
 def forecast_group_session(
     group_session_id: Optional[str] = None,
     sims: int = entries_forecast.DEFAULT_SIMS,
@@ -182,14 +223,24 @@ def entries_with_forecast(
     person_id: Optional[str] = None,
     date_from: Optional[str] = None,
     sims: int = 5000,
+    club_group_ids: Optional[Iterable[str]] = None,
 ) -> List[Dict[str, Any]]:
     """A player's upcoming entries, each with that player's forecast rank and pct.
 
     A session with fewer than two registered pairs gets ``forecast_error``.
-    Raises EntriesPrivate when FFBridge keeps the player's entries private.
+    When FFBridge keeps the player's entries private, the entry lists of
+    ``club_group_ids`` are scanned instead and each row gets
+    ``found_via_club_scan``; without club groups, EntriesPrivate is raised.
     """
     person = str(person_id or create.ensure_lancelot_auth().lancelot_id)
-    rows = upcoming_entries(date_from, person_id=person)
+    try:
+        rows = upcoming_entries(date_from, person_id=person)
+    except EntriesPrivate:
+        if not club_group_ids:
+            raise
+        rows = entries_from_club_schedules(person, club_group_ids, date_from)
+        for row in rows:
+            row["found_via_club_scan"] = True
     for row in rows:
         try:
             forecast = forecast_group_session(row["group_session_id"], sims=sims)

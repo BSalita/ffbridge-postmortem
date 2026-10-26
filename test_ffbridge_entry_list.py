@@ -145,6 +145,51 @@ class EntryListTests(unittest.TestCase):
         self.assertEqual(out[0]["pair"], "DAS Ramendra - SALITA Robert")
         self.assertIn("1 registered pairs", out[1]["forecast_error"])
 
+    def test_club_scan_finds_the_sessions_a_hidden_player_entered(self):
+        schedule = [
+            {"id": 422520, "date": "2026-10-26T14:00:00+01:00"},
+            {"id": 422522, "date": "2026-10-27T14:00:00+01:00"},
+            {"id": 438338, "date": "2026-11-03T14:00:00+01:00"},
+            {"id": 499999, "date": "2026-12-28T14:00:00+01:00"},  # beyond the scan window
+        ]
+        collins = _person("56959", "Collins", "Gilbert", "1821439")
+        darmon = _person("7860", "DARMON", "Robert", "1")
+        others = [_person("1", "A", "x", "1"), _person("2", "B", "y", "2")]
+        entrants = {
+            "422520": {"items": [_team(1, [darmon, collins], 110)]},
+            "422522": {"items": [_team(2, others, 90), _team(3, [darmon, collins], 110)]},
+            "438338": {"items": [_team(4, others, 90)]},
+        }
+        read = []
+
+        def fake(path, params=None):
+            if path == "/competitions/groups/21333/groupSessions":
+                return schedule
+            if path == "/entries/teams/search":
+                read.append(str(params["groupSessionId"]))
+                return entrants[str(params["groupSessionId"])]
+            gsid = path.rsplit("/", 1)[-1]
+            return dict(SESSION, date=next(s["date"] for s in schedule if str(s["id"]) == gsid))
+
+        with patch.object(entry_list, "_api_get", side_effect=fake):
+            rows = entry_list.entries_from_club_schedules("56959", ["21333"], "2026-10-26")
+        self.assertEqual([row["group_session_id"] for row in rows], ["422520", "422522"])
+        self.assertEqual(rows[1]["partner"], "DARMON Robert")
+        self.assertNotIn("499999", read)
+
+    def test_hidden_entries_use_the_club_scan_when_clubs_are_known(self):
+        found = [{"group_session_id": "422522", "date": "2026-10-27T14:00:00+01:00"}]
+        forecast = {"pairs": 19, "rows": [], "pair_of_player": {}}
+        with patch.object(entry_list, "upcoming_entries", side_effect=entry_list.EntriesPrivate("hidden")), \
+                patch.object(entry_list, "entries_from_club_schedules", return_value=found) as scan, \
+                patch.object(entry_list, "forecast_group_session", return_value=forecast):
+            rows = entry_list.entries_with_forecast("56959", "2026-10-26", sims=10, club_group_ids=("21333",))
+        scan.assert_called_once_with("56959", ("21333",), "2026-10-26")
+        self.assertTrue(rows[0]["found_via_club_scan"])
+        with patch.object(entry_list, "upcoming_entries", side_effect=entry_list.EntriesPrivate("hidden")):
+            with self.assertRaises(entry_list.EntriesPrivate):
+                entry_list.entries_with_forecast("56959", "2026-10-26", sims=10)
+
     def test_fewer_than_two_pairs_fails(self):
         def fake(path, params=None):
             return SESSION if path.startswith("/competitions/groupSessions/") else {"items": []}

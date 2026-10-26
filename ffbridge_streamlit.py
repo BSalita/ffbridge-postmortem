@@ -32,7 +32,7 @@ import json
 import sys
 import os
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 
 from urllib.parse import urlparse
@@ -2262,18 +2262,37 @@ ENTRY_FORECAST_COLUMNS = ["Rank_Forecast", "Pair", "Pct_Forecast", "P_Win", "P_T
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def _cached_entries_with_forecast(lancelot_id: str, day: str) -> Dict[str, Any]:
+def _cached_entries_with_forecast(lancelot_id: str, day: str, club_group_ids: Tuple[str, ...]) -> Dict[str, Any]:
     """A player's upcoming entries with forecasts, re-read every 10 minutes.
 
-    Returns {"private": True} when FFBridge hides the player's entries.
+    When FFBridge hides the player's own entry list, the entry lists of the
+    clubs in ``club_group_ids`` are scanned instead. Returns {"private": True}
+    when the list is hidden and there are no clubs to scan.
     """
     import ffbridge_entry_list as entry_list
 
     try:
-        rows = entry_list.entries_with_forecast(lancelot_id, day, sims=ENTRY_FORECAST_SIMS)
+        rows = entry_list.entries_with_forecast(
+            lancelot_id, day, sims=ENTRY_FORECAST_SIMS, club_group_ids=club_group_ids
+        )
     except entry_list.EntriesPrivate:
         return {"private": True, "rows": []}
     return {"private": False, "rows": rows}
+
+
+ENTRY_CLUB_SCAN_LOOKBACK_DAYS = 90
+
+
+def _recent_club_group_ids() -> Tuple[str, ...]:
+    """Club groups of the loaded player's games in the last 90 days, for the entry scan."""
+    player_id = st.session_state.get("player_id")
+    games = (st.session_state.get("game_urls_d") or {}).get(str(player_id)) or {}
+    since = (datetime.now().date() - timedelta(days=ENTRY_CLUB_SCAN_LOOKBACK_DAYS)).isoformat()
+    return tuple(sorted({
+        str(game["group_id"])
+        for game in games.values()
+        if game.get("group_id") and str(game.get("date") or "")[:10] >= since
+    }))
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -2312,7 +2331,9 @@ def _render_upcoming_entries_sidebar() -> None:
     with st.sidebar:
         with st.spinner(chrome_text("entries_loading", "Reading entries and forecasting...")):
             try:
-                data = _cached_entries_with_forecast(str(lancelot_id), datetime.now().date().isoformat())
+                data = _cached_entries_with_forecast(
+                    str(lancelot_id), datetime.now().date().isoformat(), _recent_club_group_ids()
+                )
             except Exception as e:
                 _clear_entry_forecast()
                 st.error(f"Could not read entries from FFBridge: {e}")
@@ -2343,6 +2364,11 @@ def _render_upcoming_entries_sidebar() -> None:
         key="entry_forecast_selectbox",
         on_change=_entry_forecast_on_change,
     )
+    if any(row.get("found_via_club_scan") for row in rows):
+        st.sidebar.caption(chrome_text(
+            "entries_club_scan",
+            "FFBridge hides this player's entry list; these games were found in the entry lists of their clubs.",
+        ))
 
 
 def _render_entry_forecast(group_session_id: str) -> None:
