@@ -356,6 +356,16 @@ class RankingTests(unittest.TestCase):
             self.assertEqual(again["rank"].to_list(), [61, 150])
             self.assertEqual(fetch.call_count, 1)
 
+    def test_organizer_sessions_never_ask_ffbridge_for_a_ranking(self):
+        # Bridge+ (900_000_000+) and BridgeInterNet (920_000_000+) ids are ours, not FFBridge's.
+        with tempfile.TemporaryDirectory() as cache:
+            with patch.object(predictions, "_fetch_ranking") as fetch:
+                for session_id in ("900012345", "922610260"):
+                    ranking, warning = predictions.load_ranking(session_id, Path(cache))
+                    self.assertIsNone(ranking)
+                    self.assertIn("organizer", warning)
+            fetch.assert_not_called()
+
     def test_unpublished_results_warn_instead_of_ranking_everyone_first(self):
         boards = pl.DataFrame(
             {

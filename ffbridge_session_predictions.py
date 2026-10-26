@@ -928,12 +928,27 @@ def _fetch_ranking(session_id: Any) -> Any:
     return mlBridgeFFLib.lancelot_get(f"results/sessions/{int(session_id)}/ranking")
 
 
+# Sessions read from an organizer's website before ffbridge.fr publishes them
+# get ids from here up (Bridge+ 900_000_000 + tournament, BridgeInterNet
+# 920_000_000 + date). FFBridge has no ranking for them.
+ORGANIZER_SESSION_ID_MIN = 900_000_000
+
+
+def is_organizer_session_id(session_id: Any) -> bool:
+    return int(session_id) >= ORGANIZER_SESSION_ID_MIN
+
+
 def load_ranking(session_id: Any, cache_dir: Path) -> Tuple[Optional[pl.DataFrame], Optional[str]]:
     """The national ranking and a warning when FFBridge has not published it.
 
     A ranking cached before publication is downloaded again, and the cache is
     rewritten once the published scores arrive.
     """
+    if is_organizer_session_id(session_id):
+        return None, (
+            "Results come from the organizer's website until FFBridge publishes this session, "
+            "so actual percentages and ranks are not shown."
+        )
     path = Path(cache_dir) / "rankings" / f"{session_id}.json"
     if path.is_file():
         ranking = _ranking_frame(json.loads(path.read_text(encoding="utf-8")))
