@@ -1693,6 +1693,9 @@ def _remember_resolved_player_ids(resolved: Dict[str, Any]) -> None:
         st.session_state.lancelot_player_id = str(lancelot_id)
     if license_number:
         st.session_state.player_license_number = str(license_number)
+    elif lancelot_id:
+        # A new player without a known license must not keep the previous (or default) one.
+        st.session_state.pop("player_license_number", None)
     if classic_id:
         st.session_state.classic_player_id = str(classic_id)
 
@@ -2151,6 +2154,8 @@ def _apply_resolved_search_player(player_id: str, license_number: str, query: st
         st.session_state.player_license_number = str(license_number)
         st.session_state.player_id = str(license_number)
     else:
+        # Never leave the previous player's (or the default) license bound to this one.
+        st.session_state.pop("player_license_number", None)
         st.session_state.player_id = str(player_id)
     _clear_selected_session(clear_games=True)
     try:
@@ -2321,6 +2326,19 @@ def _cached_session_forecast(group_session_id: str) -> Dict[str, Any]:
     return entry_list.forecast_group_session(group_session_id, sims=ENTRY_FORECAST_SIMS)
 
 
+def _entries_player_name() -> str:
+    """'Gilbert Collins' for the selected player, from their license (cached per process).
+
+    Not st.session_state.player_name: that is set when a report loads and can
+    still hold the previously selected player.
+    """
+    license_number = st.session_state.get("player_license_number")
+    if not license_number:
+        raise ValueError("No license number for the selected player")
+    last, first = pm_create._person_name_parts(str(license_number))
+    return f"{first} {last}".strip()
+
+
 def _entry_label(row: Mapping[str, Any]) -> str:
     """One line per entry: date, session, and the player's forecast."""
     when = str(row.get("date") or "")[:16].replace("T", " ")
@@ -2367,7 +2385,7 @@ def _render_upcoming_entries_sidebar() -> None:
     if not rows:
         _clear_entry_forecast()
         st.sidebar.markdown(f"**{title}**")
-        st.sidebar.caption(chrome_text("no_entries", "No upcoming entries."))
+        st.sidebar.caption(chrome_text("no_entries", "No upcoming entries for {name}.").format(name=_entries_player_name()))
         return
     none_label = chrome_text("entry_none", "— show the game report —")
     options = {none_label: None}
