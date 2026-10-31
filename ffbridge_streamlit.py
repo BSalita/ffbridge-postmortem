@@ -2673,8 +2673,9 @@ def reset_game_data() -> None:
 def app_info() -> None:
     """Display app information"""
     st.caption(f"Project lead is Robert Salita research@AiPolice.org. Code written in Python. UI written in streamlit. Data engine is polars. Query engine is duckdb. Bridge lib is endplay. Self hosted using Cloudflare Tunnel. Repo:https://github.com/BSalita/ffbridge-postmortem")
-    st.caption(f"App:{st.session_state.app_datetime} Streamlit:{st.__version__} Query Params:{st.query_params.to_dict()} Environment:{os.getenv('STREAMLIT_ENV','')}")
-    st.caption(f"Python:{'.'.join(map(str, sys.version_info[:3]))} pandas:{pd.__version__} polars:{pl.__version__} endplay:{endplay.__version__}")
+    st.caption(f"App:{st.session_state.app_datetime} Query Params:{st.query_params.to_dict()} Environment:{os.getenv('STREAMLIT_ENV','')}")
+    from mlBridge.package_versions import package_versions_line
+    st.caption(package_versions_line())
     try:
         from mlBridge.dds_ddss import engine_caption
         st.caption(engine_caption())
