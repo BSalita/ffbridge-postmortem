@@ -3213,7 +3213,7 @@ class FFBridgeApp(PostmortemBase):
             st.sidebar.markdown("---")
             st.sidebar.write(chrome_text(
                 "favorite_prompts",
-                "Favorite prompts. Click a button, or ask a question in the box at the bottom.",
+                "Favorites",
             ))
             for key, button in st.session_state.favorites["Buttons"].items():
                 label = localized_field(button, "title", str(button.get("title") or key))
