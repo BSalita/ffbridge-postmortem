@@ -960,8 +960,9 @@ def list_source_sessions(
         cache_file = cache_parquet_path(entry["session_id"], resolved.lancelot_id, directory)
         row = dict(entry)
         row.pop("raw_date", None)
-        row["already_cached"] = cache_file.is_file()
-        row["cache_file"] = cache_file.name if cache_file.is_file() else None
+        usable = cached_frame_usable(cache_file)
+        row["already_cached"] = usable
+        row["cache_file"] = cache_file.name if usable else None
         sessions.append(row)
     sessions = sessions_newest_first(sessions)
     club_codes = [
@@ -1130,15 +1131,70 @@ def _fetch_lancelot_json_cached(
     cache_dir: pathlib.Path,
     *,
     use_auth: bool = False,
+    unpublished: Optional[Callable[[Any], bool]] = None,
 ) -> Any:
+    """Lancelot JSON, cached on disk.
+
+    ``unpublished(data)`` is true for a response FFBridge has not finished
+    (scores or ranks still 0%). Such a response is never cached, and one
+    cached before this check existed is downloaded again.
+    """
     file_path = cache_dir.joinpath(cache_relpath).with_suffix(".json")
     if file_path.exists():
-        _log(f"loading Lancelot JSON cache {file_path}")
-        return json.loads(file_path.read_text(encoding="utf-8"))
+        cached = json.loads(file_path.read_text(encoding="utf-8"))
+        if unpublished is None or not unpublished(cached):
+            _log(f"loading Lancelot JSON cache {file_path}")
+            return cached
+        _log(f"Lancelot JSON cache {file_path} predates published results; downloading again")
     data = mlBridgeFFLib.lancelot_get(path, token=token if use_auth else None)
+    if unpublished is not None and unpublished(data):
+        _log(f"not caching {file_path}: FFBridge has not published results yet")
+        file_path.unlink(missing_ok=True)
+        return data
     file_path.parent.mkdir(parents=True, exist_ok=True)
     file_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
     return data
+
+
+def _note_is_zero(value: Any) -> bool:
+    try:
+        return float(value or 0) == 0.0
+    except (TypeError, ValueError):
+        return False
+
+
+def scores_unpublished(scores_json: Any) -> bool:
+    """A team's board scores whose percentages are all still 0 (FFBridge has not scored them)."""
+    rows = scores_json if isinstance(scores_json, list) else (scores_json or {}).get("items") or []
+    played = [row for row in rows if isinstance(row, dict) and str(row.get("contract") or "").strip()]
+    return bool(played) and all(
+        _note_is_zero(row.get("nsNote")) and _note_is_zero(row.get("ewNote")) for row in played
+    )
+
+
+def ranking_unpublished(ranking_json: Any) -> bool:
+    """A session ranking with every pair still at 0% (published placeholders)."""
+    rows = ranking_json if isinstance(ranking_json, list) else (ranking_json or {}).get("items") or []
+    rows = [row for row in rows if isinstance(row, dict)]
+    return bool(rows) and all(_note_is_zero(row.get("sessionScore")) for row in rows)
+
+
+def cached_frame_usable(path: pathlib.Path) -> bool:
+    """A cached postmortem parquet that exists and was built after FFBridge published percentages.
+
+    A game built before publication has Pct_NS 0 on every board; it is rebuilt
+    instead of reused.
+    """
+    if not path.is_file():
+        return False
+    try:
+        pct = pl.read_parquet(path, columns=["Pct_NS"])["Pct_NS"]
+    except (pl.exceptions.ColumnNotFoundError, pl.exceptions.SchemaError):
+        return True
+    if pct.fill_null(0.0).cast(pl.Float64, strict=False).fill_null(0.0).eq(0.0).all():
+        _log(f"{path.name} was built before FFBridge published percentages; rebuilding")
+        return False
+    return True
 
 
 def lancelot_session_meta(
@@ -1160,6 +1216,7 @@ def lancelot_session_meta(
         f"rankings/{sid}",
         token,
         directory,
+        unpublished=ranking_unpublished,
     )
     teams_df = json_normalize_api(ranking_json)
     match_df = teams_df.filter(_ranking_player_id_expr(teams_df, pid))
@@ -1254,6 +1311,7 @@ def build_lancelot_session_mldf(
             f"scores/{one_team_id}_{sid}",
             token,
             directory,
+            unpublished=scores_unpublished,
         )
         if all(board.get("contract", "") == "" for board in scores_json):
             if one_team_id == team_id:
@@ -1332,7 +1390,7 @@ def augment_and_cache_mldf(
     df = reduce_mldf_for_augment(df)
     directory = pathlib.Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
     cache_file = cache_parquet_path(session_id, player_id, directory)
-    if write_cache and cache_file.exists() and not force:
+    if write_cache and not force and cached_frame_usable(cache_file):
         loaded = pl.read_parquet(cache_file)
         _log(f"loaded {cache_file.name}: shape:{loaded.shape} size:{cache_file.stat().st_size}")
         return loaded
@@ -1400,7 +1458,7 @@ def _create_organizer_postmortem(
     source = str(game_entry.get("source"))
     scrape = {"bridgeplus": bridgeplus.scrape_mldf, "bridgeinter": bridgeinter.scrape_mldf}[source]
     meta = _bridgeplus_meta(resolved, game_entry)
-    already_cached = skip_build_if_cached and cache_file.exists() and not force
+    already_cached = skip_build_if_cached and not force and cached_frame_usable(cache_file)
     if already_cached:
         frame = pl.read_parquet(cache_file)
     else:
@@ -1489,7 +1547,7 @@ def create_lancelot_postmortem(
             started=started,
         )
 
-    if skip_build_if_cached and cache_file.exists() and not force:
+    if skip_build_if_cached and not force and cached_frame_usable(cache_file):
         meta, _, _ = lancelot_session_meta(
             resolved.lancelot_id, session_id, game_entry, token=token, cache_dir=directory
         )
@@ -2266,7 +2324,7 @@ def generate_postmortems(
     to_build = []
     for entry in sessions:
         path = cache_parquet_path(entry["session_id"], resolved.lancelot_id, directory)
-        if path.is_file() and not force:
+        if not force and cached_frame_usable(path):
             cached_frame = pl.read_parquet(path)
             archive_result = postmortem_archive.archive_session(
                 cached_frame,

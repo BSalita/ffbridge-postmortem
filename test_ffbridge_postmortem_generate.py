@@ -8,6 +8,19 @@ import requests
 
 import ffbridge_postmortem_create as create
 
+# Game listing looks players up by name for organizer pages; keep these tests off the live API.
+_no_name_lookup = patch.object(
+    create, "_person_name_parts", side_effect=RuntimeError("tests do not look up player names")
+)
+
+
+def setUpModule():
+    _no_name_lookup.start()
+
+
+def tearDownModule():
+    _no_name_lookup.stop()
+
 
 class GenerateJobTests(unittest.TestCase):
     def tearDown(self):
