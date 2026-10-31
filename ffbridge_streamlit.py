@@ -2795,6 +2795,9 @@ class FFBridgeApp(PostmortemBase):
         # MortyBridgeMCP's FFBridge postmortem tools.
         st.session_state.do_not_cache_df = False
 
+        # Show SQL query starts unchecked; ?show_sql_query=1 overrides below.
+        st.session_state.show_sql_query = False
+
         # Default before URL params are applied; URL ?player_id=... will override below.
         st.session_state.player_id = None
 
@@ -3237,6 +3240,14 @@ class FFBridgeApp(PostmortemBase):
         st.sidebar.markdown("🔗 [FFBridge Statistics](https://ffbridge-stats.7nt.info)")
         st.sidebar.markdown("🔗 [PBN/LIN Postmortem](https://pbn.postmortem.chat)")
 
+        st.sidebar.markdown("---")
+        st.sidebar.checkbox(
+            chrome_text("show_sql_query", "Show SQL query"),
+            value=st.session_state.show_sql_query,
+            key='show_sql_query_checkbox',
+            on_change=sql_query_on_change,
+        )
+
         # Separator above Developer Settings
         st.sidebar.markdown("---")
 
@@ -3265,14 +3276,6 @@ class FFBridgeApp(PostmortemBase):
                         on_change=debug_player_id_names_change, 
                         key='debug_player_id_names_selectbox'
                     )
-
-            st.checkbox(
-                'Show SQL Query',
-                value=st.session_state.show_sql_query,
-                key='show_sql_query_checkbox',
-                on_change=sql_query_on_change,
-                help='Show SQL used to query dataframes.'
-            )
 
             st.checkbox(
                 'Enable Debug Mode',
