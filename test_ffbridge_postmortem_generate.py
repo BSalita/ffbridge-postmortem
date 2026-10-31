@@ -439,6 +439,8 @@ class OtherPlayerSessionTests(unittest.TestCase):
                 return_value=indexed,
             ) as indexed_source,
             patch.object(create, "fetch_logged_in_source_sessions") as logged_in,
+            patch.object(create, "live_sessions_since_index", return_value=[]),
+            patch.object(create.bridgeinter, "gap_session_entries", return_value=[]),
         ):
             result = create.list_source_sessions(
                 "4958370",
@@ -478,6 +480,8 @@ class OtherPlayerSessionTests(unittest.TestCase):
                 return_value=indexed,
             ) as indexed_source,
             patch.object(create, "fetch_logged_in_source_sessions") as logged_in,
+            patch.object(create, "live_sessions_since_index", return_value=[]),
+            patch.object(create.bridgeinter, "gap_session_entries", return_value=[]),
         ):
             result = create.list_source_sessions(
                 "246273",
@@ -535,6 +539,42 @@ class OtherPlayerSessionTests(unittest.TestCase):
         self.assertEqual(result["player_license_number"], "9500754")
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["sessions"][0]["session_id"], "300749")
+
+    def test_games_published_after_the_index_are_added_once(self):
+        auth = create.LancelotAuth("token", "246273", "9500754")
+        resolved = create.ResolvedPlayer("56959", "1821439", "1821439")
+        indexed = [{"session_id": "271195", "date": "2026-10-23", "club": "Bridge Club Levallois Perret"}]
+        live = [
+            {"session_id": "271195", "date": "2026-10-23", "club": "Bridge Club Levallois Perret"},
+            {"session_id": "288725", "date": "2026-10-28", "club": "Bridge Club Levallois Perret",
+             "listing_source": "live Lancelot lookup since the player-session index"},
+        ]
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.object(create, "ensure_lancelot_auth", return_value=auth),
+            patch.object(create, "resolve_player", return_value=resolved),
+            patch.object(create, "fetch_other_player_source_sessions", return_value=indexed),
+            patch.object(create, "live_sessions_since_index", return_value=live) as live_lookup,
+            patch.object(create.bridgeplus, "gap_session_entries", return_value=[]),
+            patch.object(create.bridgeinter, "gap_session_entries", return_value=[]),
+        ):
+            result = create.list_source_sessions("1821439", cache_dir=pathlib.Path(tmp))
+        self.assertEqual([row["session_id"] for row in result["sessions"]], ["288725", "271195"])
+        live_lookup.assert_called_once_with(resolved, indexed)
+
+    def test_a_failing_live_lookup_still_lists_the_indexed_games(self):
+        resolved = create.ResolvedPlayer("56959", "1821439", "1821439")
+        indexed = [{"session_id": "271195", "date": "2026-10-23", "club": "Club"}]
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.object(create, "resolve_player", return_value=resolved),
+            patch.object(create, "fetch_other_player_source_sessions", return_value=indexed),
+            patch.object(create, "live_sessions_since_index", side_effect=RuntimeError("sign-in failed")),
+            patch.object(create.bridgeplus, "gap_session_entries", return_value=[]),
+            patch.object(create.bridgeinter, "gap_session_entries", side_effect=RuntimeError("sign-in failed")),
+        ):
+            result = create.list_source_sessions("1821439", cache_dir=pathlib.Path(tmp))
+        self.assertEqual([row["session_id"] for row in result["sessions"]], ["271195"])
 
     def test_logged_in_search_me_is_used_only_when_index_is_missing(self):
         auth = create.LancelotAuth("token", "246273", "9500754")
@@ -607,6 +647,9 @@ class OtherPlayerSessionTests(unittest.TestCase):
                     {"FFBRIDGE_PLAYER_SESSION_INDEX_DIR": str(index_dir)},
                 ),
                 patch.object(create, "ensure_lancelot_auth", return_value=auth),
+                patch.object(create, "live_sessions_since_index", return_value=[]),
+                patch.object(create.bridgeplus, "gap_session_entries", return_value=[]),
+                patch.object(create.bridgeinter, "gap_session_entries", return_value=[]),
             ):
                 results = [
                     create.list_source_sessions(

@@ -17,7 +17,7 @@ import time
 import unicodedata
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import requests
@@ -831,6 +831,73 @@ def fetch_other_player_source_sessions(
     return sessions_newest_first(sessions)
 
 
+LIVE_SINCE_INDEX_TTL_S = 600.0
+LIVE_SINCE_INDEX_CLUB_DAYS = 90
+_live_since_index_cache: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
+
+
+def live_sessions_since_index(
+    resolved: ResolvedPlayer,
+    index_sessions: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Games FFBridge published after the player-session index was built.
+
+    The index is rebuilt only with the Elo data, so a player's newer games are
+    missing from it. This runs the latest-game scan (configured simultaneous
+    series plus the clubs the player played at in the last 90 days) from the
+    index's newest game to today and keeps every game found, shaped like an
+    index entry. Cached per player for 10 minutes.
+    """
+    if not resolved.license_number:
+        return []
+    key = resolved.lancelot_id
+    now = time.monotonic()
+    hit = _live_since_index_cache.get(key)
+    if hit is not None and hit[0] > now:
+        return hit[1]
+
+    import ffbridge_player_game_service as player_games  # imports this module
+
+    since = (datetime.now().date() - timedelta(days=LIVE_SINCE_INDEX_CLUB_DAYS)).isoformat()
+    clubs = sorted({
+        str(row["organization_id"])
+        for row in index_sessions
+        if str(row.get("organization_id") or "").isdigit() and str(row.get("date") or "") >= since
+    })
+    result = player_games._lookup(
+        resolved.license_number,
+        target_date=None,
+        clubs=clubs or None,
+        first_only=False,
+        resolved=resolved,
+        display_name=None,
+    )
+    rows = []
+    for game in result["games"]:
+        day = str(game.get("date") or "")[:10]
+        label = str(game.get("competition") or "")
+        club = str(game.get("club_name") or "")
+        rows.append(
+            {
+                "session_id": str(game["session_id"]),
+                "date": day,
+                "club": club,
+                "organization_id": game.get("club_code"),
+                "organization_name": club,
+                "group_id": game.get("group_id"),
+                "competition_label": label,
+                "session_label": label,
+                "description": " ".join(part for part in (day, label, club) if part),
+                "series_id": game.get("series_id"),
+                "team_id": game.get("team_id"),
+                "results_url": game.get("results_url"),
+                "listing_source": "live Lancelot lookup since the player-session index",
+            }
+        )
+    _live_since_index_cache[key] = (now + LIVE_SINCE_INDEX_TTL_S, rows)
+    return rows
+
+
 _person_name_cache: Dict[str, Tuple[str, str]] = {}
 
 
@@ -857,8 +924,11 @@ def list_source_sessions(
     """Playable Lancelot sessions for a player, with already_cached flags.
 
     The shared player-session index is enough to list games. Lancelot auth is
-    used only when the index is missing and the requested player is the
-    signed-in user (live ``results/search/me``).
+    needed when the index is missing and the requested player is the signed-in
+    user (live ``results/search/me``), and for the additions below: games
+    FFBridge published after the index was built, and organizer (Bridge+,
+    BridgeInterNet) games it has not published yet. An addition that fails,
+    sign-in included, is logged and the indexed games are still listed.
     """
     resolved = resolve_player(player_id, token=token)
     directory = pathlib.Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
@@ -874,6 +944,15 @@ def list_source_sessions(
         if resolved.lancelot_id != auth.lancelot_id:
             raise
         source_sessions = fetch_logged_in_source_sessions(token)
+    else:
+        # The index is only as new as its last build; add what FFBridge has published since.
+        try:
+            live = live_sessions_since_index(resolved, source_sessions)
+        except Exception as exc:  # additive: never hide the indexed games
+            _log(f"Live lookup of games since the player-session index failed: {exc!r}")
+            live = []
+        known = {row["session_id"] for row in source_sessions}
+        source_sessions = [*source_sessions, *(row for row in live if row["session_id"] not in known)]
     sessions = []
     for entry in source_sessions:
         if not _in_date_window(entry.get("date"), date_from, date_to):
@@ -918,8 +997,8 @@ def list_source_sessions(
                 date_from=date_from,
                 date_to=date_to,
             )
-        except (requests.RequestException, ValueError, OSError) as exc:
-            _log(f"BridgeInterNet organizer check failed: {exc}")
+        except Exception as exc:  # additive: never hide the indexed games
+            _log(f"BridgeInterNet organizer check failed: {exc!r}")
             gaps = []
         known = {row["session_id"] for row in sessions}
         sessions.extend(row for row in gaps if row["session_id"] not in known)
