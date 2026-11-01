@@ -494,7 +494,8 @@ class HierarchicalOpeningLeadTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             sd = {
                 column: pl.lit(None, dtype=dtype)
-                for column, dtype in normalized.SD_LEAD_RESULT_COLUMNS.items()
+                for optional in normalized.OPTIONAL_RESULT_SETS
+                for column, dtype in optional.items()
             }
             production = self._production(tmp, _lead_frame().with_columns(**sd))
             written = normalized.write_hierarchical_session(

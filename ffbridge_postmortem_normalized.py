@@ -41,9 +41,19 @@ SD_LEAD_RESULT_COLUMNS: dict[str, pl.DataType] = {
     "SD_Lead_Luck": pl.Float32,
     "SD_Lead_Samples": pl.UInt16,
 }
+# SuitC board-result columns (mlBridgeSuitCLib.add_suitc_declarer_columns).
+# Opt-in like the SD lead set: absent, the whole set is stored as nulls.
+SC_RESULT_COLUMNS: dict[str, pl.DataType] = {
+    "SC_Guess_Declarer": pl.Float32,
+    "DD_Tricks_Diff_SC": pl.Float32,
+}
+# Opt-in sets: each is stored all-or-nothing.
+OPTIONAL_RESULT_SETS: tuple[dict[str, pl.DataType], ...] = (SD_LEAD_RESULT_COLUMNS, SC_RESULT_COLUMNS)
+# Every results column layout 4 adds (lead scores and SuitC).
 OPENING_LEAD_COLUMNS: dict[str, pl.DataType] = {
     **LEAD_RESULT_COLUMNS,
     **SD_LEAD_RESULT_COLUMNS,
+    **SC_RESULT_COLUMNS,
 }
 # Table-contract or seat-perspective metrics, stored as plain results columns.
 # Seed sessions can look board-invariant when every table plays the same
@@ -456,17 +466,20 @@ def _with_opening_lead_columns(
     The single-dummy lead set is all or nothing: absent, it is stored as nulls
     (stage 4 augments without it); partly present is an error.
     """
-    sd_mapped = [column for column in SD_LEAD_RESULT_COLUMNS if column in mapping]
-    if sd_mapped:
+    for optional in OPTIONAL_RESULT_SETS:
+        sd_mapped = [column for column in optional if column in mapping]
+        if not sd_mapped:
+            continue
         sd_present = [column for column in sd_mapped if column in frame.columns]
         if not sd_present:
             frame = frame.with_columns(
-                pl.lit(None, dtype=SD_LEAD_RESULT_COLUMNS[column]).alias(column)
+                pl.lit(None, dtype=optional[column]).alias(column)
                 for column in sd_mapped
             )
         elif len(sd_present) != len(sd_mapped):
+            name = "single-dummy lead" if optional is SD_LEAD_RESULT_COLUMNS else "SuitC"
             raise ValueError(
-                "Frame has only part of the single-dummy lead columns: "
+                f"Frame has only part of the {name} columns: "
                 f"missing {sorted(set(sd_mapped) - set(sd_present))}"
             )
     present = set(frame.columns)
@@ -983,7 +996,7 @@ def _migrate_lead_fragment(
             raise ValueError(f"Session {session_id} results already have {clash}")
         scored = scorer(row, _lead_inputs(old_boards, old_results, mapping))
         sd = [column for column in SD_LEAD_RESULT_COLUMNS if column in scored.columns]
-        allowed = {"_result_row_id", *LEAD_RESULT_COLUMNS, *SD_LEAD_RESULT_COLUMNS}
+        allowed = {"_result_row_id", *OPENING_LEAD_COLUMNS}
         missing = sorted({"_result_row_id", *LEAD_RESULT_COLUMNS} - set(scored.columns))
         unexpected = sorted(set(scored.columns) - allowed)
         if missing or unexpected:
