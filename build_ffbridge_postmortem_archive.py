@@ -36,8 +36,8 @@ PAR_COLUMNS = ("ParScore", "ParNumber", "ParContracts")
 def load_dd_sd_cache(hrs_cache_path: pathlib.Path) -> pl.DataFrame:
     """Stage 1's cached DD and SD results, with Par cleared.
 
-    The cache holds the same ddss DD tables and SD samples (seed 42, 10
-    productions) the archive would compute, but stage 1 counts ParNumber
+    The cache holds the same ddss DD tables and SD samples (seed 42; the
+    sample count is each row's Probs_Trials) the archive would compute, but stage 1 counts ParNumber
     differently. Clearing Par makes mlBridge recompute it from the cached DD
     table, so the archive keeps its own Par values while the solving (mostly
     single-dummy) is skipped.
@@ -266,6 +266,57 @@ def _commit_prepared_batch(
     return flat_created, hierarchical_created
 
 
+def sd_refresh_session_ids(
+    archive_dir: pathlib.Path,
+    flat_rows: dict[str, dict[str, Any]],
+    session_ids: list[str],
+    hrs_cache_path: pathlib.Path,
+    target: int = create.DEFAULT_SD_PRODUCTIONS,
+) -> tuple[set[str], dict[str, int]]:
+    """Archived sessions worth re-archiving for better single-dummy probabilities.
+
+    A session qualifies when its archived rows hold fewer than ``target`` SD
+    samples and the hand-records cache has at least ``target`` for every one of
+    its deals (so re-archiving now actually improves it).
+    """
+    cache = (
+        pl.scan_parquet(hrs_cache_path)
+        .select("PBN", "Probs_Trials")
+        .group_by("PBN")
+        .agg(pl.col("Probs_Trials").min().alias("_cache_trials"))
+        .collect()
+    )
+
+    def stored(session_id: str) -> pl.DataFrame:
+        row = flat_rows[session_id]
+        return pl.read_parquet(
+            archive_dir / str(row["fragment_path"]), columns=["PBN", "Probs_Trials"]
+        ).with_columns(pl.lit(session_id).alias("session_id"))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
+        frames = list(pool.map(stored, session_ids))
+    if not frames:
+        return set(), {"below_target": 0, "ready": 0, "waiting_for_cache": 0}
+    per_session = (
+        pl.concat(frames, how="vertical_relaxed")
+        .join(cache, on="PBN", how="left")
+        .group_by("session_id")
+        .agg(
+            pl.col("Probs_Trials").min().alias("stored"),
+            (pl.col("_cache_trials").is_null().any() | (pl.col("_cache_trials").min() < target))
+            .alias("cache_short"),
+        )
+    )
+    below = per_session.filter(pl.col("stored").is_null() | (pl.col("stored") < target))
+    ready = below.filter(~pl.col("cache_short"))
+    counts = {
+        "below_target": below.height,
+        "ready": ready.height,
+        "waiting_for_cache": below.height - ready.height,
+    }
+    return set(ready["session_id"].to_list()), counts
+
+
 def backfill_raw(
     source_dir: pathlib.Path,
     archive_dir: pathlib.Path,
@@ -277,7 +328,10 @@ def backfill_raw(
     hierarchical_dir: pathlib.Path | None = None,
     workers: int = 1,
     commit_batch_size: int = 50,
+    refresh_sd: bool = False,
 ) -> dict[str, int]:
+    """``refresh_sd`` also re-archives sessions stored with fewer SD samples than
+    DEFAULT_SD_PRODUCTIONS once the cache has more (see sd_refresh_session_ids)."""
     pipeline = _load_quality_pipeline()
     training_path = source_dir / "ffbridge_training_data_df.parquet"
     # Stage 1's audit manifest lists sessions already known complete, so their
@@ -315,13 +369,34 @@ def backfill_raw(
         if hierarchical_dir is not None
         else set()
     )
+
+    def in_window(session: Any) -> bool:
+        return session.complete and (
+            since is None or date.fromisoformat(str(session.session_date)) >= since
+        )
+
+    refresh_ids: set[str] = set()
+    if refresh_sd:
+        refresh_ids, refresh_counts = sd_refresh_session_ids(
+            archive_dir,
+            flat_rows,
+            [s.session_id for s in audit.sessions if in_window(s) and s.session_id in archived_ids],
+            pipeline.default_hrs_cache_path(source_dir),
+        )
+        print(
+            f"[archive-builder] refresh-sd: {refresh_counts['below_target']} archived sessions "
+            f"below {create.DEFAULT_SD_PRODUCTIONS} SD samples; re-archiving "
+            f"{refresh_counts['ready']}, {refresh_counts['waiting_for_cache']} wait for "
+            "ffbridge_sd_backfill.py",
+            flush=True,
+        )
     candidates = [
         session
         for session in audit.sessions
-        if session.complete
-        and (since is None or date.fromisoformat(str(session.session_date)) >= since)
+        if in_window(session)
         and (
             session.session_id not in archived_ids
+            or session.session_id in refresh_ids
             or (
                 hierarchical_dir is not None
                 and session.session_id not in hierarchical_ids
@@ -340,7 +415,8 @@ def backfill_raw(
             str(archive_dir),
             str(hierarchical_dir) if hierarchical_dir is not None else None,
             metadata_by_session.get(session.session_id),
-            flat_rows.get(session.session_id),
+            # A refreshed session is rebuilt from raw, not from its stored fragment.
+            None if session.session_id in refresh_ids else flat_rows.get(session.session_id),
         )
         for session in selected
     ]
@@ -454,6 +530,7 @@ def _execute(args: argparse.Namespace, root: pathlib.Path) -> int:
             hierarchical_dir=hierarchical_dir,
             workers=args.workers,
             commit_batch_size=args.commit_batch_size,
+            refresh_sd=args.refresh_sd,
         )
     result["indexes"] = archive.rebuild_indexes(root)
     if args.skip_compact:
@@ -498,6 +575,14 @@ def main() -> int:
         type=int,
         default=50,
         help="Prepared sessions committed per atomic manifest update.",
+    )
+    parser.add_argument(
+        "--refresh-sd",
+        action="store_true",
+        help=(
+            "Also re-archive sessions (within --since) stored with fewer SD samples than "
+            "the hand-records cache now has; each gets a new revision."
+        ),
     )
     parser.add_argument("--audit-only", action="store_true")
     parser.add_argument(

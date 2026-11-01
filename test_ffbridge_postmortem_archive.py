@@ -407,106 +407,238 @@ class NormalizedArchiveTests(unittest.TestCase):
             self.assertEqual(sorted(report["MP_DD_Pct_Declarer"].to_list()), [0.4, 0.6])
 
 
-class HierarchicalMigrationTests(unittest.TestCase):
-    def test_migration_moves_board_columns_to_results_and_rejects_v2_reads(self):
+def _lead_frame() -> pl.DataFrame:
+    return _session_frame().with_columns(
+        pl.Series("BidSuit", ["N", "S"]),
+        pl.Series("PBN", ["N:AKQ.. E:... S:... W:..."] * 2),
+        pl.Series("Lead", ["HK", None]),
+        pl.Series("DD_Lead_Cost", [1, None], dtype=pl.Int64),
+        pl.Series("Lead_Is_DD_Best", [False, None]),
+    )
+
+
+def _lead_source() -> pl.DataFrame:
+    return _session_frame().with_columns(
+        pl.Series("BidSuit", ["N", "S"]),
+        pl.Series("PBN", ["N:AKQ.. E:... S:... W:..."] * 2),
+    )
+
+
+def _fixed_lead_scorer(row, inputs: pl.DataFrame) -> pl.DataFrame:
+    """Test scorer: a lead for North player 10 only, cost = row id."""
+    return inputs.select(
+        "_result_row_id",
+        pl.when(pl.col("Player_ID_N") == "10")
+        .then(pl.lit("SA"))
+        .otherwise(None)
+        .alias("Lead"),
+        pl.col("_result_row_id").cast(pl.UInt8).alias("DD_Lead_Cost"),
+        (pl.col("_result_row_id") == 0).alias("Lead_Is_DD_Best"),
+    )
+
+
+def _short_lead_scorer(row, inputs: pl.DataFrame) -> pl.DataFrame:
+    return _fixed_lead_scorer(row, inputs).head(1)
+
+
+def _previous_layout_archive(tmp: str) -> pathlib.Path:
+    """One session archived on LAYOUT_VERSION - 1: no lead columns."""
+    root = pathlib.Path(tmp) / "archive"
+    seed = pathlib.Path(tmp) / "seed"
+    production = pathlib.Path(tmp) / "hierarchical"
+    archive.archive_session(_lead_source(), "100", archive_dir=root)
+    metadata = normalized.build_normalized_subset(root, seed)
+    # The flat archive adds a null Lead; the previous layout never mapped it.
+    for column in normalized.OPENING_LEAD_COLUMNS:
+        metadata["column_mapping"].pop(column, None)
+    (seed / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+    normalized.initialize_hierarchical_layout(production, seed / "metadata.json")
+    written = normalized.write_hierarchical_session(
+        _lead_source(), session_id="100", revision="r1", output_dir=production
+    )
+    old_tag = f"layout_version={normalized.LAYOUT_VERSION - 1}"
+    new_tag = f"layout_version={normalized.LAYOUT_VERSION}"
+    for key in ("boards_path", "results_path"):
+        path = pathlib.Path(written[key])
+        old_path = pathlib.Path(str(path).replace(new_tag, old_tag))
+        old_path.parent.mkdir(parents=True, exist_ok=True)
+        path.replace(old_path)
+    manifest = normalized.read_hierarchical_manifest(production).with_columns(
+        pl.col("boards_path", "results_path").str.replace(new_tag, old_tag, literal=True)
+    )
+    normalized._atomic_write_parquet(manifest, production / "manifest.parquet")
+    metadata_path = production / "metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["layout_version"] = normalized.LAYOUT_VERSION - 1
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    return production
+
+
+class HierarchicalOpeningLeadTests(unittest.TestCase):
+    def _production(self, tmp: str, source: pl.DataFrame) -> pathlib.Path:
+        root = pathlib.Path(tmp) / "archive"
+        seed = pathlib.Path(tmp) / "seed"
+        production = pathlib.Path(tmp) / "hierarchical"
+        archive.archive_session(source, "100", archive_dir=root)
+        metadata = normalized.build_normalized_subset(root, seed)
+        for column in normalized.OPENING_LEAD_COLUMNS:
+            if column in source.columns:
+                self.assertEqual(
+                    metadata["column_mapping"][column],
+                    {"table": "results", "storage_column": column, "field": None},
+                )
+        normalized.initialize_hierarchical_layout(production, seed / "metadata.json")
+        return production
+
+    def test_lead_columns_are_stored_typed_and_sd_set_null_when_absent(self):
         with tempfile.TemporaryDirectory() as tmp:
-            production = pathlib.Path(tmp)
-            relative = pathlib.Path(
-                "fragments/year=2026/session_id=100/layout_version=2/revision=r1"
-            )
-            boards = pl.DataFrame(
-                {"session_id": ["100"], "Board": [1], "MP_DD_Pct_Declarer": [0.5]}
-            )
-            results = pl.DataFrame(
-                {
-                    "session_id": ["100", "100"],
-                    "Board": [1, 1],
-                    "_result_row_id": [0, 1],
-                    "Pct_NS": [0.6, 0.4],
-                    "Player_ID_N": ["10", "20"],
-                    "Player_ID_E": ["20", "10"],
-                    "Player_ID_S": ["11", "21"],
-                    "Player_ID_W": ["21", "11"],
-                }
-            )
-            normalized._atomic_write_parquet(
-                boards, production / relative / "boards.parquet"
-            )
-            normalized._atomic_write_parquet(
-                results, production / relative / "results.parquet"
-            )
-            normalized._atomic_write_parquet(
-                pl.DataFrame(
-                    [
-                        {
-                            "session_id": "100",
-                            "revision": "r1",
-                            "Date": date(2026, 8, 28),
-                            "year": 2026,
-                            "series_id": "series-a",
-                            "archived_at": "2026-08-28T00:00:00+00:00",
-                            "board_rows": 1,
-                            "result_rows": 2,
-                            "boards_path": (relative / "boards.parquet").as_posix(),
-                            "results_path": (relative / "results.parquet").as_posix(),
-                        }
-                    ],
-                    schema=normalized.HIERARCHICAL_MANIFEST_SCHEMA,
-                ),
-                production / "manifest.parquet",
-            )
-            mapping = {
-                column: {"table": "results", "storage_column": column, "field": None}
-                for column in results.columns
-                if column != "_result_row_id"
+            sd = {
+                column: pl.lit(None, dtype=dtype)
+                for column, dtype in normalized.SD_LEAD_RESULT_COLUMNS.items()
             }
-            mapping["session_id"]["table"] = "boards"
-            mapping["Board"]["table"] = "boards"
-            mapping["MP_DD_Pct_Declarer"] = {
-                "table": "boards",
-                "storage_column": "MP_DD_Pct_Declarer",
-                "field": None,
-            }
-            (production / "metadata.json").write_text(
-                json.dumps({"layout_version": 2, "column_mapping": mapping}),
-                encoding="utf-8",
+            production = self._production(tmp, _lead_frame().with_columns(**sd))
+            written = normalized.write_hierarchical_session(
+                _lead_frame(),
+                session_id="101",
+                revision="no-sd",
+                output_dir=production,
             )
-            with self.assertRaisesRegex(ValueError, "migrate"):
-                normalized.normalized_player_report(
-                    production,
-                    session_id="100",
-                    player_ids=["10"],
-                    columns=["Board", "MP_DD_Pct_Declarer"],
+            self.assertTrue(written["created"])
+            stored = pl.read_parquet(written["results_path"])
+            for column, dtype in normalized.OPENING_LEAD_COLUMNS.items():
+                self.assertEqual(stored.schema[column], dtype, column)
+            report = normalized.normalized_player_report(
+                production,
+                session_id="101",
+                player_ids=["10"],
+                columns=["Board", *normalized.OPENING_LEAD_COLUMNS],
+            )
+            self.assertEqual(report["Lead"].to_list(), ["HK", None])
+            self.assertEqual(report["DD_Lead_Cost"].to_list(), [1, None])
+            self.assertEqual(report["Lead_Is_DD_Best"].to_list(), [False, None])
+            self.assertEqual(report["SD_Lead_Cost"].null_count(), 2)
+
+            with self.assertRaisesRegex(ValueError, "part of the single-dummy"):
+                normalized.write_hierarchical_session(
+                    _lead_frame().with_columns(pl.lit(0.5).alias("SD_Lead_Cost")),
+                    session_id="102",
+                    revision="partial-sd",
+                    output_dir=production,
+                )
+            with self.assertRaisesRegex(ValueError, "Missing=.*DD_Lead_Cost"):
+                normalized.write_hierarchical_session(
+                    _lead_frame().drop("DD_Lead_Cost"),
+                    session_id="103",
+                    revision="no-dd",
+                    output_dir=production,
                 )
 
-            summary = normalized.migrate_hierarchical_layout(production)
-
-            self.assertEqual(summary["moved_columns"], ["MP_DD_Pct_Declarer"])
-            migrated = json.loads(
-                (production / "metadata.json").read_text(encoding="utf-8")
+    def test_postmortem_sql_selects_stored_dd_lead_cost(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            production = self._production(tmp, _lead_frame())
+            normalized.write_hierarchical_session(
+                _lead_frame(),
+                session_id="100",
+                revision="r1",
+                output_dir=production,
             )
-            self.assertEqual(migrated["layout_version"], normalized.LAYOUT_VERSION)
+            resolved = create.ResolvedPlayer(
+                lancelot_id="10", license_number="10", requested_id="10"
+            )
+            with (
+                patch.object(service, "HIERARCHICAL_DIR", production),
+                patch.object(create, "resolve_player", return_value=resolved),
+            ):
+                frame, meta = service.load_postmortem("10", "100")
+                result = service.run_sql(
+                    frame,
+                    "SELECT Board, Lead, DD_Lead_Cost FROM self ORDER BY DD_Lead_Cost",
+                    meta,
+                )
+            self.assertEqual(meta["data_source"], "hierarchical_archive")
             self.assertEqual(
-                migrated["column_mapping"]["MP_DD_Pct_Declarer"]["table"], "results"
+                sorted(
+                    ((r["Lead"], r["DD_Lead_Cost"]) for r in result["rows"]),
+                    key=str,
+                ),
+                sorted([("HK", 1), (None, None)], key=str),
             )
+
+
+class HierarchicalMigrationTests(unittest.TestCase):
+    def test_migration_adds_lead_columns_and_rejects_old_reads(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            production = _previous_layout_archive(tmp)
+            metadata_path = production / "metadata.json"
+            old_tag = f"layout_version={normalized.LAYOUT_VERSION - 1}"
+            with self.assertRaisesRegex(ValueError, "migrate"):
+                normalized.normalized_player_report(
+                    production, session_id="100", player_ids=["10"], columns=["Board"]
+                )
+
+            summary = normalized.migrate_hierarchical_layout(
+                production, _fixed_lead_scorer, delete_old_fragments=True
+            )
+
+            self.assertEqual(summary["fragments"], 1)
+            self.assertEqual(summary["leads"], 1)
+            self.assertEqual(summary["dd_lead_scored"], 2)
+            migrated = json.loads(metadata_path.read_text(encoding="utf-8"))
+            self.assertEqual(migrated["layout_version"], normalized.LAYOUT_VERSION)
+            for column in normalized.OPENING_LEAD_COLUMNS:
+                self.assertEqual(
+                    migrated["column_mapping"][column],
+                    {"table": "results", "storage_column": column, "field": None},
+                )
+            self.assertEqual(list(production.rglob(f"{old_tag}/**/*.parquet")), [])
             report = normalized.normalized_player_report(
                 production,
                 session_id="100",
                 player_ids=["10"],
-                columns=["Board", "MP_DD_Pct_Declarer"],
+                columns=["Board", "Contract", *normalized.OPENING_LEAD_COLUMNS],
             )
-            self.assertEqual(report["MP_DD_Pct_Declarer"].to_list(), [0.5, 0.5])
-
+            self.assertEqual(report["Contract"].to_list(), ["3NT", "4S"])
+            self.assertEqual(report["Lead"].to_list(), ["SA", None])
+            self.assertEqual(report["DD_Lead_Cost"].to_list(), [0, 1])
+            self.assertEqual(report["Lead_Is_DD_Best"].to_list(), [True, False])
+            self.assertEqual(report["SD_Lead_Samples"].null_count(), 2)
             info = normalized.hierarchical_info(production)
             self.assertEqual(info["layout_version"], normalized.LAYOUT_VERSION)
-            self.assertEqual(info["sessions"], 1)
-            self.assertEqual(info["board_files"], 1)
-            self.assertEqual(info["result_files"], 1)
             self.assertEqual(info["missing_fragment_files"], 0)
-            next(production.rglob("layout_version=3/**/results.parquet")).unlink()
-            info = normalized.hierarchical_info(production)
-            self.assertEqual(info["missing_fragment_files"], 1)
-            self.assertEqual(info["result_files"], 0)
+
+            # The migrated metadata is the stage 4 seed: new sessions use it.
+            normalized.initialize_hierarchical_layout(production, metadata_path)
+            later = normalized.write_hierarchical_session(
+                _lead_frame(), session_id="101", revision="r1", output_dir=production
+            )
+            self.assertTrue(later["created"])
+            with self.assertRaisesRegex(ValueError, "layout version"):
+                normalized.migrate_hierarchical_layout(production, _fixed_lead_scorer)
+
+    def test_migration_with_workers_matches_sequential(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            production = _previous_layout_archive(tmp)
+            summary = normalized.migrate_hierarchical_layout(
+                production, _fixed_lead_scorer, workers=2
+            )
+            self.assertEqual(summary["dd_lead_scored"], 2)
+            report = normalized.normalized_player_report(
+                production,
+                session_id="100",
+                player_ids=["10"],
+                columns=["Board", "DD_Lead_Cost"],
+            )
+            self.assertEqual(report["DD_Lead_Cost"].to_list(), [0, 1])
+
+    def test_migration_rejects_a_scorer_that_drops_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            production = _previous_layout_archive(tmp)
+            with self.assertRaisesRegex(ValueError, "1 rows for 2 results"):
+                normalized.migrate_hierarchical_layout(production, _short_lead_scorer)
+            metadata = json.loads(
+                (production / "metadata.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(metadata["layout_version"], normalized.LAYOUT_VERSION - 1)
 
 
 class HierarchicalResolveTests(unittest.TestCase):

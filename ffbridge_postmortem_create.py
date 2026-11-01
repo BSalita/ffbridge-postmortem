@@ -67,7 +67,7 @@ DEFAULT_CACHE_DIR = pathlib.Path(
 DEFAULT_HIERARCHICAL_DIR = postmortem_normalized.resolve_hierarchical_dir(
     DEFAULT_CACHE_DIR
 )
-DEFAULT_SD_PRODUCTIONS = 10
+DEFAULT_SD_PRODUCTIONS = 40
 FFBRIDGE_RESULTS_ORIGIN = "https://www.ffbridge.fr"
 
 

@@ -1,13 +1,13 @@
 ﻿"""Normalized Parquet layout for FFBridge postmortem analytics."""
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import os
 import pathlib
-import shutil
 import threading
 from datetime import datetime, timezone
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import duckdb
 import polars as pl
@@ -16,11 +16,39 @@ from tqdm import tqdm
 import ffbridge_postmortem_archive as archive
 
 
-LAYOUT_VERSION = 3
+LAYOUT_VERSION = 4
 KEY_COLUMNS = ("session_id", "Board")
 SEATS = ("N", "E", "S", "W")
-# Table-contract or seat-perspective metrics. Seed sessions can look
-# board-invariant when every table plays the same contract.
+# Opening lead and its double-dummy score (mlBridgeAugmentLib.add_dd_lead_cost).
+# Every FFBridge augmentation produces them.
+LEAD_RESULT_COLUMNS: dict[str, pl.DataType] = {
+    "Lead": pl.String,
+    "DD_Lead_Cost": pl.UInt8,
+    "Lead_Is_DD_Best": pl.Boolean,
+}
+# Single-dummy lead score (mlBridgeAugmentLib.add_sd_lead_score). Opt-in: a
+# session augmented without it stores the whole set as nulls.
+SD_LEAD_RESULT_COLUMNS: dict[str, pl.DataType] = {
+    "SD_Lead_Tricks": pl.Float32,
+    "SD_Lead_Best_Tricks": pl.Float32,
+    "SD_Lead_Cost": pl.Float32,
+    "SD_Lead_Is_Best": pl.Boolean,
+    "SD_Lead_Best_Card": pl.String,
+    "SD_Lead_Rank": pl.UInt8,
+    "SD_Lead_Set_Pct": pl.Float32,
+    "SD_Lead_Best_Set_Pct": pl.Float32,
+    "SD_Lead_Set_Cost": pl.Float32,
+    "SD_Lead_Luck": pl.Float32,
+    "SD_Lead_Samples": pl.UInt16,
+}
+OPENING_LEAD_COLUMNS: dict[str, pl.DataType] = {
+    **LEAD_RESULT_COLUMNS,
+    **SD_LEAD_RESULT_COLUMNS,
+}
+# Table-contract or seat-perspective metrics, stored as plain results columns.
+# Seed sessions can look board-invariant when every table plays the same
+# contract, and the DD_ prefix would otherwise pack lead scores into the
+# boards double_dummy struct.
 RESULT_ONLY_COLUMNS = frozenset(
     {
         "Section_Name",
@@ -30,6 +58,7 @@ RESULT_ONLY_COLUMNS = frozenset(
         "MP_EV_Score_Declarer",
         "MP_Par_Declarer",
         "MP_Par_Pct_Declarer",
+        *OPENING_LEAD_COLUMNS,
     }
 )
 HIERARCHICAL_MANIFEST_SCHEMA: dict[str, pl.DataType] = {
@@ -332,10 +361,11 @@ def initialize_hierarchical_layout(
     """Initialize a production layout from a validated representative subset."""
     output = pathlib.Path(output_dir)
     seed = json.loads(pathlib.Path(seed_metadata_path).read_text(encoding="utf-8"))
-    if seed.get("layout_version") not in {1, 2, LAYOUT_VERSION}:
+    if seed.get("layout_version") != LAYOUT_VERSION:
         raise ValueError(
-            f"Expected seed layout version 1, 2 or {LAYOUT_VERSION}, got "
-            f"{seed.get('layout_version')!r}"
+            f"Expected seed layout version {LAYOUT_VERSION}, got "
+            f"{seed.get('layout_version')!r}. Migrate the seed archive with "
+            "migrate_ffbridge_hierarchical_layout.py."
         )
     if not isinstance(seed.get("column_mapping"), dict):
         raise ValueError("Seed metadata lacks column_mapping")
@@ -417,6 +447,36 @@ def _pack_with_mapping(
     return frame.select(*expressions)
 
 
+def _with_opening_lead_columns(
+    frame: pl.DataFrame,
+    mapping: Mapping[str, Any],
+) -> pl.DataFrame:
+    """Cast mapped lead columns to their stored types.
+
+    The single-dummy lead set is all or nothing: absent, it is stored as nulls
+    (stage 4 augments without it); partly present is an error.
+    """
+    sd_mapped = [column for column in SD_LEAD_RESULT_COLUMNS if column in mapping]
+    if sd_mapped:
+        sd_present = [column for column in sd_mapped if column in frame.columns]
+        if not sd_present:
+            frame = frame.with_columns(
+                pl.lit(None, dtype=SD_LEAD_RESULT_COLUMNS[column]).alias(column)
+                for column in sd_mapped
+            )
+        elif len(sd_present) != len(sd_mapped):
+            raise ValueError(
+                "Frame has only part of the single-dummy lead columns: "
+                f"missing {sorted(set(sd_mapped) - set(sd_present))}"
+            )
+    present = set(frame.columns)
+    return frame.with_columns(
+        pl.col(column).cast(dtype, strict=True)
+        for column, dtype in OPENING_LEAD_COLUMNS.items()
+        if column in mapping and column in present
+    )
+
+
 def prepare_hierarchical_session(
     frame: pl.DataFrame,
     *,
@@ -433,7 +493,9 @@ def prepare_hierarchical_session(
     output = pathlib.Path(output_dir)
     metadata = _load_metadata(output)
     mapping = metadata["column_mapping"]
-    canonical = archive.canonicalize_frame(frame).with_columns(
+    canonical = _with_opening_lead_columns(
+        archive.canonicalize_frame(frame), mapping
+    ).with_columns(
         pl.lit(str(session_id)).alias("session_id")
     ).with_row_index("_result_row_id")
     expected = set(mapping) - {"session_id", "_result_row_id"}
@@ -847,89 +909,208 @@ def normalized_player_report(
     )
 
 
+# Inputs a lead scorer needs, one row per stored result.
+LEAD_INPUT_COLUMNS = (
+    "Board",
+    "Player_ID_N",
+    "Player_ID_E",
+    "Player_ID_S",
+    "Player_ID_W",
+    "PBN",
+    "BidSuit",
+    "Declarer_Direction",
+)
+# (manifest row, lead inputs) -> frame of _result_row_id plus LEAD_RESULT_COLUMNS
+# and optionally the whole SD_LEAD_RESULT_COLUMNS set. Must be picklable when
+# the migration runs with several workers.
+LeadScorer = Callable[[Mapping[str, Any], pl.DataFrame], pl.DataFrame]
+
+
+def _lead_inputs(
+    boards_path: pathlib.Path,
+    results_path: pathlib.Path,
+    mapping: Mapping[str, Mapping[str, str | None]],
+) -> pl.DataFrame:
+    """_result_row_id plus LEAD_INPUT_COLUMNS for one stored session."""
+    inputs = [column for column in LEAD_INPUT_COLUMNS if column != "Board"]
+    result_inputs = [c for c in inputs if mapping[c]["table"] == "results"]
+    board_inputs = [c for c in inputs if mapping[c]["table"] == "boards"]
+    frame = pl.scan_parquet(results_path).select(
+        "_result_row_id",
+        "Board",
+        *[_mapped_expr(mapping, column) for column in result_inputs],
+    )
+    if board_inputs:
+        boards = pl.scan_parquet(boards_path).select(
+            "Board", *[_mapped_expr(mapping, column) for column in board_inputs]
+        )
+        frame = frame.join(
+            boards, on="Board", how="left", validate="m:1", maintain_order="left"
+        )
+    return frame.select("_result_row_id", *LEAD_INPUT_COLUMNS).collect(
+        engine="in-memory"
+    )
+
+
+def _migrate_lead_fragment(
+    output_text: str,
+    row: Mapping[str, Any],
+    mapping: Mapping[str, Mapping[str, str | None]],
+    scorer: LeadScorer,
+) -> tuple[dict[str, Any], dict[str, int]]:
+    """Write one session's layout-4 fragments: results gain the lead columns,
+    boards are hard-linked unchanged."""
+    output = pathlib.Path(output_text)
+    old_tag = f"layout_version={LAYOUT_VERSION - 1}"
+    new_tag = f"layout_version={LAYOUT_VERSION}"
+    new_row = dict(row)
+    for path_column in ("boards_path", "results_path"):
+        relative = str(row[path_column])
+        if old_tag not in relative:
+            raise ValueError(f"Fragment is not {old_tag}: {relative}")
+        new_row[path_column] = relative.replace(old_tag, new_tag)
+    old_boards = output / str(row["boards_path"])
+    old_results = output / str(row["results_path"])
+    new_boards = output / str(new_row["boards_path"])
+    new_results = output / str(new_row["results_path"])
+    session_id = row["session_id"]
+    if new_results.is_file():
+        stored = pl.read_parquet(new_results, columns=["DD_Lead_Cost", "Lead"])
+    else:
+        results = pl.read_parquet(old_results)
+        clash = [column for column in OPENING_LEAD_COLUMNS if column in results.columns]
+        if clash:
+            raise ValueError(f"Session {session_id} results already have {clash}")
+        scored = scorer(row, _lead_inputs(old_boards, old_results, mapping))
+        sd = [column for column in SD_LEAD_RESULT_COLUMNS if column in scored.columns]
+        allowed = {"_result_row_id", *LEAD_RESULT_COLUMNS, *SD_LEAD_RESULT_COLUMNS}
+        missing = sorted({"_result_row_id", *LEAD_RESULT_COLUMNS} - set(scored.columns))
+        unexpected = sorted(set(scored.columns) - allowed)
+        if missing or unexpected:
+            raise ValueError(
+                f"Session {session_id} lead scorer returned missing={missing}, "
+                f"unexpected={unexpected}"
+            )
+        if sd and len(sd) != len(SD_LEAD_RESULT_COLUMNS):
+            raise ValueError(
+                f"Session {session_id} lead scorer returned part of the SD lead set"
+            )
+        scored = _with_opening_lead_columns(scored, OPENING_LEAD_COLUMNS).with_columns(
+            pl.col("_result_row_id").cast(results.schema["_result_row_id"])
+        )
+        if (
+            scored.height != results.height
+            or scored["_result_row_id"].n_unique() != results.height
+        ):
+            raise ValueError(
+                f"Session {session_id} lead scorer returned {scored.height} rows "
+                f"for {results.height} results"
+            )
+        results = results.join(
+            scored.select("_result_row_id", *OPENING_LEAD_COLUMNS),
+            on="_result_row_id",
+            how="left",
+            validate="1:1",
+            maintain_order="left",
+        )
+        if results.height != row["result_rows"]:
+            raise ValueError(f"Row count changed for session {session_id}")
+        _atomic_write_parquet(results, new_results)
+        stored = results.select("DD_Lead_Cost", "Lead")
+    if not new_boards.is_file():
+        # Fragments are immutable, so the unchanged boards file is shared.
+        new_boards.parent.mkdir(parents=True, exist_ok=True)
+        os.link(old_boards, new_boards)
+    stats = {
+        "result_rows": stored.height,
+        "leads": int(stored["Lead"].is_not_null().sum()),
+        "dd_lead_scored": int(stored["DD_Lead_Cost"].is_not_null().sum()),
+    }
+    return new_row, stats
+
+
 def migrate_hierarchical_layout(
     output_dir: pathlib.Path,
+    scorer: LeadScorer,
     *,
+    workers: int = 1,
     delete_old_fragments: bool = False,
 ) -> dict[str, Any]:
-    """Migrate a layout-version-2 archive to 3 by moving result-only columns.
+    """Migrate a layout-version-3 archive to 4 by adding opening-lead columns.
 
-    Fragments are rewritten beside the originals under ``layout_version=3``;
-    the manifest and metadata are swapped only after every fragment succeeds.
-    Run with writers and readers stopped. The derived compacted ``dataset`` is
-    removed, not rebuilt; rerun the domain compactor afterwards.
+    ``scorer`` supplies Lead, DD_Lead_Cost and Lead_Is_DD_Best (and optionally
+    the SD lead set) per stored result; a missing SD set is stored as nulls.
+    New results fragments are written beside the originals under
+    ``layout_version=4``; boards fragments are hard-linked unchanged. The
+    manifest and metadata are swapped only after every fragment succeeds, and
+    a rerun reuses fragments already written. Run with writers and readers
+    stopped. The compacted ``dataset_domains`` then lacks the new columns;
+    rebuild it with src/elo/compact_ffbridge_hierarchical_domains.py.
     """
     output = pathlib.Path(output_dir)
+    from_version = LAYOUT_VERSION - 1
     metadata_path = output / "metadata.json"
     if not metadata_path.is_file():
         raise FileNotFoundError(f"Hierarchical metadata not found: {metadata_path}")
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    if metadata.get("layout_version") != 2:
+    if metadata.get("layout_version") != from_version:
         raise ValueError(
-            f"Migration expects layout version 2, got "
+            f"Migration expects layout version {from_version}, got "
             f"{metadata.get('layout_version')!r}"
         )
     old_mapping = metadata["column_mapping"]
-    new_mapping = _correct_column_mapping(old_mapping)
-    moved = sorted(
-        column
-        for column, entry in old_mapping.items()
-        if entry["table"] == "boards" and new_mapping[column]["table"] == "results"
-    )
-    for column in moved:
-        if old_mapping[column]["field"] is not None:
-            raise ValueError(f"Cannot migrate struct-packed board column {column}")
+    clash = [column for column in OPENING_LEAD_COLUMNS if column in old_mapping]
+    if clash:
+        raise ValueError(f"Layout already maps {clash}")
+    absent = [column for column in LEAD_INPUT_COLUMNS if column not in old_mapping]
+    if absent:
+        raise ValueError(f"Layout lacks the lead inputs {absent}")
+    new_mapping = {
+        **old_mapping,
+        **{
+            column: {"table": "results", "storage_column": column, "field": None}
+            for column in OPENING_LEAD_COLUMNS
+        },
+    }
 
     manifest = read_hierarchical_manifest(output)
-    migrated_rows: list[dict[str, Any]] = []
-    old_files: list[pathlib.Path] = []
-    for row in tqdm(
-        manifest.iter_rows(named=True),
-        total=manifest.height,
-        desc="Migrating fragments",
-    ):
-        new_row = dict(row)
-        new_paths: dict[str, pathlib.Path] = {}
-        for path_column in ("boards_path", "results_path"):
-            old_relative = str(row[path_column])
-            if "layout_version=2" not in old_relative:
-                raise ValueError(f"Fragment is not layout version 2: {old_relative}")
-            new_relative = old_relative.replace("layout_version=2", "layout_version=3")
-            new_row[path_column] = new_relative
-            new_paths[path_column] = output / new_relative
-            old_files.append(output / old_relative)
-        boards = pl.read_parquet(output / str(row["boards_path"]))
-        results = pl.read_parquet(output / str(row["results_path"]))
-        if moved:
-            absent = [column for column in moved if column not in boards.columns]
-            if absent:
-                raise ValueError(
-                    f"Session {row['session_id']} boards lack {absent}"
-                )
-            clash = [column for column in moved if column in results.columns]
-            if clash:
-                raise ValueError(
-                    f"Session {row['session_id']} results already have {clash}"
-                )
-            results = results.join(
-                boards.select(*KEY_COLUMNS, *moved),
-                on=list(KEY_COLUMNS),
-                how="left",
-                validate="m:1",
-                maintain_order="left",
+    rows = list(manifest.iter_rows(named=True))
+    migrated: list[tuple[dict[str, Any], dict[str, int]] | None] = [None] * len(rows)
+    progress = tqdm(total=len(rows), desc="Migrating fragments")
+    if workers > 1:
+        executor = concurrent.futures.ProcessPoolExecutor(max_workers=workers)
+        try:
+            futures = {
+                executor.submit(
+                    _migrate_lead_fragment, str(output), row, old_mapping, scorer
+                ): index
+                for index, row in enumerate(rows)
+            }
+            for future in concurrent.futures.as_completed(futures):
+                migrated[futures[future]] = future.result()
+                progress.update()
+        except BaseException:
+            executor.shutdown(wait=True, cancel_futures=True)
+            raise
+        executor.shutdown(wait=True)
+    else:
+        for index, row in enumerate(rows):
+            migrated[index] = _migrate_lead_fragment(
+                str(output), row, old_mapping, scorer
             )
-            boards = boards.drop(moved)
-        if boards.height != row["board_rows"] or results.height != row["result_rows"]:
-            raise ValueError(f"Row counts changed for session {row['session_id']}")
-        if not new_paths["boards_path"].is_file():
-            _atomic_write_parquet(boards, new_paths["boards_path"])
-        if not new_paths["results_path"].is_file():
-            _atomic_write_parquet(results, new_paths["results_path"])
-        migrated_rows.append(new_row)
+            progress.update()
+    progress.close()
+    new_rows = [item[0] for item in migrated if item is not None]
+    if len(new_rows) != len(rows):
+        raise RuntimeError("Some fragments were not migrated")
+    totals = {
+        key: sum(item[1][key] for item in migrated if item is not None)
+        for key in ("result_rows", "leads", "dd_lead_scored")
+    }
 
     with _HIERARCHICAL_LOCK:
         _atomic_write_parquet(
-            pl.DataFrame(migrated_rows, schema=HIERARCHICAL_MANIFEST_SCHEMA),
+            pl.DataFrame(new_rows, schema=HIERARCHICAL_MANIFEST_SCHEMA),
             _hierarchical_manifest_path(output),
         )
         _atomic_write_json(
@@ -937,21 +1118,19 @@ def migrate_hierarchical_layout(
                 **metadata,
                 "layout_version": LAYOUT_VERSION,
                 "column_mapping": new_mapping,
-                "migrated_from_layout_version": 2,
+                "original_columns": len(new_mapping),
+                "migrated_from_layout_version": from_version,
                 "migrated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             },
             metadata_path,
         )
-    # The compacted dataset is derived and now has the wrong column layout.
-    # Rebuild it with src/elo/compact_ffbridge_hierarchical_domains.py; the
-    # flat compact_hierarchical_archive is impractically slow on this width.
-    shutil.rmtree(output / "dataset", ignore_errors=True)
     if delete_old_fragments:
-        for path in old_files:
-            path.unlink(missing_ok=True)
+        for row in rows:
+            for path_column in ("boards_path", "results_path"):
+                (output / str(row[path_column])).unlink(missing_ok=True)
     return {
-        "fragments": len(migrated_rows),
-        "moved_columns": moved,
-        "stale_dataset_removed": True,
+        "fragments": len(new_rows),
+        "added_columns": list(OPENING_LEAD_COLUMNS),
+        **totals,
         "old_fragments_deleted": delete_old_fragments,
     }
