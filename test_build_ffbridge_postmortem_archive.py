@@ -20,6 +20,27 @@ def test_two_trick_scores_on_one_row_are_rejected():
         builder._reject_ambiguous_scores(raw)
 
 
+def test_same_section_rows_are_accepted():
+    raw = pl.DataFrame(
+        {
+            "lineup_segment_game_homeTeam_section": ["A", "B", None],
+            "lineup_segment_game_awayTeam_section": ["A", "B", None],
+        }
+    )
+    builder._reject_cross_section(raw)
+
+
+def test_cross_section_rows_are_rejected():
+    raw = pl.DataFrame(
+        {
+            "lineup_segment_game_homeTeam_section": ["A", "A"],
+            "lineup_segment_game_awayTeam_section": ["A", "B"],
+        }
+    )
+    with pytest.raises(builder.UnsupportedSessionError):
+        builder._reject_cross_section(raw)
+
+
 def test_dd_sd_cache_clears_par_and_keeps_dd_sd(tmp_path):
     pipeline = builder._load_quality_pipeline()
     schema = pipeline._official_hrs_schema()

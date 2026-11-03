@@ -108,11 +108,25 @@ def _reject_ambiguous_scores(raw: pl.DataFrame) -> None:
         )
 
 
+def _reject_cross_section(raw: pl.DataFrame) -> None:
+    # convert_ffdf_lancelot_to_mldf asserts home and away teams share a
+    # section; the Club BridgeStats build drops such sessions too (124841).
+    home = "lineup_segment_game_homeTeam_section"
+    away = "lineup_segment_game_awayTeam_section"
+    if not {home, away}.issubset(raw.columns):
+        return
+    if raw.filter(pl.col(home).ne_missing(pl.col(away))).height:
+        raise UnsupportedSessionError(
+            "Raw session has rows whose home and away teams are in different sections"
+        )
+
+
 def _prepare_raw_session(
     raw: pl.DataFrame,
     session_date: date,
 ) -> pl.DataFrame:
     _reject_ambiguous_scores(raw)
+    _reject_cross_section(raw)
     converted = create.mlBridgeFFLib.convert_ffdf_lancelot_to_mldf(raw)
     additions: list[pl.Expr] = [
         pl.lit(session_date).alias("Date"),
@@ -445,24 +459,31 @@ def backfill_raw(
         initargs=(str(hrs_cache_path),),
     ) as executor:
         futures = [executor.submit(_prepare_session_worker, task) for task in tasks]
-        with tqdm(total=len(futures), desc="Archiving FFBridge postmortems") as progress:
-            for future in concurrent.futures.as_completed(futures):
-                result = future.result()
-                progress.update()
-                if result["status"] == "unsupported":
-                    unsupported += 1
-                    continue
-                pending_batch.append(result)
-                processed += 1
-                if len(pending_batch) >= commit_batch_size:
-                    flat_count, hierarchical_count = _commit_prepared_batch(
-                        pending_batch,
-                        archive_dir,
-                        hierarchical_dir,
-                    )
-                    created += flat_count
-                    hierarchical_created += hierarchical_count
-                    pending_batch.clear()
+        try:
+            with tqdm(total=len(futures), desc="Archiving FFBridge postmortems") as progress:
+                for future in concurrent.futures.as_completed(futures):
+                    result = future.result()
+                    progress.update()
+                    if result["status"] == "unsupported":
+                        unsupported += 1
+                        continue
+                    pending_batch.append(result)
+                    processed += 1
+                    if len(pending_batch) >= commit_batch_size:
+                        flat_count, hierarchical_count = _commit_prepared_batch(
+                            pending_batch,
+                            archive_dir,
+                            hierarchical_dir,
+                        )
+                        created += flat_count
+                        hierarchical_created += hierarchical_count
+                        pending_batch.clear()
+        except BaseException:
+            # Leaving the with-block waits for every queued session; on a
+            # failure that augmented the whole rest of the queue (~1 h) and
+            # then discarded it. Cancel what has not started.
+            executor.shutdown(wait=True, cancel_futures=True)
+            raise
     flat_count, hierarchical_count = _commit_prepared_batch(
         pending_batch,
         archive_dir,
