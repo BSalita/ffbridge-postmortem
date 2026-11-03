@@ -192,6 +192,11 @@ CORE_MLDF_COLUMNS = [
     "Player_Name_W",
 ]
 
+PCT_COLUMNS = ("MP_NS", "MP_EW", "MP_Top", "Pct_NS", "Pct_EW")
+# Present only on a frame whose percentages did not come from FFBridge.
+PCT_SOURCE_COLUMN = "Pct_Source"
+PCT_SOURCE_BRIDGEPLUS = "Bridge+"
+
 TeamProgress = Callable[[Sequence[Any]], Iterable[Any]]
 
 
@@ -272,6 +277,39 @@ def _write_hierarchical_if_configured(
         output_dir=output_dir,
         series_id=str(series_id) if series_id is not None else None,
     )
+
+
+def unarchivable_reason(frame: pl.DataFrame) -> Optional[str]:
+    """Why a postmortem frame must stay out of the archives, or None.
+
+    The archives keep FFBridge's final results. A game FFBridge has not scored
+    yet (every Pct_NS 0) or scored only provisionally by its organizer is
+    archived later, once it is rebuilt with published percentages.
+    """
+    if PCT_SOURCE_COLUMN in frame.columns:
+        return f"its percentages are provisional ({frame[PCT_SOURCE_COLUMN][0]})"
+    if "Pct_NS" in frame.columns and frame["Pct_NS"].cast(pl.Float64, strict=False).fill_null(0.0).eq(0.0).all():
+        return "FFBridge has not published its percentages"
+    return None
+
+
+def _archive_frame(
+    frame: pl.DataFrame,
+    session_id: Any,
+    *,
+    context: Mapping[str, Any],
+    series_id: Any,
+) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """Archive a finished postmortem (flat and hierarchical), unless it is not final."""
+    reason = unarchivable_reason(frame)
+    if reason is not None:
+        _log(f"not archiving session {session_id}: {reason}")
+        return {"archive_file": None, "revision": None}, None
+    archive_result = postmortem_archive.archive_session(frame, session_id, context=context)
+    hierarchical_result = _write_hierarchical_if_configured(
+        frame, str(session_id), archive_result, series_id=series_id
+    )
+    return archive_result, hierarchical_result
 
 
 def json_normalize_api(json_data: Any, separator: str = "_") -> pl.DataFrame:
@@ -1188,8 +1226,12 @@ def cached_frame_usable(path: pathlib.Path) -> bool:
     """
     if not path.is_file():
         return False
-    if "DD_Lead_Cost" not in pl.read_parquet_schema(path):
+    schema = pl.read_parquet_schema(path)
+    if "DD_Lead_Cost" not in schema:
         _log(f"{path.name} was built before opening leads were scored; rebuilding")
+        return False
+    if PCT_SOURCE_COLUMN in schema:
+        _log(f"{path.name} has provisional organizer percentages; rebuilding")
         return False
     try:
         pct = pl.read_parquet(path, columns=["Pct_NS"])["Pct_NS"]
@@ -1360,7 +1402,58 @@ def build_lancelot_session_mldf(
         .cast(pl.Int64, strict=False)
         .alias("Pair_Number_EW"),
     )
+    if scores_unpublished(teams_jsons):
+        df = _fill_organizer_percentages(df, meta, game_entry)
     return LancelotSessionBuild(df=df, meta=meta, ranking_df=teams_df, scores_df=ffdf)
+
+
+def _fill_organizer_percentages(
+    df: pl.DataFrame, meta: LancelotSessionMeta, game_entry: Dict[str, Any]
+) -> pl.DataFrame:
+    """Bridge+ percentages for a simultaneous FFBridge has not scored yet.
+
+    FFBridge publishes a Bridge+ simultaneous (e.g. Roy René) days later; until
+    then every Lancelot percentage is 0. The filled frame carries
+    Pct_Source="Bridge+": it is rebuilt on every load and never archived,
+    because the field keeps growing as other clubs play the deals.
+    """
+    series_id = game_entry.get("series_id")
+    club = str(game_entry.get("organization_id") or meta.org_id or "")
+    if series_id is None or str(series_id) not in bridgeplus.organizer_series_ids():
+        return df
+    if not meta.player_license_number or not club.isdigit():
+        return df
+    started = time.time()
+    pcts = bridgeplus.club_session_percentages(
+        session_date=str(meta.tournament_date)[:10],
+        club=club,
+        license_number=str(meta.player_license_number),
+    )
+    _elapsed_if_slow(f"Bridge+ percentages session {meta.session_id}", started)
+    if pcts is None:
+        _log(f"session {meta.session_id}: FFBridge has no percentages and Bridge+ has no sheet")
+        return df
+    key = ["Section_Name", "Board", "Pair_Number_NS", "Pair_Number_EW"]
+    joined = df.drop(*PCT_COLUMNS).join(
+        pcts.rename({"Score_NS": "_bridgeplus_score"}), on=key, how="left"
+    )
+    missing = joined.filter(pl.col("Pct_NS").is_null()).height
+    if missing:
+        raise ValueError(
+            f"Bridge+ has no result for {missing} of {df.height} tables in session {meta.session_id}"
+        )
+    clashes = joined.filter(
+        pl.col("_bridgeplus_score") != pl.col("Score_NS").cast(pl.Int64)
+    ).height
+    if clashes:
+        raise ValueError(
+            f"Bridge+ and FFBridge scores differ on {clashes} tables in session {meta.session_id}"
+        )
+    _log(f"session {meta.session_id}: percentages from Bridge+ ({df.height} tables)")
+    return joined.select(
+        *(pl.col(column).cast(df.schema[column]) for column in df.columns),
+        pl.lit(PCT_SOURCE_BRIDGEPLUS).alias(PCT_SOURCE_COLUMN),
+    )
 
 
 def reduce_mldf_for_augment(df: pl.DataFrame) -> pl.DataFrame:
@@ -1395,6 +1488,7 @@ def augment_and_cache_mldf(
     """
     if df["Contract"].is_null().all():
         raise ValueError("No Contract data available. Unable to proceed.")
+    pct_source = df[PCT_SOURCE_COLUMN][0] if PCT_SOURCE_COLUMN in df.columns else None
     df = reduce_mldf_for_augment(df)
     directory = pathlib.Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
     cache_file = cache_parquet_path(session_id, player_id, directory)
@@ -1416,6 +1510,8 @@ def augment_and_cache_mldf(
     )
     df, _hrs = augmenter.perform_all_augmentations()
     _elapsed_if_slow(f"augment session {session_id}", t_aug)
+    if pct_source is not None:
+        df = df.with_columns(pl.lit(pct_source).alias(PCT_SOURCE_COLUMN))
 
     if write_cache:
         directory.mkdir(parents=True, exist_ok=True)
@@ -1486,15 +1582,10 @@ def _create_organizer_postmortem(
             progress=augment_progress,
             lock_func=lock_func,
         )
-    archive_result = postmortem_archive.archive_session(
+    archive_result, hierarchical_result = _archive_frame(
         frame,
         meta.session_id,
         context=_archive_context(meta, game_entry),
-    )
-    hierarchical_result = _write_hierarchical_if_configured(
-        frame,
-        meta.session_id,
-        archive_result,
         series_id=_entry_archive_context(game_entry).get("series_id"),
     )
     ended = datetime.now()
@@ -1561,15 +1652,10 @@ def create_lancelot_postmortem(
         meta, _, _ = lancelot_session_meta(
             resolved.lancelot_id, session_id, game_entry, token=token, cache_dir=directory
         )
-        archive_result = postmortem_archive.archive_session(
+        archive_result, hierarchical_result = _archive_frame(
             pl.read_parquet(cache_file),
             session_id,
             context=_archive_context(meta, game_entry),
-        )
-        hierarchical_result = _write_hierarchical_if_configured(
-            pl.read_parquet(cache_file),
-            str(session_id),
-            archive_result,
             series_id=_entry_archive_context(game_entry).get("series_id"),
         )
         _log(f"end create session={session_id} status=cached")
@@ -1604,15 +1690,10 @@ def create_lancelot_postmortem(
         progress=augment_progress,
         lock_func=lock_func,
     )
-    archive_result = postmortem_archive.archive_session(
+    archive_result, hierarchical_result = _archive_frame(
         df,
         built.meta.session_id,
         context=_archive_context(built.meta, game_entry),
-    )
-    hierarchical_result = _write_hierarchical_if_configured(
-        df,
-        built.meta.session_id,
-        archive_result,
         series_id=_entry_archive_context(game_entry).get("series_id"),
     )
     ended = datetime.now()
@@ -2336,15 +2417,10 @@ def generate_postmortems(
         path = cache_parquet_path(entry["session_id"], resolved.lancelot_id, directory)
         if not force and cached_frame_usable(path):
             cached_frame = pl.read_parquet(path)
-            archive_result = postmortem_archive.archive_session(
+            archive_result, hierarchical_result = _archive_frame(
                 cached_frame,
                 entry["session_id"],
                 context=_entry_archive_context(entry),
-            )
-            hierarchical_result = _write_hierarchical_if_configured(
-                cached_frame,
-                entry["session_id"],
-                archive_result,
                 series_id=_entry_archive_context(entry).get("series_id"),
             )
             cached_results.append(

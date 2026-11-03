@@ -20,15 +20,37 @@ CLUB = """
 SALITA Robert - JACOUPY Christian
 </a>
 <div>01111111-02222222</div>
-<a href='https://www.bridgeplus.com/nos-simultanes/resultats/?p=route/S202719/5802079/A/1'>
-OTHER Pair
+<a href='https://www.bridgeplus.com/nos-simultanes/resultats/?p=route/S202719/5802079/A/113'>
+KAMOUN Annie - SENOUSSI Marie-Louise
 </a>
 """
 
 ROUTE = """
 <div>SALITA Robert - JACOUPY Christian (EO212 A)</div>
-<div>NS 113 KAMOUN Annie - SENOUSSI Marie-Louise</div>
-<div>1</div><div>-140</div><div>376,0 (64,93 %)</div><div>E : 3P=</div><div>♥A</div>
+<div>Top intégral : 579</div>
+<div>Donne</div><div>Score</div><div>Top</div><div>%</div><div>Déclarant : Contrat</div><div>Entame</div>
+<div>NS 113 KAMOUN Annie - SENOUSSI Marie-Louise (40,00 %)</div>
+<div>1</div><div>-140</div><div>376,0</div><div>64,93 %</div><div>E : 3P=</div><div>♥</div><div>A</div>
+<div>Totaux : 376,0 / 579 => 64,93 %</div>
+"""
+
+# The same table on the NS pair's sheet: the score is shown from EW's side.
+NS_ROUTE = """
+<div>KAMOUN Annie - SENOUSSI Marie-Louise (NS113 A)</div>
+<div>Top intégral : 579</div>
+<div>EO 212 SALITA Robert - JACOUPY Christian (60,00 %)</div>
+<div>1</div><div>140</div><div>203,0</div><div>35,07 %</div><div>E : 3P=</div><div>♥</div><div>A</div>
+"""
+
+RESULTS = """
+<div class='col-4 p-0 text-left h5'>Mardi 13 Octobre 2026 (Après-midi)</div>
+<div class='col h4'>
+<a href='https://www.bridgeplus.com/nos-simultanes/resultats/?p=clubs/S202719'>Simultané du Roy René n&deg;19</a>
+</div>
+<div class='col-4 p-0 text-left h5'>Jeudi 1 Octobre 2026 (Après-midi)</div>
+<div class='col h4'>
+<a href='https://www.bridgeplus.com/nos-simultanes/resultats/?p=clubs/S202716'>Simultané du Roy René n&deg;16</a>
+</div>
 """
 
 DONNE = """
@@ -144,6 +166,7 @@ class GapSelectionTests(unittest.TestCase):
     def test_gap_is_the_undisclosed_bridgeplus_event_the_player_played(self):
         pages = {
             bridgeplus.BRIDGEPLUS_FORM_URL: FORM,
+            bridgeplus.BRIDGEPLUS_RESULTS_URL: RESULTS,
             "https://www.bridgeplus.com/nos-simultanes/resultats/?p=club/S202719/5802079": CLUB,
             "https://www.bridgeplus.com/nos-simultanes/resultats/?p=route/S202719/5802079/A/212": ROUTE,
         }
@@ -182,6 +205,69 @@ class GapSelectionTests(unittest.TestCase):
         self.assertEqual(rows[0]["source"], "bridgeplus")
         self.assertEqual(rows[0]["player_direction"], "E")
         self.assertNotIn("2026-10-09", [row["date"] for row in rows])
+
+
+class ClubPercentagesTests(unittest.TestCase):
+    PAGES = {
+        bridgeplus.BRIDGEPLUS_FORM_URL: FORM,
+        bridgeplus.BRIDGEPLUS_RESULTS_URL: RESULTS,
+        "https://www.bridgeplus.com/nos-simultanes/resultats/?p=club/S202719/5802079": CLUB,
+        "https://www.bridgeplus.com/nos-simultanes/resultats/?p=route/S202719/5802079/A/212": ROUTE,
+        "https://www.bridgeplus.com/nos-simultanes/resultats/?p=route/S202719/5802079/A/113": NS_ROUTE,
+    }
+
+    def _percentages(self, pages):
+        def fetch(url: str) -> str:
+            if url not in pages:
+                raise AssertionError(url)
+            return pages[url]
+
+        return bridgeplus.club_session_percentages(
+            session_date="2026-10-13", club="5802079", license_number="9500754", fetch=fetch
+        )
+
+    def test_results_list_has_the_same_day_simultaneous(self):
+        self.assertEqual(
+            bridgeplus.parse_results_tournaments(RESULTS),
+            [
+                {"tournament_id": "S202719", "date": "2026-10-13"},
+                {"tournament_id": "S202716", "date": "2026-10-01"},
+            ],
+        )
+
+    def test_route_rows_read_score_from_the_opponents_side(self):
+        ew = bridgeplus.parse_route_boards(ROUTE)
+        ns = bridgeplus.parse_route_boards(NS_ROUTE)
+        self.assertEqual(ew["top"], 579)
+        self.assertEqual(ew["boards"][1]["ns_score"], -140)
+        self.assertEqual(ns["boards"][1]["ns_score"], -140)
+        self.assertEqual(ew["boards"][1]["lead"], "HA")
+        self.assertEqual(ew["boards"][1]["mp"], 376.0)
+        self.assertEqual(ew["boards"][1]["pct"], 64.93)
+
+    def test_every_club_table_gets_both_sides_percentages(self):
+        frame = self._percentages(self.PAGES)
+        self.assertEqual(frame.height, 1)
+        row = frame.row(0, named=True)
+        self.assertEqual((row["Section_Name"], row["Board"]), ("A", 1))
+        self.assertEqual((row["Pair_Number_NS"], row["Pair_Number_EW"]), (13, 12))
+        self.assertEqual(row["Score_NS"], -140)
+        self.assertEqual((row["MP_NS"], row["MP_EW"], row["MP_Top"]), (203.0, 376.0, 579))
+        self.assertAlmostEqual(row["Pct_EW"], 0.6493)
+        self.assertAlmostEqual(row["Pct_NS"], 0.3507)
+
+    def test_sheets_that_disagree_on_a_score_fail(self):
+        pages = dict(self.PAGES)
+        pages["https://www.bridgeplus.com/nos-simultanes/resultats/?p=route/S202719/5802079/A/113"] = (
+            NS_ROUTE.replace("<div>140</div>", "<div>170</div>")
+        )
+        with self.assertRaisesRegex(ValueError, "disagree"):
+            self._percentages(pages)
+
+    def test_no_sheet_for_the_player_that_day_is_none(self):
+        pages = dict(self.PAGES)
+        pages["https://www.bridgeplus.com/nos-simultanes/resultats/?p=club/S202719/5802079"] = "<div>no pairs</div>"
+        self.assertIsNone(self._percentages(pages))
 
 
 if __name__ == "__main__":

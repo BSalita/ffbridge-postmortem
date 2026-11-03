@@ -1996,6 +1996,23 @@ def _attach_session_predictions() -> None:
         st.sidebar.warning(warning)
 
 
+def _percentages_notice(df: pl.DataFrame) -> Optional[Tuple[str, str]]:
+    """Report notice (Chrome key, English default) when percentages are not FFBridge's final ones."""
+    if pm_create.PCT_SOURCE_COLUMN in df.columns:
+        return (
+            "pct_bridgeplus",
+            "Percentages are provisional, from the organizer's Bridge+ results: FFBridge has not "
+            "published this game yet, and other clubs may still be playing these deals.",
+        )
+    if df["Pct_NS"].cast(pl.Float64, strict=False).fill_null(0.0).eq(0.0).all():
+        return (
+            "pct_unpublished",
+            "FFBridge has not published percentages for this game yet, so they show as 0. "
+            "Open the report again once they are published.",
+        )
+    return None
+
+
 def _change_game_state_lancelot(player_id: str, session_id: Optional[int]) -> bool:
     """Lancelot branch of change_game_state. Returns True on error, False on success."""
     session_id = _normalize_session_id_arg(session_id)
@@ -2037,6 +2054,7 @@ def _change_game_state_lancelot(player_id: str, session_id: Optional[int]) -> bo
         if listing and listing.get("date"):
             st.session_state.tournament_date = str(listing["date"])[:10]
         df = pm_api.postmortem_dataframe(str(player_id), sid)
+        st.session_state.report_notice = _percentages_notice(df)
         if st.session_state.debug_mode:
             debug_capture_df("Final Dataframe", df, source="ffbridge_postmortem_api")
         st.session_state.df = filter_dataframe(df)

@@ -404,7 +404,7 @@ class StreamlitLancelotRoutingTests(unittest.TestCase):
                     }],
                 },
             ) as generate,
-            patch.object(app.pm_api, "postmortem_dataframe", return_value=pl.DataFrame()),
+            patch.object(app.pm_api, "postmortem_dataframe", return_value=pl.DataFrame({"Pct_NS": [0.5]})),
             patch.object(app, "filter_dataframe", return_value=pl.DataFrame()),
             patch.object(app, "_ensure_game_results_url"),
             patch.object(app, "get_session_duckdb_connection", return_value=Mock()),

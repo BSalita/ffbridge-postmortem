@@ -12,6 +12,7 @@ import pathlib
 import re
 import time
 import unicodedata
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 from html import unescape
 from typing import Any, Callable, Dict, List, Optional
@@ -24,6 +25,7 @@ BRIDGEPLUS_HOST = "bridgeplus.com"
 BRIDGEPLUS_FORM_URL = (
     "https://www.bridgeplus.com/nos-simultanes/espace-club/?p=joueur&res=sim"
 )
+BRIDGEPLUS_RESULTS_URL = "https://www.bridgeplus.com/nos-simultanes/resultats/"
 BRIDGEPLUS_CLUB_URL = (
     "https://www.bridgeplus.com/nos-simultanes/resultats/?p=club/{tournament}/{club}"
 )
@@ -149,6 +151,45 @@ def parse_tournament_options(html: str) -> List[Dict[str, str]]:
     return rows
 
 
+_FRENCH_MONTHS = {
+    "janvier": 1, "fevrier": 2, "mars": 3, "avril": 4, "mai": 5, "juin": 6,
+    "juillet": 7, "aout": 8, "septembre": 9, "octobre": 10, "novembre": 11, "decembre": 12,
+}
+_RESULTS_ROW_RE = re.compile(
+    r"(\d{1,2})\s+([^\s<]+)\s+(\d{4})[^<]*</div>\s*<div[^>]*>\s*"
+    r"<a href='[^']*p=clubs/(S\d+)'",
+)
+
+
+def parse_results_tournaments(html: str) -> List[Dict[str, str]]:
+    """Simultaneous ids and dates from the public results list.
+
+    The player form (BRIDGEPLUS_FORM_URL) adds a simultaneous only some days
+    after it is played; this list has it the same day.
+    """
+    rows = []
+    for day, month, year, tournament_id in _RESULTS_ROW_RE.findall(html):
+        number = _FRENCH_MONTHS.get(_fold(month))
+        if number is None:
+            raise ValueError(f"Bridge+ results list has an unknown month {month!r}")
+        rows.append(
+            {"tournament_id": tournament_id, "date": f"{year}-{number:02d}-{int(day):02d}"}
+        )
+    return rows
+
+
+def bridgeplus_tournaments(fetch: Fetch) -> List[Dict[str, str]]:
+    """Every Bridge+ simultaneous on the results list and the player form, newest id first."""
+    found = {
+        row["tournament_id"]: row
+        for row in [
+            *parse_tournament_options(fetch(BRIDGEPLUS_FORM_URL)),
+            *parse_results_tournaments(fetch(BRIDGEPLUS_RESULTS_URL)),
+        ]
+    }
+    return [found[key] for key in sorted(found, reverse=True)]
+
+
 def parse_player_route(html: str, license_number: str) -> Optional[Dict[str, str]]:
     """Club sheet row: padded licenses, then the pair's route link."""
     wanted = _license_key(license_number)
@@ -199,12 +240,33 @@ def _lead_code(text: str) -> Optional[str]:
     rank = _RANK.get(rank_text)
     if rank is None:
         return None
-    return rank + suit
+    # Suit then rank ("HA"), the Lancelot Lead format the lead scoring reads.
+    return suit + rank
+
+
+_MP_RE = re.compile(r"^-?\d+(?:,\d+)?$")
+_PCT_RE = re.compile(r"^(\d+(?:,\d+)?) %$")
+_TOP_RE = re.compile(r"^Top int\S*\s*:\s*(\d+)")
+_LEAD_SYMBOLS = {"♠", "♥", "♦", "♣"}
 
 
 def parse_route_boards(html: str) -> Dict[str, Any]:
+    """A pair's route sheet: one row per board, grouped under each opponent.
+
+    A board row is number, score, matchpoints, percentage, contract, then the
+    lead's suit symbol and rank (absent when no lead was recorded). The score
+    is shown from the opponents' side: an EW sheet lists NS's score, an NS
+    sheet lists EW's. Matchpoints and percentage are the sheet pair's own.
+    """
     lines = _lines(html)
     header = _pair_header(lines)
+    top = next(
+        (int(match.group(1)) for line in lines if (match := _TOP_RE.match(line))),
+        None,
+    )
+    if top is None:
+        raise ValueError("Bridge+ route sheet has no 'Top intégral'")
+    sign = 1 if header["pair_direction"] == "EW" else -1
     boards: Dict[int, Dict[str, Any]] = {}
     opponent = None
     index = 0
@@ -214,32 +276,35 @@ def parse_route_boards(html: str) -> Dict[str, Any]:
             opponent = line
             index += 1
             continue
-        if re.fullmatch(r"\d{1,2}", line) and index + 3 < len(lines):
-            contract = lines[index + 3]
-            if _CONTRACT_RE.match(contract):
-                board = int(line)
-                top = lines[index + 2]
-                mp_match = re.match(
-                    r"(-?\d+(?:[.,]\d+)?)\s*\(([0-9]+,[0-9]+)\s*%\)",
-                    top,
-                )
-                if mp_match is None:
-                    raise ValueError(f"Board {board} matchpoints {top!r} were not parsed")
-                boards[board] = {
-                    "board": board,
-                    "ns_score": int(lines[index + 1]),
-                    "mp": float(mp_match.group(1).replace(",", ".")),
-                    "pct": float(mp_match.group(2).replace(",", ".")),
-                    "contract": contract,
-                    "lead": _lead_code(lines[index + 4]) if index + 4 < len(lines) else None,
-                    "opponent": opponent,
-                }
-                index += 5
-                continue
+        if (
+            re.fullmatch(r"\d{1,2}", line)
+            and index + 4 < len(lines)
+            and _MP_RE.match(lines[index + 2])
+            and _PCT_RE.match(lines[index + 3])
+            and (_CONTRACT_RE.match(lines[index + 4]) or lines[index + 4] == "-")
+        ):
+            board = int(line)
+            lead = None
+            step = 5
+            if index + 6 < len(lines) and lines[index + 5] in _LEAD_SYMBOLS:
+                lead = _lead_code(lines[index + 5] + lines[index + 6])
+                step = 7
+            boards[board] = {
+                "board": board,
+                "ns_score": sign * int(lines[index + 1]),
+                "mp": float(lines[index + 2].replace(",", ".")),
+                "pct": float(_PCT_RE.match(lines[index + 3]).group(1).replace(",", ".")),
+                # "-": the club recorded no contract for this table.
+                "contract": None if lines[index + 4] == "-" else lines[index + 4],
+                "lead": lead,
+                "opponent": opponent,
+            }
+            index += step
+            continue
         index += 1
     if not boards:
         raise ValueError("Bridge+ route sheet has no board results")
-    return {"header": header, "boards": boards}
+    return {"header": header, "top": top, "boards": boards}
 
 
 def _suit_holding(text: str) -> str:
@@ -312,7 +377,9 @@ def parse_donne_boards(html: str) -> Dict[int, Dict[str, Any]]:
     return boards
 
 
-def _contract_fields(contract: str) -> Dict[str, Any]:
+def _contract_fields(contract: Optional[str]) -> Dict[str, Any]:
+    if contract is None:
+        raise ValueError("Bridge+ route sheet has a board with no recorded contract")
     seat, level, suit, penalty, result = _CONTRACT_RE.match(contract).groups()
     declarer = _SEAT[seat]
     encoded = f"{level}{_SUIT[suit]}{penalty or ''}{declarer}"
@@ -539,8 +606,7 @@ def gap_session_entries(
         "",
     )
     entries: List[Dict[str, Any]] = []
-    form_html = fetch(BRIDGEPLUS_FORM_URL)
-    tournaments = parse_tournament_options(form_html)
+    tournaments = bridgeplus_tournaments(fetch)
     for organizer in _series_organizers():
         published = _lancelot_session_dates(organizer["lancelot_series_id"])
         for tournament in tournaments:
@@ -676,3 +742,73 @@ def scrape_mldf(
         player_name=str(entry.get("player_name") or ""),
         partner_name=str(entry.get("partner_name") or ""),
     )
+
+
+def organizer_series_ids() -> set[str]:
+    """FFBridge migration series ids whose simultaneous is scored on Bridge+."""
+    return {str(row["series_id"]) for row in _series_organizers() if row.get("series_id") is not None}
+
+
+def club_session_percentages(
+    *,
+    session_date: str,
+    club: str,
+    license_number: str,
+    fetch: Fetch = default_fetch,
+    workers: int = 8,
+) -> Optional[pl.DataFrame]:
+    """Bridge+ matchpoints for every table a club played in one simultaneous.
+
+    Returns one row per (Section_Name, Board, Pair_Number_NS, Pair_Number_EW)
+    with Score_NS, MP_NS, MP_EW, MP_Top, Pct_NS and Pct_EW, or None when no
+    Bridge+ simultaneous that day lists the player at this club. Pair numbers
+    drop Bridge+'s 100 (NS) / 200 (EW) prefix to match Lancelot table numbers.
+
+    Pages are never cached: the same deals are played at other clubs over
+    several days, so the field and the percentages keep changing.
+    """
+    tournaments = [row for row in bridgeplus_tournaments(fetch) if row["date"] == session_date]
+    for tournament in tournaments:
+        club_html = fetch(
+            BRIDGEPLUS_CLUB_URL.format(tournament=tournament["tournament_id"], club=club)
+        )
+        if parse_player_route(club_html, license_number) is None:
+            continue
+        hrefs = [href for _first, _second, _quote, href in _ROUTE_RE.findall(club_html)]
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            routes = list(pool.map(lambda href: parse_route_boards(fetch(href)), hrefs))
+        rows = []
+        for route in routes:
+            header = route["header"]
+            own_ns = header["pair_direction"] == "NS"
+            pair = int(header["pair_number"]) % 100
+            top = route["top"]
+            for board in route["boards"].values():
+                opponent = _opponent_number(board["opponent"])
+                if opponent is None:
+                    raise ValueError(f"Bridge+ board {board['board']} has no opponent pair")
+                own_pct = board["pct"] / 100.0
+                rows.append(
+                    {
+                        "Section_Name": header["section"],
+                        "Board": board["board"],
+                        "Pair_Number_NS": pair if own_ns else opponent % 100,
+                        "Pair_Number_EW": opponent % 100 if own_ns else pair,
+                        "Score_NS": board["ns_score"],
+                        "MP_NS": board["mp"] if own_ns else top - board["mp"],
+                        "MP_EW": top - board["mp"] if own_ns else board["mp"],
+                        "MP_Top": top,
+                        "Pct_NS": own_pct if own_ns else 1.0 - own_pct,
+                        "Pct_EW": 1.0 - own_pct if own_ns else own_pct,
+                    }
+                )
+        key = ["Section_Name", "Board", "Pair_Number_NS", "Pair_Number_EW"]
+        frame = pl.DataFrame(rows)
+        # Both pairs' sheets list each table: their scores must agree.
+        clash = frame.group_by(key).agg(pl.col("Score_NS").n_unique().alias("scores")).filter(
+            pl.col("scores") > 1
+        )
+        if clash.height:
+            raise ValueError(f"Bridge+ sheets disagree on {clash.height} table scores: {clash.head(3).to_dicts()}")
+        return frame.unique(subset=key, keep="first", maintain_order=True)
+    return None
