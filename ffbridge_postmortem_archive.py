@@ -118,12 +118,35 @@ def _sha256_file(path: pathlib.Path) -> str:
     return digest.hexdigest()
 
 
+REPLACE_RETRY_SECONDS = 30.0
+
+
+def _replace(source: pathlib.Path, destination: pathlib.Path) -> None:
+    """os.replace that waits out a brief lock on the destination.
+
+    On Windows, a scanner (Defender, Search) that opens a freshly written file
+    makes the rename fail with WinError 5 for a moment; a 98-minute archive run
+    died that way on 2026-11-03. Retry for a short while, then raise.
+    """
+    deadline = time.monotonic() + REPLACE_RETRY_SECONDS
+    delay = 0.1
+    while True:
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 2.0)
+
+
 def _atomic_write_parquet(frame: pl.DataFrame, path: pathlib.Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     try:
         frame.write_parquet(temporary, compression="zstd", statistics=True)
-        os.replace(temporary, path)
+        _replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -136,7 +159,7 @@ def _atomic_write_json(value: Mapping[str, Any], path: pathlib.Path) -> None:
             json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True),
             encoding="utf-8",
         )
-        os.replace(temporary, path)
+        _replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -278,7 +301,7 @@ def prepare_archive_session(
         if created:
             try:
                 destination.parent.mkdir(parents=True, exist_ok=True)
-                os.replace(staging, destination)
+                _replace(staging, destination)
             except FileExistsError:
                 created = False
         record = {
@@ -561,7 +584,7 @@ def compact_archive(
             )
         finally:
             con.close()
-        os.replace(temporary, destination)
+        _replace(temporary, destination)
         partition_rows = pl.scan_parquet(destination).select(pl.len()).collect().item()
         _atomic_write_json(
             {
