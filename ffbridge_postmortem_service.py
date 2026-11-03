@@ -574,9 +574,96 @@ def attach_opening_lead(frame: pl.DataFrame, session_id: Optional[str]) -> pl.Da
     return joined
 
 
+# (manifest path, mtime) -> one row per (player_id, session_id, Date) in the
+# hierarchical archive. Scanning every session's player ids takes ~1.5 s.
+_player_sessions_cache: Dict[Tuple[str, float], pl.DataFrame] = {}
+_player_sessions_lock = threading.Lock()
+
+
+def _hierarchical_player_sessions() -> pl.DataFrame:
+    """Every (player_id, session_id, Date) in the hierarchical archive."""
+    manifest_path = HIERARCHICAL_DIR / "manifest.parquet"
+    key = (str(manifest_path), manifest_path.stat().st_mtime)
+    with _player_sessions_lock:
+        cached = _player_sessions_cache.get(key)
+        if cached is not None:
+            return cached
+        manifest = normalized.latest_hierarchical_manifest(HIERARCHICAL_DIR)
+        mapping = json.loads(
+            (HIERARCHICAL_DIR / "metadata.json").read_text(encoding="utf-8")
+        )["column_mapping"]
+        seats = []
+        for seat in "NESW":
+            entry = mapping[f"Player_ID_{seat}"]
+            column = pl.col(str(entry["storage_column"]))
+            if entry.get("field"):
+                column = column.struct.field(str(entry["field"]))
+            seats.append(column.cast(pl.Utf8).alias(seat))
+        frame = (
+            pl.scan_parquet(
+                [str(HIERARCHICAL_DIR / path) for path in manifest["results_path"]]
+            )
+            .select(pl.col("session_id").cast(pl.Utf8), *seats)
+            .unpivot(index="session_id", value_name="player_id")
+            .drop_nulls("player_id")
+            .select("player_id", "session_id")
+            .unique()
+            .collect()
+            .join(
+                manifest.select(pl.col("session_id").cast(pl.Utf8), "Date"),
+                on="session_id",
+            )
+        )
+        _player_sessions_cache.clear()
+        _player_sessions_cache[key] = frame
+        return frame
+
+
+def _newest_hierarchical_session(player_id: str) -> Optional[Tuple[str, str]]:
+    """(session_id, date) of the player's newest session in the hierarchical archive."""
+    if HIERARCHICAL_DIR is None or not (HIERARCHICAL_DIR / "metadata.json").is_file():
+        return None
+    rows = _hierarchical_player_sessions().filter(
+        pl.col("player_id").is_in(player_match_ids(player_id))
+    )
+    if rows.is_empty():
+        return None
+    row = rows.sort(["Date", "session_id"]).row(-1, named=True)
+    return row["session_id"], str(row["Date"])
+
+
+def _newer_unarchived_game(player_id: str, archived_date: str) -> bool:
+    """True when a cached postmortem not in the hierarchical archive is a later game.
+
+    Games played since the last archive run exist only as on-demand cache files.
+    """
+    archived = set(
+        normalized.latest_hierarchical_manifest(HIERARCHICAL_DIR)["session_id"].cast(pl.Utf8)
+    )
+    for entry in list_cached_postmortems(player_id):
+        if entry["session_id"] in archived:
+            continue
+        if entry.get("source") == "archive":
+            path = archive.resolve_archive_dir() / entry["file"]
+        else:
+            path = CACHE_DIR / entry["file"]
+        game_date = pl.read_parquet(path, columns=["Date"])["Date"].first()
+        if str(game_date)[:10] > archived_date:
+            return True
+    return False
+
+
 def load_postmortem(player_id: str, session_id: Optional[str] = None) -> Tuple[pl.DataFrame, Dict[str, Any]]:
-    """Load a cached postmortem (latest session when session_id is None) and
-    personalize it for the player. Returns (df, meta)."""
+    """Load a player's postmortem (latest game when session_id is None) and
+    personalize it for the player. Returns (df, meta).
+
+    The hierarchical archive is preferred: older per-player cache files predate
+    columns such as DD_Lead_Cost and SC_Guess_Declarer.
+    """
+    if session_id is None:
+        newest = _newest_hierarchical_session(str(player_id))
+        if newest is not None and not _newer_unarchived_game(str(player_id), newest[1]):
+            return _load_hierarchical_postmortem(str(player_id), newest[0])
     if session_id is not None:
         try:
             return _load_hierarchical_postmortem(str(player_id), str(session_id))

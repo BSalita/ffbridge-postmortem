@@ -565,6 +565,42 @@ class HierarchicalOpeningLeadTests(unittest.TestCase):
                 sorted([("HK", 1), (None, None)], key=str),
             )
 
+    def test_latest_postmortem_reads_newest_archived_game_unless_cache_is_newer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            production = self._production(tmp, _lead_frame())
+            for session_id, played in (("100", date(2026, 8, 28)), ("101", date(2026, 9, 5))):
+                normalized.write_hierarchical_session(
+                    _lead_frame().with_columns(pl.lit(played).alias("Date")),
+                    session_id=session_id,
+                    revision="r1",
+                    output_dir=production,
+                )
+            cache_dir = pathlib.Path(tmp) / "cache"
+            cache_dir.mkdir()
+            # A pre-upgrade cache file for an archived game must not win.
+            _session_frame().write_parquet(cache_dir / "df-100-10.parquet")
+            resolved = create.ResolvedPlayer(
+                lancelot_id="10", license_number="10", requested_id="10"
+            )
+            with (
+                patch.object(service, "HIERARCHICAL_DIR", production),
+                patch.object(service, "CACHE_DIR", cache_dir),
+                patch.object(archive, "DEFAULT_ARCHIVE_DIR", pathlib.Path(tmp) / "no-archive"),
+                patch.object(create, "resolve_player", return_value=resolved),
+            ):
+                frame, meta = service.load_postmortem("10")
+                self.assertEqual(meta["data_source"], "hierarchical_archive")
+                self.assertEqual(meta["session_id"], "101")
+                self.assertIn("DD_Lead_Cost", frame.columns)
+
+                # A game played after the last archive run is only in the cache.
+                _session_frame().with_columns(
+                    pl.lit(date(2026, 9, 10)).alias("Date")
+                ).write_parquet(cache_dir / "df-102-10.parquet")
+                _frame, meta = service.load_postmortem("10")
+                self.assertEqual(meta["data_source"], "cache")
+                self.assertEqual(meta["session_id"], "102")
+
 
 class HierarchicalMigrationTests(unittest.TestCase):
     def test_migration_adds_lead_columns_and_rejects_old_reads(self):
