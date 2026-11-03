@@ -56,6 +56,14 @@ def load_dd_sd_cache(hrs_cache_path: pathlib.Path) -> pl.DataFrame:
 
 def _init_worker(hrs_cache_path_text: str) -> None:
     global _WORKER_HRS_CACHE
+    # The augment library logs ~400 INFO lines per session; with 8 workers
+    # that buries the progress bar. Import it first: its setup_logger sets
+    # INFO at import time and would undo an earlier setLevel.
+    import logging
+
+    import mlBridge.mlBridgeAugmentLib  # noqa: F401
+
+    logging.getLogger("mlBridge.mlBridgeAugmentLib").setLevel(logging.WARNING)
     _WORKER_HRS_CACHE = load_dd_sd_cache(pathlib.Path(hrs_cache_path_text))
 
 
