@@ -317,6 +317,11 @@ class GenerateJobTests(unittest.TestCase):
                     return_value=pl.DataFrame({"Board": [1]}),
                 ),
                 patch.object(
+                    create.pl,
+                    "read_parquet_schema",
+                    return_value={"Board": pl.Int64, "DD_Lead_Cost": pl.UInt8},
+                ),
+                patch.object(
                     create.postmortem_archive,
                     "archive_session",
                     return_value={

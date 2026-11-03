@@ -1183,9 +1183,13 @@ def cached_frame_usable(path: pathlib.Path) -> bool:
     """A cached postmortem parquet that exists and was built after FFBridge published percentages.
 
     A game built before publication has Pct_NS 0 on every board; it is rebuilt
-    instead of reused.
+    instead of reused. So is one built before opening leads were scored: the
+    layout-4 archive requires DD_Lead_Cost.
     """
     if not path.is_file():
+        return False
+    if "DD_Lead_Cost" not in pl.read_parquet_schema(path):
+        _log(f"{path.name} was built before opening leads were scored; rebuilding")
         return False
     try:
         pct = pl.read_parquet(path, columns=["Pct_NS"])["Pct_NS"]
