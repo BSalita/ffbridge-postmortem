@@ -194,8 +194,8 @@ CORE_MLDF_COLUMNS = [
 
 PCT_COLUMNS = ("MP_NS", "MP_EW", "MP_Top", "Pct_NS", "Pct_EW")
 # Present only on a frame whose percentages did not come from FFBridge.
-PCT_SOURCE_COLUMN = "Pct_Source"
-PCT_SOURCE_BRIDGEPLUS = "Bridge+"
+PCT_SOURCE_COLUMN = bridgeplus.PCT_SOURCE_COLUMN
+PCT_SOURCE_BRIDGEPLUS = bridgeplus.PCT_SOURCE
 
 TeamProgress = Callable[[Sequence[Any]], Iterable[Any]]
 

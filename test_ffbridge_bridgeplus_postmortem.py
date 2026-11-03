@@ -149,6 +149,7 @@ class SheetParserTests(unittest.TestCase):
         self.assertEqual(frame.schema["Score_EW"], pl.Int16)
         self.assertEqual(frame.schema["Player_ID_N"], pl.String)
         self.assertEqual(frame.schema["Player_Name_S"], pl.String)
+        self.assertEqual(frame[bridgeplus.PCT_SOURCE_COLUMN].unique().to_list(), ["Bridge+"])
         prepared = frame.with_columns(
             pl.when(pl.col("Declarer").is_in(["N", "S"]))
             .then(pl.col("Score_NS"))
@@ -194,6 +195,21 @@ class GapSelectionTests(unittest.TestCase):
                 today=date(2026, 10, 14),
                 fetch=fetch,
             )
+            # Lancelot already lists the player's game that day: no Bridge+ copy.
+            listed = bridgeplus.gap_session_entries(
+                player_id="246273",
+                license_number="9500754",
+                sessions=[
+                    {
+                        "organization_id": "5802079",
+                        "organization_name": "Levallois",
+                        "date": "2026-10-13",
+                        "series_id": 5,
+                    }
+                ],
+                today=date(2026, 10, 14),
+                fetch=fetch,
+            )
         finally:
             # Restore the real lookups for any later test in this process.
             import importlib
@@ -205,6 +221,7 @@ class GapSelectionTests(unittest.TestCase):
         self.assertEqual(rows[0]["source"], "bridgeplus")
         self.assertEqual(rows[0]["player_direction"], "E")
         self.assertNotIn("2026-10-09", [row["date"] for row in rows])
+        self.assertEqual(listed, [])
 
 
 class ClubPercentagesTests(unittest.TestCase):

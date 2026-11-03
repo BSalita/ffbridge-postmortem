@@ -25,7 +25,10 @@ BRIDGEPLUS_HOST = "bridgeplus.com"
 BRIDGEPLUS_FORM_URL = (
     "https://www.bridgeplus.com/nos-simultanes/espace-club/?p=joueur&res=sim"
 )
-BRIDGEPLUS_RESULTS_URL = "https://www.bridgeplus.com/nos-simultanes/resultats/"
+# Marks a frame whose percentages are Bridge+'s, not FFBridge's published ones.
+PCT_SOURCE_COLUMN = "Pct_Source"
+PCT_SOURCE = "Bridge+"
+BRIDGEPLUS_RESULTS_URL ="https://www.bridgeplus.com/nos-simultanes/resultats/"
 BRIDGEPLUS_CLUB_URL = (
     "https://www.bridgeplus.com/nos-simultanes/resultats/?p=club/{tournament}/{club}"
 )
@@ -608,7 +611,14 @@ def gap_session_entries(
     entries: List[Dict[str, Any]] = []
     tournaments = bridgeplus_tournaments(fetch)
     for organizer in _series_organizers():
-        published = _lancelot_session_dates(organizer["lancelot_series_id"])
+        # Lancelot's series date list can lag; a session already listed for
+        # this player is the same game, so it is never added again.
+        listed = {
+            str(row.get("date") or "")[:10]
+            for row in sessions
+            if str(row.get("series_id")) == str(organizer["series_id"])
+        }
+        published = _lancelot_session_dates(organizer["lancelot_series_id"]) | listed
         for tournament in tournaments:
             session_date = date.fromisoformat(tournament["date"])
             if date_from and tournament["date"] < date_from:
@@ -709,17 +719,17 @@ def scrape_mldf(
     route_html: Optional[str] = None,
     donne_html: Optional[str] = None,
 ) -> pl.DataFrame:
-    """Read the route and deal sheet, downloading each page only when it is not cached."""
+    """Read the route and deal sheets into a provisional board frame.
+
+    The deal sheet is cached. The route sheet is downloaded every time: its
+    percentages change while other clubs play the deals. The frame carries
+    Pct_Source="Bridge+" so it is rebuilt on every load and never archived.
+    """
     route_url = str(entry["route_url"])
     tournament = str(entry.get("tournament_id") or "event")
     club = str(entry.get("organization_id") or "club")
     if route_html is None:
-        route_html = _page_cache(
-            cache_dir,
-            f"bridgeplus/{tournament}/{club}/route.html",
-            route_url,
-            fetch,
-        )
+        route_html = fetch(route_url)
     route = parse_route_boards(route_html)
     donne_url = route_url.replace("p=route/", "p=donne/")
     if donne_html is None:
@@ -741,7 +751,7 @@ def scrape_mldf(
         license_2=str(entry.get("license_2") or entry.get("partner_license_number") or ""),
         player_name=str(entry.get("player_name") or ""),
         partner_name=str(entry.get("partner_name") or ""),
-    )
+    ).with_columns(pl.lit(PCT_SOURCE).alias(PCT_SOURCE_COLUMN))
 
 
 def organizer_series_ids() -> set[str]:
