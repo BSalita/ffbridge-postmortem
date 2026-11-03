@@ -1382,12 +1382,16 @@ def augment_and_cache_mldf(
     lock_func: Optional[Callable[..., Any]] = None,
     write_cache: bool = True,
     hrs_cache_df: Optional[pl.DataFrame] = None,
+    sd_lead: Any = None,
+    suitc: Any = None,
 ) -> pl.DataFrame:
     """Reduce to core columns, augment (unless cached), write parquet.
 
     ``hrs_cache_df`` is a hand-records cache (DD, Par, SD per PBN/Dealer/Vul).
     Deals found there are not solved again; rows with a null ParScore get Par
-    recomputed from their cached DD table.
+    recomputed from their cached DD table. ``sd_lead`` (mlBridge SDLeadCache)
+    adds the SD_Lead_* columns; ``suitc`` (mlBridgeSuitCLib.SuitCCache) adds
+    SC_* and DD_Tricks_Diff_SC.
     """
     if df["Contract"].is_null().all():
         raise ValueError("No Contract data available. Unable to proceed.")
@@ -1407,6 +1411,8 @@ def augment_and_cache_mldf(
         progress=progress,
         lock_func=lock_func,
         output_progress=True,
+        sd_lead=sd_lead,
+        suitc=suitc,
     )
     df, _hrs = augmenter.perform_all_augmentations()
     _elapsed_if_slow(f"augment session {session_id}", t_aug)

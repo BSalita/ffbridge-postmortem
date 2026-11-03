@@ -1374,6 +1374,169 @@
 					}
 				}
 			},
+			"Our_Opening_Leads": {
+				"title": "Our Opening Leads",
+				"row_click": "Show every score on board {Board}.",
+				"help": "**Showing the opening leads {player1_name} and {player2_name} made. DD_Lead_Cost is the tricks the lead gave up against the best double dummy (DD) lead; Field columns show how the other tables did on the same board.**",
+				"prompts": [
+					{
+						"prompt": "Show board, contract, leader, lead, DD lead cost, whether the lead was DD best, field DD best pct, tricks, DD tricks, pct. Show those boards we defended. Sort by DD lead cost descending.",
+						"try_next": [
+							{
+								"Leads That Cost Tricks": "@Our_Costly_Leads"
+							},
+							{
+								"Opening Lead Accuracy": "@Opening_Lead_Summary"
+							},
+							{
+								"Leads at Other Tables": "@Field_Leads_On_Our_Boards"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
+						],
+						"sql": "WITH f AS (SELECT *, AVG(CAST(Lead_Is_DD_Best AS INT)) OVER (PARTITION BY Board) AS Field_DD_Best_Pct, AVG(DD_Lead_Cost) OVER (PARTITION BY Board) AS Field_Avg_DD_Lead_Cost FROM self) SELECT Board, Contract, CASE Direction_OnLead WHEN 'N' THEN Player_Name_N WHEN 'E' THEN Player_Name_E WHEN 'S' THEN Player_Name_S WHEN 'W' THEN Player_Name_W END AS Leader, Lead, DD_Lead_Cost, Lead_Is_DD_Best, ROUND(Field_DD_Best_Pct, 2) AS Field_DD_Best_Pct, ROUND(Field_Avg_DD_Lead_Cost, 2) AS Field_Avg_DD_Lead_Cost, Tricks, DD_Tricks, Pct_{Pair_Direction} FROM f WHERE Boards_I_Played = True AND Boards_Opponent_Declared = True ORDER BY DD_Lead_Cost DESC NULLS LAST, Board"
+					}
+				],
+				"i18n": {
+					"fr": {
+						"title": "Nos entames",
+						"help": "**Entames de {player1_name} et {player2_name}. DD_Lead_Cost : levées perdues par rapport à la meilleure entame en double mort (DD) ; les colonnes Field montrent les autres tables sur la même donne.**"
+					}
+				}
+			},
+			"Our_Costly_Leads": {
+				"title": "Our Leads That Cost Tricks",
+				"row_click": "Show every score on board {Board}.",
+				"help": "**Showing our opening leads that gave up at least one trick against the best double dummy (DD) lead.**",
+				"prompts": [
+					{
+						"prompt": "Show board, contract, leader, lead, DD lead cost, field DD best pct, tricks, DD tricks, pct. Show those boards we defended and DD lead cost >= 1.",
+						"try_next": [
+							{
+								"Our Opening Leads": "@Our_Opening_Leads"
+							},
+							{
+								"Leads at Other Tables": "@Field_Leads_On_Our_Boards"
+							},
+							{
+								"Our Mistakes": "@Our_Mistakes"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
+						],
+						"sql": "WITH f AS (SELECT *, AVG(CAST(Lead_Is_DD_Best AS INT)) OVER (PARTITION BY Board) AS Field_DD_Best_Pct, AVG(DD_Lead_Cost) OVER (PARTITION BY Board) AS Field_Avg_DD_Lead_Cost FROM self) SELECT Board, Contract, CASE Direction_OnLead WHEN 'N' THEN Player_Name_N WHEN 'E' THEN Player_Name_E WHEN 'S' THEN Player_Name_S WHEN 'W' THEN Player_Name_W END AS Leader, Lead, DD_Lead_Cost, Lead_Is_DD_Best, ROUND(Field_DD_Best_Pct, 2) AS Field_DD_Best_Pct, ROUND(Field_Avg_DD_Lead_Cost, 2) AS Field_Avg_DD_Lead_Cost, Tricks, DD_Tricks, Pct_{Pair_Direction} FROM f WHERE Boards_I_Played = True AND Boards_Opponent_Declared = True AND DD_Lead_Cost >= 1 ORDER BY DD_Lead_Cost DESC, Board"
+					}
+				],
+				"i18n": {
+					"fr": {
+						"title": "Nos entames qui ont coûté des levées",
+						"help": "**Nos entames qui ont perdu au moins une levée par rapport à la meilleure entame en double mort (DD).**"
+					}
+				}
+			},
+			"Opening_Lead_Summary": {
+				"title": "Opening Lead Accuracy: Me, Partner and Field",
+				"help": "**Showing how often {player1_name} and {player2_name} found the best double dummy (DD) lead and the tricks their leads gave up, next to the whole field's averages.**",
+				"prompts": [
+					{
+						"prompt": "",
+						"try_next": [
+							{
+								"Our Opening Leads": "@Our_Opening_Leads"
+							},
+							{
+								"Rank Leaders": "@Lead_Rankings"
+							}
+						],
+						"sql": "SELECT CASE WHEN Direction_OnLead = '{Player_Direction}' THEN 'Me' WHEN Direction_OnLead = '{Partner_Direction}' THEN 'Partner' END AS Leader, COUNT(*) AS Leads, COUNT(DD_Lead_Cost) AS Scored, ROUND(AVG(CAST(Lead_Is_DD_Best AS INT)), 2) AS Pct_DD_Best, ROUND(AVG(DD_Lead_Cost), 2) AS Avg_DD_Lead_Cost, SUM(DD_Lead_Cost) AS Tricks_Given_Up, (SELECT ROUND(AVG(CAST(Lead_Is_DD_Best AS INT)), 2) FROM self) AS Field_Pct_DD_Best, (SELECT ROUND(AVG(DD_Lead_Cost), 2) FROM self) AS Field_Avg_DD_Lead_Cost FROM self WHERE Boards_I_Played = True AND Boards_Opponent_Declared = True GROUP BY ALL ORDER BY Leader"
+					}
+				],
+				"i18n": {
+					"fr": {
+						"title": "Précision des entames : moi, mon partenaire et le champ",
+						"help": "**Fréquence à laquelle {player1_name} et {player2_name} ont trouvé la meilleure entame en double mort (DD) et levées perdues, comparées aux moyennes du champ.**"
+					}
+				}
+			},
+			"Opponents_Lead_Gifts": {
+				"title": "Tricks the Opponents' Leads Gave Us",
+				"row_click": "Show every score on board {Board}.",
+				"help": "**Showing boards we declared where the opening lead gave us at least one trick against the best double dummy (DD) lead.**",
+				"prompts": [
+					{
+						"prompt": "Show board, contract, declarer, lead, DD lead cost, tricks, DD tricks, score, pct. Show those boards we declared and DD lead cost >= 1.",
+						"try_next": [
+							{
+								"We Got Gifts": "@We_Got_Gifts"
+							},
+							{
+								"Boards We Declared": "@Boards_We_Declared"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
+						],
+						"sql": "SELECT Board, Contract, Declarer_Name, Lead, DD_Lead_Cost AS Tricks_Gifted, Tricks, DD_Tricks, Score_{Pair_Direction}, Pct_{Pair_Direction} FROM self WHERE Boards_We_Declared = True AND DD_Lead_Cost >= 1 ORDER BY DD_Lead_Cost DESC, Board"
+					}
+				],
+				"i18n": {
+					"fr": {
+						"title": "Levées offertes par l'entame adverse",
+						"help": "**Donnes que nous avons déclarées où l'entame nous a donné au moins une levée par rapport à la meilleure entame en double mort (DD).**"
+					}
+				}
+			},
+			"Lead_Rankings": {
+				"title": "Rank Leaders by Opening Lead Accuracy",
+				"help": "**Ranking players who made 4 or more opening leads by the tricks their leads gave up against the best double dummy (DD) lead.**",
+				"prompts": [
+					{
+						"prompt": "",
+						"try_next": [
+							{
+								"Opening Lead Accuracy": "@Opening_Lead_Summary"
+							},
+							{
+								"Rank Declarers by Pct": "@Declarer_Rankings"
+							}
+						],
+						"sql": "WITH leads AS (SELECT CASE Direction_OnLead WHEN 'N' THEN Player_ID_N WHEN 'E' THEN Player_ID_E WHEN 'S' THEN Player_ID_S WHEN 'W' THEN Player_ID_W END AS Leader_ID, CASE Direction_OnLead WHEN 'N' THEN Player_Name_N WHEN 'E' THEN Player_Name_E WHEN 'S' THEN Player_Name_S WHEN 'W' THEN Player_Name_W END AS Leader, Lead_Is_DD_Best, DD_Lead_Cost FROM self WHERE DD_Lead_Cost IS NOT NULL) SELECT Leader AS Name, COUNT(*) AS Leads, ROUND(AVG(CAST(Lead_Is_DD_Best AS INT)), 2) AS Pct_DD_Best, ROUND(AVG(DD_Lead_Cost), 2) AS Avg_DD_Lead_Cost, SUM(DD_Lead_Cost) AS Tricks_Given_Up, Leader_ID FROM leads WHERE Leader_ID IS NOT NULL GROUP BY Leader_ID, Leader HAVING COUNT(*) >= 4 ORDER BY Avg_DD_Lead_Cost, Pct_DD_Best DESC, Leads DESC"
+					}
+				],
+				"i18n": {
+					"fr": {
+						"title": "Classement des joueurs par précision d'entame",
+						"help": "**Classement des joueurs ayant fait au moins 4 entames, selon les levées perdues par rapport à la meilleure entame en double mort (DD).**"
+					}
+				}
+			},
+			"Field_Leads_On_Our_Boards": {
+				"title": "Leads at Other Tables on Boards We Defended",
+				"row_click": "Show every score on board {Board}.",
+				"help": "**Showing the leads made at other tables against the same strain from the same seat on boards we defended. Leads chosen at fewer than 5% of those tables are left out unless they were ours.**",
+				"prompts": [
+					{
+						"prompt": "",
+						"try_next": [
+							{
+								"Our Opening Leads": "@Our_Opening_Leads"
+							},
+							{
+								"Leads That Cost Tricks": "@Our_Costly_Leads"
+							}
+						],
+						"sql": "WITH ours AS (SELECT Board, BidSuit, Direction_OnLead, Lead AS Our_Lead FROM self WHERE Boards_I_Played = True AND Boards_Opponent_Declared = True), field AS (SELECT s.Board, s.BidSuit AS Strain, s.Direction_OnLead AS Leader_Seat, s.Lead, s.Lead = o.Our_Lead AS Our_Lead, COUNT(*) AS Tables, ROUND(COUNT(*) / SUM(COUNT(*)) OVER (PARTITION BY s.Board), 2) AS Share, BOOL_AND(s.Lead_Is_DD_Best) AS Is_DD_Best, ROUND(AVG(s.DD_Lead_Cost), 2) AS Avg_DD_Lead_Cost FROM self s JOIN ours o ON s.Board = o.Board AND s.BidSuit = o.BidSuit AND s.Direction_OnLead = o.Direction_OnLead WHERE s.DD_Lead_Cost IS NOT NULL GROUP BY s.Board, s.BidSuit, s.Direction_OnLead, s.Lead, o.Our_Lead) SELECT * FROM field WHERE Our_Lead OR Share >= 0.05 ORDER BY Board, Tables DESC"
+					}
+				],
+				"i18n": {
+					"fr": {
+						"title": "Entames des autres tables sur nos donnes en défense",
+						"help": "**Entames faites aux autres tables contre la même dénomination depuis le même siège, sur les donnes où nous défendions. Les entames choisies à moins de 5 % de ces tables sont omises, sauf la nôtre.**"
+					}
+				}
+			},
 			"Overall_Rankings_Predictions": {
 				"title": "Overall Rankings Predictions",
 				"help": "**Club rank and predicted club rank, FFBridge's published global rank and our predicted global rank, and the published and predicted session percentages. Club_Rank, Global_Scratch_Rank, Global_Scratch_Pct, and the diffs are scratch, like the predictions. In a handicapped session, Handicap_Pct, Handicap_Club_Rank, and Handicap_Global_Rank are FFBridge's figures with the IV bonus; they are blank when the session has no handicap. Each diff is actual minus predicted. A positive Pct_Diff means the pair scored above the prediction. A positive Rank_Diff means the pair finished lower than predicted, because a smaller rank is better. Club_Rank_Pred ranks predictions against the club's predictions; pairs with the same Global_Scratch_Pct_Pred share a place. Global_Scratch_Rank_Pred ranks the pair's prediction against the published percentages of the national field. Pct_Pred_SD is the prediction's standard deviation in percentage points, and Pct_Pred_Low to Pct_Pred_High is its 95% range; it narrows as more boards are played. Low_Confidence is true when either player had fewer than 20 earlier sessions (Min_Prior_Sessions is the smaller of the two counts), the pair had fewer than 5 earlier sessions together (Pair_Prior_Sessions), or the ratings are more than 30 days old. Ratings_Age_Days is filled only while the session is not yet in the Elo build: the predictions then use each player's latest rating, and Ratings_Age_Days is the age of the older of the pair's two ratings. Global_Scratch_Pct_Forecast and Club_Rank_Forecast are the pre-game field forecast: the players' Elo only, no deals, as forecast before play; 50 is the average of the club's pairs in the same direction. Global_Scratch_Pct_Pred adds the deals and seats (the board model).**",

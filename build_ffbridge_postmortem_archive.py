@@ -30,7 +30,13 @@ class UnsupportedSessionError(ValueError):
 
 # Stage 1's hand-records cache, loaded once per worker process.
 _WORKER_HRS_CACHE: pl.DataFrame | None = None
+# Optional SD lead (SDLeadCache) and SuitC (SuitCCache) caches, one per worker.
+_WORKER_SD_LEAD: Any = None
+_WORKER_SUITC: Any = None
 PAR_COLUMNS = ("ParScore", "ParNumber", "ParContracts")
+# Stage 2 (build_ffbridge_club_parquets.py) keeps solved lead positions here,
+# under its output directory, the parent of the raw source directory.
+SD_LEAD_CACHE_DIRNAME = "ffbridge_sd_lead_cache"
 
 
 def load_dd_sd_cache(hrs_cache_path: pathlib.Path) -> pl.DataFrame:
@@ -54,8 +60,17 @@ def load_dd_sd_cache(hrs_cache_path: pathlib.Path) -> pl.DataFrame:
     )
 
 
-def _init_worker(hrs_cache_path_text: str) -> None:
-    global _WORKER_HRS_CACHE
+def _init_worker(
+    hrs_cache_path_text: str,
+    sd_lead_samples: int = 0,
+    sd_lead_dir_text: str | None = None,
+    suitc_workers: int = 0,
+) -> None:
+    """``sd_lead_samples`` > 0 adds the SD lead score from the cache in
+    ``sd_lead_dir_text``; ``suitc_workers`` > 0 adds the SuitC columns from the
+    shared SuitC cache, running at most that many SuitC programs for holdings
+    it lacks."""
+    global _WORKER_HRS_CACHE, _WORKER_SD_LEAD, _WORKER_SUITC
     # The augment library logs ~400 INFO lines per session; with 8 workers
     # that buries the progress bar. Import it first: its setup_logger sets
     # INFO at import time and would undo an earlier setLevel.
@@ -65,6 +80,19 @@ def _init_worker(hrs_cache_path_text: str) -> None:
 
     logging.getLogger("mlBridge.mlBridgeAugmentLib").setLevel(logging.WARNING)
     _WORKER_HRS_CACHE = load_dd_sd_cache(pathlib.Path(hrs_cache_path_text))
+    pipeline = _load_quality_pipeline()
+    if sd_lead_samples > 0:
+        if sd_lead_dir_text is None:
+            raise ValueError("SD lead samples given without an SD lead cache directory")
+        _WORKER_SD_LEAD = pipeline.make_sd_lead_cache(
+            sd_lead_samples, pathlib.Path(sd_lead_dir_text)
+        )
+    if suitc_workers > 0:
+        import mlBridge.mlBridgeSuitCLib  # noqa: F401
+
+        logging.getLogger("mlBridge.mlBridgeSuitCLib").setLevel(logging.WARNING)
+        _WORKER_SUITC = pipeline.make_suitc_cache()
+        _WORKER_SUITC.workers = suitc_workers
 
 
 def _session_hrs_cache(prepared: pl.DataFrame) -> pl.DataFrame:
@@ -220,7 +248,13 @@ def _prepare_session_worker(task: tuple[Any, ...]) -> dict[str, Any]:
                 "archive",
                 write_cache=False,
                 hrs_cache_df=_session_hrs_cache(prepared),
+                sd_lead=_WORKER_SD_LEAD,
+                suitc=_WORKER_SUITC,
             )
+            if _WORKER_SD_LEAD is not None:
+                # Keep newly solved positions; a part is written only when
+                # this session needed some the cache lacked.
+                _WORKER_SD_LEAD.flush()
             context = _session_context(metadata, raw)
             flat_record = archive.prepare_archive_session(
                 augmented,
@@ -339,6 +373,42 @@ def sd_refresh_session_ids(
     return set(ready["session_id"].to_list()), counts
 
 
+def lead_suitc_refresh_session_ids(
+    hierarchical_dir: pathlib.Path,
+    session_ids: list[str],
+    *,
+    sd_lead_samples: int,
+    suitc: bool,
+) -> tuple[set[str], dict[str, int]]:
+    """Archived sessions whose stored results lack the requested optional columns.
+
+    A session needs the SD lead score when ``sd_lead_samples`` > 0 and none of
+    its rows was scored with that many samples; it needs SuitC when ``suitc``
+    and no row has SC_Guess_Declarer.
+    """
+    latest = normalized.latest_hierarchical_manifest(hierarchical_dir).filter(
+        pl.col("session_id").is_in(pl.Series(session_ids, dtype=pl.String).implode())
+    )
+
+    def check(row: dict[str, Any]) -> tuple[str, bool, bool]:
+        stored = pl.read_parquet(
+            hierarchical_dir / str(row["results_path"]),
+            columns=["SD_Lead_Samples", "SC_Guess_Declarer"],
+        )
+        needs_sd = sd_lead_samples > 0 and stored["SD_Lead_Samples"].drop_nulls().max() != sd_lead_samples
+        needs_sc = suitc and stored["SC_Guess_Declarer"].is_not_null().sum() == 0
+        return str(row["session_id"]), needs_sd, needs_sc
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
+        checked = list(pool.map(check, latest.iter_rows(named=True)))
+    counts = {
+        "checked": len(checked),
+        "need_sd_lead": sum(sd for _session, sd, _sc in checked),
+        "need_suitc": sum(sc for _session, _sd, sc in checked),
+    }
+    return {session for session, sd, sc in checked if sd or sc}, counts
+
+
 def backfill_raw(
     source_dir: pathlib.Path,
     archive_dir: pathlib.Path,
@@ -351,9 +421,20 @@ def backfill_raw(
     workers: int = 1,
     commit_batch_size: int = 50,
     refresh_sd: bool = False,
+    sd_lead_samples: int = 0,
+    sd_lead_dir: pathlib.Path | None = None,
+    suitc: bool = False,
 ) -> dict[str, int]:
     """``refresh_sd`` also re-archives sessions stored with fewer SD samples than
-    DEFAULT_SD_PRODUCTIONS once the cache has more (see sd_refresh_session_ids)."""
+    DEFAULT_SD_PRODUCTIONS once the cache has more (see sd_refresh_session_ids).
+
+    ``sd_lead_samples`` > 0 adds the SD lead score (positions cached in
+    ``sd_lead_dir``) and ``suitc`` the SuitC columns; archived sessions stored
+    without them are re-archived (see lead_suitc_refresh_session_ids)."""
+    if (sd_lead_samples > 0 or suitc) and hierarchical_dir is None:
+        raise ValueError("SD lead and SuitC columns need --hierarchical-dir")
+    if sd_lead_samples > 0 and sd_lead_dir is None:
+        raise ValueError("SD lead samples need an SD lead cache directory")
     pipeline = _load_quality_pipeline()
     training_path = source_dir / "ffbridge_training_data_df.parquet"
     # Stage 1's audit manifest lists sessions already known complete, so their
@@ -412,6 +493,21 @@ def backfill_raw(
             "ffbridge_sd_backfill.py",
             flush=True,
         )
+    if sd_lead_samples > 0 or suitc:
+        assert hierarchical_dir is not None
+        lead_ids, lead_counts = lead_suitc_refresh_session_ids(
+            hierarchical_dir,
+            [s.session_id for s in audit.sessions if in_window(s) and s.session_id in hierarchical_ids],
+            sd_lead_samples=sd_lead_samples,
+            suitc=suitc,
+        )
+        print(
+            f"[archive-builder] lead/SuitC: {lead_counts['checked']} archived sessions checked; "
+            f"{lead_counts['need_sd_lead']} lack the SD lead score at {sd_lead_samples} samples, "
+            f"{lead_counts['need_suitc']} lack SuitC; re-archiving {len(lead_ids)}",
+            flush=True,
+        )
+        refresh_ids |= lead_ids
     candidates = [
         session
         for session in audit.sessions
@@ -453,10 +549,23 @@ def backfill_raw(
         f"DDSS_MAX_THREADS={os.environ['DDSS_MAX_THREADS']} x {workers} workers",
         flush=True,
     )
+    # Each worker's SuitC runs for uncached holdings share the cores like ddss.
+    suitc_workers = max(1, (os.cpu_count() or 1) // workers) if suitc else 0
+    print(
+        "[archive-builder] SD lead "
+        f"{f'{sd_lead_samples} samples, cache {sd_lead_dir}' if sd_lead_samples > 0 else 'off'}; "
+        f"SuitC {'on' if suitc else 'off'}",
+        flush=True,
+    )
     with concurrent.futures.ProcessPoolExecutor(
         max_workers=workers,
         initializer=_init_worker,
-        initargs=(str(hrs_cache_path),),
+        initargs=(
+            str(hrs_cache_path),
+            sd_lead_samples,
+            str(sd_lead_dir) if sd_lead_dir is not None else None,
+            suitc_workers,
+        ),
     ) as executor:
         futures = [executor.submit(_prepare_session_worker, task) for task in tasks]
         try:
@@ -560,6 +669,13 @@ def _execute(args: argparse.Namespace, root: pathlib.Path) -> int:
             workers=args.workers,
             commit_batch_size=args.commit_batch_size,
             refresh_sd=args.refresh_sd,
+            sd_lead_samples=args.sd_lead_samples,
+            sd_lead_dir=(
+                (args.sd_lead_dir or args.source_dir.parent / SD_LEAD_CACHE_DIRNAME).resolve()
+                if args.sd_lead_samples > 0
+                else None
+            ),
+            suitc=args.suitc,
         )
     result["indexes"] = archive.rebuild_indexes(root)
     if args.skip_compact:
@@ -613,6 +729,32 @@ def main() -> int:
             "the hand-records cache now has; each gets a new revision."
         ),
     )
+    parser.add_argument(
+        "--sd-lead-samples",
+        type=int,
+        default=0,
+        help=(
+            "Add the single-dummy lead score (SD_Lead_*) with this many samples; 0 = off. "
+            "Archived sessions without it are re-archived."
+        ),
+    )
+    parser.add_argument(
+        "--sd-lead-dir",
+        type=pathlib.Path,
+        default=None,
+        help=(
+            "Solved lead positions, shared with Club BridgeStats "
+            f"(default: the source dir's parent / {SD_LEAD_CACHE_DIRNAME})."
+        ),
+    )
+    parser.add_argument(
+        "--suitc",
+        action="store_true",
+        help=(
+            "Add the SuitC columns (SC_Guess_Declarer, DD_Tricks_Diff_SC) from the shared "
+            "SuitC cache. Archived sessions without them are re-archived."
+        ),
+    )
     parser.add_argument("--audit-only", action="store_true")
     parser.add_argument(
         "--from-cache",
@@ -644,6 +786,8 @@ def main() -> int:
         raise ValueError("--workers must be positive")
     if args.commit_batch_size < 1:
         raise ValueError("--commit-batch-size must be positive")
+    if args.sd_lead_samples < 0:
+        raise ValueError("--sd-lead-samples must not be negative")
     if args.skip_compact and args.force_compact:
         raise ValueError("--skip-compact and --force-compact are mutually exclusive")
     if args.since is not None and args.since > args.cutoff:

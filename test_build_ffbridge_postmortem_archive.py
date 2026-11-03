@@ -1,7 +1,10 @@
+from datetime import date
+
 import polars as pl
 import pytest
 
 import build_ffbridge_postmortem_archive as builder
+import ffbridge_postmortem_normalized as normalized
 
 
 def test_adjusted_and_passed_out_boards_are_accepted():
@@ -84,6 +87,40 @@ def test_sd_refresh_picks_sessions_the_cache_can_improve(tmp_path):
     ids, counts = builder.sd_refresh_session_ids(tmp_path, flat_rows, list(stored), cache, target=40)
     assert ids == {"s1"}
     assert counts == {"below_target": 3, "ready": 1, "waiting_for_cache": 2}
+
+
+def test_lead_suitc_refresh_picks_sessions_missing_the_columns(tmp_path):
+    # s1: scored at 20 with SuitC -> nothing to do.  s2: no SD lead, no SuitC.
+    # s3: SD lead at 10 samples.  s4: not asked about (outside the id list).
+    stored = {
+        "s1": ([20, None], [0.5, None]),
+        "s2": ([None, None], [None, None]),
+        "s3": ([10, 10], [0.2, 0.1]),
+        "s4": ([None], [None]),
+    }
+    rows = []
+    for session_id, (samples, guesses) in stored.items():
+        relative = f"fragments/{session_id}/results.parquet"
+        (tmp_path / relative).parent.mkdir(parents=True)
+        pl.DataFrame(
+            {"SD_Lead_Samples": samples, "SC_Guess_Declarer": guesses},
+            schema={"SD_Lead_Samples": pl.UInt16, "SC_Guess_Declarer": pl.Float32},
+        ).write_parquet(tmp_path / relative)
+        rows.append({
+            "session_id": session_id, "revision": "r1", "Date": date(2026, 10, 1), "year": 2026,
+            "series_id": None, "archived_at": "2026-11-03T00:00:00+00:00", "board_rows": 1,
+            "result_rows": len(samples), "boards_path": relative, "results_path": relative,
+        })
+    pl.DataFrame(rows, schema=normalized.HIERARCHICAL_MANIFEST_SCHEMA).write_parquet(tmp_path / "manifest.parquet")
+    ids, counts = builder.lead_suitc_refresh_session_ids(
+        tmp_path, ["s1", "s2", "s3"], sd_lead_samples=20, suitc=True
+    )
+    assert ids == {"s2", "s3"}
+    assert counts == {"checked": 3, "need_sd_lead": 2, "need_suitc": 1}
+    ids, counts = builder.lead_suitc_refresh_session_ids(
+        tmp_path, ["s1", "s2", "s3"], sd_lead_samples=0, suitc=True
+    )
+    assert ids == {"s2"}
 
 
 def test_session_hrs_cache_keeps_only_session_deals(monkeypatch):
