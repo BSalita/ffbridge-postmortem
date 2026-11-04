@@ -2406,7 +2406,7 @@ def _render_upcoming_entries_sidebar() -> None:
         st.sidebar.markdown(f"**{title}**")
         st.sidebar.caption(chrome_text("no_entries", "No upcoming entries for {name}.").format(name=_entries_player_name()))
         return
-    none_label = chrome_text("entry_none", "— show the game report —")
+    none_label = chrome_text("entry_none", "— select a game forecast —")
     options = {none_label: None}
     for row in rows:
         options[_entry_label(row)] = str(row["group_session_id"])
