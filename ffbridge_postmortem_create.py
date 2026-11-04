@@ -68,6 +68,41 @@ DEFAULT_HIERARCHICAL_DIR = postmortem_normalized.resolve_hierarchical_dir(
     DEFAULT_CACHE_DIR
 )
 DEFAULT_SD_PRODUCTIONS = 40
+# On-demand games get the same lead and SuitC columns as the pipeline archive,
+# so the lead / SuitC favorites work on a game played today.
+LEAD_SUITC_COLUMNS = ("DD_Lead_Cost", "SD_Lead_Cost", "SC_Guess_Declarer")
+SD_LEAD_SAMPLES = 20  # the archive's sample count, so its cached positions are reused
+SD_LEAD_DIR = pathlib.Path(
+    os.environ.get("FFBRIDGE_SD_LEAD_DIR", r"E:\bridge\data\ffbridge\ffbridge_sd_lead_cache")
+)
+_lead_caches: Optional[Dict[str, Any]] = None
+_lead_caches_lock = threading.Lock()
+# SDLeadCache and SuitCCache are not thread-safe; on-demand augmentations that
+# use them run one at a time.
+_lead_augment_lock = threading.Lock()
+
+
+def on_demand_lead_caches() -> Dict[str, Any]:
+    """{"sd_lead": SDLeadCache, "suitc": SuitCCache} shared by this process.
+
+    SD_LEAD_DIR (FFBRIDGE_SD_LEAD_DIR) and the SuitC cache (SUITC_CACHE_DIR)
+    must exist: they hold the archive's solved positions and holdings.
+    """
+    global _lead_caches
+    with _lead_caches_lock:
+        if _lead_caches is None:
+            from mlBridge import mlBridgeSuitCLib
+            from mlBridge.mlBridgeAugmentLib import SDLeadCache
+
+            suitc = mlBridgeSuitCLib.SuitCCache()
+            for name, directory in (("SD lead", SD_LEAD_DIR), ("SuitC", suitc.directory)):
+                if not directory.is_dir():
+                    raise FileNotFoundError(f"{name} cache directory not found: {directory}")
+            _lead_caches = {
+                "sd_lead": SDLeadCache(SD_LEAD_SAMPLES, "contract", SD_LEAD_DIR),
+                "suitc": suitc,
+            }
+        return _lead_caches
 FFBRIDGE_RESULTS_ORIGIN = "https://www.ffbridge.fr"
 
 
@@ -1227,8 +1262,9 @@ def cached_frame_usable(path: pathlib.Path) -> bool:
     if not path.is_file():
         return False
     schema = pl.read_parquet_schema(path)
-    if "DD_Lead_Cost" not in schema:
-        _log(f"{path.name} was built before opening leads were scored; rebuilding")
+    missing = [c for c in LEAD_SUITC_COLUMNS if c not in schema]
+    if missing:
+        _log(f"{path.name} lacks {missing} (built before lead / SuitC scoring); rebuilding")
         return False
     if PCT_SOURCE_COLUMN in schema:
         _log(f"{path.name} has provisional organizer percentages; rebuilding")
@@ -1508,7 +1544,13 @@ def augment_and_cache_mldf(
         sd_lead=sd_lead,
         suitc=suitc,
     )
-    df, _hrs = augmenter.perform_all_augmentations()
+    if sd_lead is None and suitc is None:
+        df, _hrs = augmenter.perform_all_augmentations()
+    else:
+        with _lead_augment_lock:
+            df, _hrs = augmenter.perform_all_augmentations()
+            if sd_lead is not None:
+                sd_lead.flush()  # keep newly solved lead positions
     _elapsed_if_slow(f"augment session {session_id}", t_aug)
     if pct_source is not None:
         df = df.with_columns(pl.lit(pct_source).alias(PCT_SOURCE_COLUMN))
@@ -1581,6 +1623,7 @@ def _create_organizer_postmortem(
             sd_productions=sd_productions,
             progress=augment_progress,
             lock_func=lock_func,
+            **on_demand_lead_caches(),
         )
     archive_result, hierarchical_result = _archive_frame(
         frame,
@@ -1689,6 +1732,7 @@ def create_lancelot_postmortem(
         sd_productions=sd_productions,
         progress=augment_progress,
         lock_func=lock_func,
+        **on_demand_lead_caches(),
     )
     archive_result, hierarchical_result = _archive_frame(
         df,

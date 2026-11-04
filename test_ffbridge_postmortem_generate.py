@@ -319,7 +319,12 @@ class GenerateJobTests(unittest.TestCase):
                 patch.object(
                     create.pl,
                     "read_parquet_schema",
-                    return_value={"Board": pl.Int64, "DD_Lead_Cost": pl.UInt8},
+                    return_value={
+                        "Board": pl.Int64,
+                        "DD_Lead_Cost": pl.UInt8,
+                        "SD_Lead_Cost": pl.Float32,
+                        "SC_Guess_Declarer": pl.Float32,
+                    },
                 ),
                 patch.object(
                     create.postmortem_archive,

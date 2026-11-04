@@ -579,13 +579,17 @@ class HierarchicalOpeningLeadTests(unittest.TestCase):
             cache_dir.mkdir()
             # A pre-upgrade cache file for an archived game must not win.
             _session_frame().write_parquet(cache_dir / "df-100-10.parquet")
+            # Nor may an older game in the flat archive once a newer game is cached.
+            flat = pathlib.Path(tmp) / "flat-archive"
+            archive.archive_session(_session_frame(), "099", archive_dir=flat)
+            archive.rebuild_indexes(flat)
             resolved = create.ResolvedPlayer(
                 lancelot_id="10", license_number="10", requested_id="10"
             )
             with (
                 patch.object(service, "HIERARCHICAL_DIR", production),
                 patch.object(service, "CACHE_DIR", cache_dir),
-                patch.object(archive, "DEFAULT_ARCHIVE_DIR", pathlib.Path(tmp) / "no-archive"),
+                patch.object(archive, "DEFAULT_ARCHIVE_DIR", flat),
                 patch.object(create, "resolve_player", return_value=resolved),
             ):
                 frame, meta = service.load_postmortem("10")

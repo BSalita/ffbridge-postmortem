@@ -251,10 +251,6 @@ def _prepare_session_worker(task: tuple[Any, ...]) -> dict[str, Any]:
                 sd_lead=_WORKER_SD_LEAD,
                 suitc=_WORKER_SUITC,
             )
-            if _WORKER_SD_LEAD is not None:
-                # Keep newly solved positions; a part is written only when
-                # this session needed some the cache lacked.
-                _WORKER_SD_LEAD.flush()
             context = _session_context(metadata, raw)
             flat_record = archive.prepare_archive_session(
                 augmented,

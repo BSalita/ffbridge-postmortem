@@ -632,14 +632,16 @@ def _newest_hierarchical_session(player_id: str) -> Optional[Tuple[str, str]]:
     return row["session_id"], str(row["Date"])
 
 
-def _newer_unarchived_game(player_id: str, archived_date: str) -> bool:
-    """True when a cached postmortem not in the hierarchical archive is a later game.
+def _newer_unarchived_game(player_id: str, archived_date: str) -> Optional[str]:
+    """Session id of the latest cached postmortem that is not in the hierarchical
+    archive and was played after ``archived_date``; None when there is none.
 
     Games played since the last archive run exist only as on-demand cache files.
     """
     archived = set(
         normalized.latest_hierarchical_manifest(HIERARCHICAL_DIR)["session_id"].cast(pl.Utf8)
     )
+    newest: Optional[Tuple[str, str]] = None  # (date, session_id)
     for entry in list_cached_postmortems(player_id):
         if entry["session_id"] in archived:
             continue
@@ -647,10 +649,10 @@ def _newer_unarchived_game(player_id: str, archived_date: str) -> bool:
             path = archive.resolve_archive_dir() / entry["file"]
         else:
             path = CACHE_DIR / entry["file"]
-        game_date = pl.read_parquet(path, columns=["Date"])["Date"].first()
-        if str(game_date)[:10] > archived_date:
-            return True
-    return False
+        game_date = str(pl.read_parquet(path, columns=["Date"])["Date"].first())[:10]
+        if game_date > archived_date and (newest is None or game_date > newest[0]):
+            newest = (game_date, entry["session_id"])
+    return newest[1] if newest is not None else None
 
 
 def load_postmortem(player_id: str, session_id: Optional[str] = None) -> Tuple[pl.DataFrame, Dict[str, Any]]:
@@ -662,8 +664,11 @@ def load_postmortem(player_id: str, session_id: Optional[str] = None) -> Tuple[p
     """
     if session_id is None:
         newest = _newest_hierarchical_session(str(player_id))
-        if newest is not None and not _newer_unarchived_game(str(player_id), newest[1]):
-            return _load_hierarchical_postmortem(str(player_id), newest[0])
+        if newest is not None:
+            newer = _newer_unarchived_game(str(player_id), newest[1])
+            if newer is None:
+                return _load_hierarchical_postmortem(str(player_id), newest[0])
+            session_id = newer
     if session_id is not None:
         try:
             return _load_hierarchical_postmortem(str(player_id), str(session_id))

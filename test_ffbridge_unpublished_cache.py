@@ -52,8 +52,9 @@ class UnpublishedResultsCacheTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             stale = pathlib.Path(tmp) / "df-300760-56959.parquet"
             good = pathlib.Path(tmp) / "df-300759-56959.parquet"
-            pl.DataFrame({"Board": [1, 2], "Pct_NS": [0.0, 0.0], "DD_Lead_Cost": [0, 1]}).write_parquet(stale)
-            pl.DataFrame({"Board": [1, 2], "Pct_NS": [0.0, 0.55], "DD_Lead_Cost": [0, 1]}).write_parquet(good)
+            scored = {"DD_Lead_Cost": [0, 1], "SD_Lead_Cost": [0.0, 0.5], "SC_Guess_Declarer": [0.1, 0.2]}
+            pl.DataFrame({"Board": [1, 2], "Pct_NS": [0.0, 0.0], **scored}).write_parquet(stale)
+            pl.DataFrame({"Board": [1, 2], "Pct_NS": [0.0, 0.55], **scored}).write_parquet(good)
             self.assertFalse(create.cached_frame_usable(stale))
             self.assertTrue(create.cached_frame_usable(good))
             self.assertFalse(create.cached_frame_usable(pathlib.Path(tmp) / "missing.parquet"))
@@ -62,6 +63,12 @@ class UnpublishedResultsCacheTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             old = pathlib.Path(tmp) / "df-271195-56959.parquet"
             pl.DataFrame({"Board": [1, 2], "Pct_NS": [0.45, 0.55], "Lead": ["SA", "H2"]}).write_parquet(old)
+            self.assertFalse(create.cached_frame_usable(old))
+
+    def test_a_game_built_before_sd_lead_and_suitc_is_not_reused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            old = pathlib.Path(tmp) / "df-288738-246273.parquet"
+            pl.DataFrame({"Board": [1, 2], "Pct_NS": [0.45, 0.55], "DD_Lead_Cost": [0, 1]}).write_parquet(old)
             self.assertFalse(create.cached_frame_usable(old))
 
 

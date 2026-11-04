@@ -1934,6 +1934,7 @@ def _finalize_mldf_for_report(df: pl.DataFrame) -> bool:
                 progress=st.progress(0),
                 lock_func=perform_hand_augmentations_queue,
                 write_cache=not st.session_state.do_not_cache_df,
+                **pm_create.on_demand_lead_caches(),
             )
         if df is not None:
             st.session_state.df_ready = True

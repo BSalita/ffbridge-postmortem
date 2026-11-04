@@ -1381,13 +1381,16 @@
 			"Our_Opening_Leads": {
 				"title": "Our Opening Leads",
 				"row_click": "Show every score on board {Board}.",
-				"help": "**Showing the opening leads {player1_name} and {player2_name} made. DD_Lead_Cost is the tricks the lead gave up against the best double dummy (DD) lead; Field columns show how the other tables did on the same board.**",
+				"help": "**Showing the opening leads {player1_name} and {player2_name} made. SD_Lead_Cost is the tricks the lead gave up, on average over sampled layouts, against the best lead from the leader's own hand (single dummy (SD)); SD_Lead_Best_Card is that lead and SD_Lead_Rank where ours ranked. DD_Lead_Cost compares with the best lead seeing all four hands (double dummy (DD)). Set_Pct is how often the lead beats the contract. Field columns show how the other tables did on the same board.**",
 				"prompts": [
 					{
-						"prompt": "Show board, contract, leader, lead, DD lead cost, whether the lead was DD best, field DD best pct, tricks, DD tricks, pct. Show those boards we defended. Sort by DD lead cost descending.",
+						"prompt": "Show board, contract, leader, lead, SD lead cost, SD best card, SD rank, set pct, DD lead cost, whether the lead was DD best, field averages, tricks, DD tricks, pct. Show those boards we defended. Sort by SD lead cost descending.",
 						"try_next": [
 							{
 								"Leads That Cost Tricks": "@Our_Costly_Leads"
+							},
+							{
+								"Bad Lead or Bad Luck?": "@Lead_Bad_Or_Unlucky"
 							},
 							{
 								"Opening Lead Accuracy": "@Opening_Lead_Summary"
@@ -1399,50 +1402,50 @@
 								"Every score": "Show every score on board {Board}."
 							}
 						],
-						"sql": "WITH f AS (SELECT *, AVG(CAST(Lead_Is_DD_Best AS INT)) OVER (PARTITION BY Board) AS Field_DD_Best_Pct, AVG(DD_Lead_Cost) OVER (PARTITION BY Board) AS Field_Avg_DD_Lead_Cost FROM self) SELECT Board, Contract, CASE Direction_OnLead WHEN 'N' THEN Player_Name_N WHEN 'E' THEN Player_Name_E WHEN 'S' THEN Player_Name_S WHEN 'W' THEN Player_Name_W END AS Leader, Lead, DD_Lead_Cost, Lead_Is_DD_Best, ROUND(Field_DD_Best_Pct, 2) AS Field_DD_Best_Pct, ROUND(Field_Avg_DD_Lead_Cost, 2) AS Field_Avg_DD_Lead_Cost, Tricks, DD_Tricks, Pct_{Pair_Direction} FROM f WHERE Boards_I_Played = True AND Boards_Opponent_Declared = True ORDER BY DD_Lead_Cost DESC NULLS LAST, Board"
+						"sql": "WITH f AS (SELECT *, AVG(SD_Lead_Cost) OVER (PARTITION BY Board) AS Field_Avg_SD_Lead_Cost, AVG(CAST(Lead_Is_DD_Best AS INT)) OVER (PARTITION BY Board) AS Field_DD_Best_Pct FROM self) SELECT Board, Contract, CASE Direction_OnLead WHEN 'N' THEN Player_Name_N WHEN 'E' THEN Player_Name_E WHEN 'S' THEN Player_Name_S WHEN 'W' THEN Player_Name_W END AS Leader, Lead, ROUND(SD_Lead_Cost, 2) AS SD_Lead_Cost, SD_Lead_Best_Card, SD_Lead_Rank, ROUND(SD_Lead_Set_Pct, 2) AS Set_Pct, DD_Lead_Cost, Lead_Is_DD_Best, ROUND(Field_Avg_SD_Lead_Cost, 2) AS Field_Avg_SD_Lead_Cost, ROUND(Field_DD_Best_Pct, 2) AS Field_DD_Best_Pct, Tricks, DD_Tricks, Pct_{Pair_Direction} FROM f WHERE Boards_I_Played = True AND Boards_Opponent_Declared = True ORDER BY SD_Lead_Cost DESC NULLS LAST, DD_Lead_Cost DESC NULLS LAST, Board"
 					}
 				],
 				"i18n": {
 					"fr": {
 						"title": "Nos entames",
-						"help": "**Entames de {player1_name} et {player2_name}. DD_Lead_Cost : levées perdues par rapport à la meilleure entame en double mort (DD) ; les colonnes Field montrent les autres tables sur la même donne.**"
+						"help": "**Entames de {player1_name} et {player2_name}. SD_Lead_Cost : levées perdues en moyenne, sur des donnes simulées, par rapport à la meilleure entame vue de la main de l'entameur (simple mort (SD)) ; SD_Lead_Best_Card est cette entame et SD_Lead_Rank le rang de la nôtre. DD_Lead_Cost compare avec la meilleure entame en voyant les quatre mains (double mort (DD)). Set_Pct : fréquence à laquelle l'entame fait chuter le contrat. Les colonnes Field montrent les autres tables sur la même donne.**"
 					}
 				}
 			},
 			"Our_Costly_Leads": {
 				"title": "Our Leads That Cost Tricks",
 				"row_click": "Show every score on board {Board}.",
-				"help": "**Showing our opening leads that gave up at least one trick against the best double dummy (DD) lead.**",
+				"help": "**Showing our opening leads that gave up at least a quarter of a trick on average against the best single dummy (SD) lead from the leader's own hand. DD_Lead_Cost shows what the lead cost on the actual layout.**",
 				"prompts": [
 					{
-						"prompt": "Show board, contract, leader, lead, DD lead cost, field DD best pct, tricks, DD tricks, pct. Show those boards we defended and DD lead cost >= 1.",
+						"prompt": "Show board, contract, leader, lead, SD lead cost, SD best card, SD rank, set pct, DD lead cost, field averages, tricks, DD tricks, pct. Show those boards we defended and SD lead cost >= 0.25.",
 						"try_next": [
 							{
 								"Our Opening Leads": "@Our_Opening_Leads"
 							},
 							{
-								"Leads at Other Tables": "@Field_Leads_On_Our_Boards"
+								"Bad Lead or Bad Luck?": "@Lead_Bad_Or_Unlucky"
 							},
 							{
-								"Our Mistakes": "@Our_Mistakes"
+								"Leads at Other Tables": "@Field_Leads_On_Our_Boards"
 							},
 							{
 								"Every score": "Show every score on board {Board}."
 							}
 						],
-						"sql": "WITH f AS (SELECT *, AVG(CAST(Lead_Is_DD_Best AS INT)) OVER (PARTITION BY Board) AS Field_DD_Best_Pct, AVG(DD_Lead_Cost) OVER (PARTITION BY Board) AS Field_Avg_DD_Lead_Cost FROM self) SELECT Board, Contract, CASE Direction_OnLead WHEN 'N' THEN Player_Name_N WHEN 'E' THEN Player_Name_E WHEN 'S' THEN Player_Name_S WHEN 'W' THEN Player_Name_W END AS Leader, Lead, DD_Lead_Cost, Lead_Is_DD_Best, ROUND(Field_DD_Best_Pct, 2) AS Field_DD_Best_Pct, ROUND(Field_Avg_DD_Lead_Cost, 2) AS Field_Avg_DD_Lead_Cost, Tricks, DD_Tricks, Pct_{Pair_Direction} FROM f WHERE Boards_I_Played = True AND Boards_Opponent_Declared = True AND DD_Lead_Cost >= 1 ORDER BY DD_Lead_Cost DESC, Board"
+						"sql": "WITH f AS (SELECT *, AVG(SD_Lead_Cost) OVER (PARTITION BY Board) AS Field_Avg_SD_Lead_Cost, AVG(CAST(Lead_Is_DD_Best AS INT)) OVER (PARTITION BY Board) AS Field_DD_Best_Pct FROM self) SELECT Board, Contract, CASE Direction_OnLead WHEN 'N' THEN Player_Name_N WHEN 'E' THEN Player_Name_E WHEN 'S' THEN Player_Name_S WHEN 'W' THEN Player_Name_W END AS Leader, Lead, ROUND(SD_Lead_Cost, 2) AS SD_Lead_Cost, SD_Lead_Best_Card, SD_Lead_Rank, ROUND(SD_Lead_Set_Pct, 2) AS Set_Pct, DD_Lead_Cost, Lead_Is_DD_Best, ROUND(Field_Avg_SD_Lead_Cost, 2) AS Field_Avg_SD_Lead_Cost, ROUND(Field_DD_Best_Pct, 2) AS Field_DD_Best_Pct, Tricks, DD_Tricks, Pct_{Pair_Direction} FROM f WHERE Boards_I_Played = True AND Boards_Opponent_Declared = True AND ROUND(SD_Lead_Cost, 2) >= 0.25 ORDER BY SD_Lead_Cost DESC, Board"
 					}
 				],
 				"i18n": {
 					"fr": {
 						"title": "Nos entames qui ont coûté des levées",
-						"help": "**Nos entames qui ont perdu au moins une levée par rapport à la meilleure entame en double mort (DD).**"
+						"help": "**Nos entames qui ont perdu au moins un quart de levée en moyenne par rapport à la meilleure entame en simple mort (SD), vue de la main de l'entameur. DD_Lead_Cost montre le coût de l'entame sur la donne réelle.**"
 					}
 				}
 			},
 			"Opening_Lead_Summary": {
 				"title": "Opening Lead Accuracy: Me, Partner and Field",
-				"help": "**Showing how often {player1_name} and {player2_name} found the best double dummy (DD) lead and the tricks their leads gave up, next to the whole field's averages.**",
+				"help": "**Showing how often {player1_name} and {player2_name} found the best lead from their own hand (single dummy (SD)) and seeing all four hands (double dummy (DD)), and the tricks their leads gave up, next to the whole field's averages. Avg_Luck above 0 means the layouts helped our leads.**",
 				"prompts": [
 					{
 						"prompt": "",
@@ -1451,16 +1454,19 @@
 								"Our Opening Leads": "@Our_Opening_Leads"
 							},
 							{
+								"Bad Lead or Bad Luck?": "@Lead_Bad_Or_Unlucky"
+							},
+							{
 								"Rank Leaders": "@Lead_Rankings"
 							}
 						],
-						"sql": "SELECT CASE WHEN Direction_OnLead = '{Player_Direction}' THEN 'Me' WHEN Direction_OnLead = '{Partner_Direction}' THEN 'Partner' END AS Leader, COUNT(*) AS Leads, COUNT(DD_Lead_Cost) AS Scored, ROUND(AVG(CAST(Lead_Is_DD_Best AS INT)), 2) AS Pct_DD_Best, ROUND(AVG(DD_Lead_Cost), 2) AS Avg_DD_Lead_Cost, SUM(DD_Lead_Cost) AS Tricks_Given_Up, (SELECT ROUND(AVG(CAST(Lead_Is_DD_Best AS INT)), 2) FROM self) AS Field_Pct_DD_Best, (SELECT ROUND(AVG(DD_Lead_Cost), 2) FROM self) AS Field_Avg_DD_Lead_Cost FROM self WHERE Boards_I_Played = True AND Boards_Opponent_Declared = True GROUP BY ALL ORDER BY Leader"
+						"sql": "SELECT CASE WHEN Direction_OnLead = '{Player_Direction}' THEN 'Me' WHEN Direction_OnLead = '{Partner_Direction}' THEN 'Partner' END AS Leader, COUNT(*) AS Leads, ROUND(AVG(CAST(SD_Lead_Is_Best AS INT)), 2) AS Pct_SD_Best, ROUND(AVG(SD_Lead_Cost), 2) AS Avg_SD_Lead_Cost, ROUND(AVG(SD_Lead_Luck), 2) AS Avg_Luck, ROUND(AVG(CAST(Lead_Is_DD_Best AS INT)), 2) AS Pct_DD_Best, ROUND(AVG(DD_Lead_Cost), 2) AS Avg_DD_Lead_Cost, (SELECT ROUND(AVG(CAST(SD_Lead_Is_Best AS INT)), 2) FROM self) AS Field_Pct_SD_Best, (SELECT ROUND(AVG(SD_Lead_Cost), 2) FROM self) AS Field_Avg_SD_Lead_Cost, (SELECT ROUND(AVG(CAST(Lead_Is_DD_Best AS INT)), 2) FROM self) AS Field_Pct_DD_Best, (SELECT ROUND(AVG(DD_Lead_Cost), 2) FROM self) AS Field_Avg_DD_Lead_Cost FROM self WHERE Boards_I_Played = True AND Boards_Opponent_Declared = True GROUP BY ALL ORDER BY Leader"
 					}
 				],
 				"i18n": {
 					"fr": {
 						"title": "Précision des entames : moi, mon partenaire et le champ",
-						"help": "**Fréquence à laquelle {player1_name} et {player2_name} ont trouvé la meilleure entame en double mort (DD) et levées perdues, comparées aux moyennes du champ.**"
+						"help": "**Fréquence à laquelle {player1_name} et {player2_name} ont trouvé la meilleure entame vue de leur main (simple mort (SD)) et en voyant les quatre mains (double mort (DD)), et levées perdues, comparées aux moyennes du champ. Avg_Luck supérieur à 0 : les donnes ont aidé nos entames.**"
 					}
 				}
 			},
@@ -1494,7 +1500,7 @@
 			},
 			"Lead_Rankings": {
 				"title": "Rank Leaders by Opening Lead Accuracy",
-				"help": "**Ranking players who made 4 or more opening leads by the tricks their leads gave up against the best double dummy (DD) lead.**",
+				"help": "**Ranking players who made 4 or more opening leads by the tricks their leads gave up against the best lead from their own hand (single dummy (SD)), which does not reward guessing the layout. The double dummy (DD) columns compare with the best lead seeing all four hands.**",
 				"prompts": [
 					{
 						"prompt": "",
@@ -1503,16 +1509,16 @@
 								"Opening Lead Accuracy": "@Opening_Lead_Summary"
 							},
 							{
-								"Rank Declarers by Pct": "@Declarer_Rankings"
+								"Rank Declarers by SuitC": "@Declarer_Rankings_SuitC"
 							}
 						],
-						"sql": "WITH leads AS (SELECT CASE Direction_OnLead WHEN 'N' THEN Player_ID_N WHEN 'E' THEN Player_ID_E WHEN 'S' THEN Player_ID_S WHEN 'W' THEN Player_ID_W END AS Leader_ID, CASE Direction_OnLead WHEN 'N' THEN Player_Name_N WHEN 'E' THEN Player_Name_E WHEN 'S' THEN Player_Name_S WHEN 'W' THEN Player_Name_W END AS Leader, Lead_Is_DD_Best, DD_Lead_Cost FROM self WHERE DD_Lead_Cost IS NOT NULL) SELECT Leader AS Name, COUNT(*) AS Leads, ROUND(AVG(CAST(Lead_Is_DD_Best AS INT)), 2) AS Pct_DD_Best, ROUND(AVG(DD_Lead_Cost), 2) AS Avg_DD_Lead_Cost, SUM(DD_Lead_Cost) AS Tricks_Given_Up, Leader_ID FROM leads WHERE Leader_ID IS NOT NULL GROUP BY Leader_ID, Leader HAVING COUNT(*) >= 4 ORDER BY Avg_DD_Lead_Cost, Pct_DD_Best DESC, Leads DESC"
+						"sql": "WITH leads AS (SELECT CASE Direction_OnLead WHEN 'N' THEN Player_ID_N WHEN 'E' THEN Player_ID_E WHEN 'S' THEN Player_ID_S WHEN 'W' THEN Player_ID_W END AS Leader_ID, CASE Direction_OnLead WHEN 'N' THEN Player_Name_N WHEN 'E' THEN Player_Name_E WHEN 'S' THEN Player_Name_S WHEN 'W' THEN Player_Name_W END AS Leader, SD_Lead_Is_Best, SD_Lead_Cost, Lead_Is_DD_Best, DD_Lead_Cost FROM self WHERE SD_Lead_Cost IS NOT NULL) SELECT Leader AS Name, COUNT(*) AS Leads, ROUND(AVG(SD_Lead_Cost), 2) AS Avg_SD_Lead_Cost, ROUND(AVG(CAST(SD_Lead_Is_Best AS INT)), 2) AS Pct_SD_Best, ROUND(AVG(DD_Lead_Cost), 2) AS Avg_DD_Lead_Cost, ROUND(AVG(CAST(Lead_Is_DD_Best AS INT)), 2) AS Pct_DD_Best, Leader_ID FROM leads WHERE Leader_ID IS NOT NULL GROUP BY Leader_ID, Leader HAVING COUNT(*) >= 4 ORDER BY Avg_SD_Lead_Cost, Pct_SD_Best DESC, Leads DESC"
 					}
 				],
 				"i18n": {
 					"fr": {
 						"title": "Classement des joueurs par précision d'entame",
-						"help": "**Classement des joueurs ayant fait au moins 4 entames, selon les levées perdues par rapport à la meilleure entame en double mort (DD).**"
+						"help": "**Classement des joueurs ayant fait au moins 4 entames, selon les levées perdues par rapport à la meilleure entame vue de leur main (simple mort (SD)), qui ne récompense pas la chance. Les colonnes double mort (DD) comparent avec la meilleure entame en voyant les quatre mains.**"
 					}
 				}
 			},
@@ -1538,6 +1544,145 @@
 					"fr": {
 						"title": "Entames des autres tables sur nos donnes en défense",
 						"help": "**Entames faites aux autres tables contre la même dénomination depuis le même siège, sur les donnes où nous défendions. Les entames choisies à moins de 5 % de ces tables sont omises, sauf la nôtre.**"
+					}
+				}
+			},
+			"Lead_Bad_Or_Unlucky": {
+				"title": "Bad Lead or Bad Luck?",
+				"row_click": "Show every score on board {Board}.",
+				"help": "**Judging each opening lead {player1_name} and {player2_name} made. Costly choice: a poor lead from the leader's hand (single dummy (SD), at least a quarter of a trick on average) that also cost a trick on the actual layout (double dummy (DD)). Poor choice, layout forgave it: poor by SD but cost nothing here. Good choice, unlucky layout: the best SD lead, but it cost a trick on this layout. Luck above 0 means the layout helped the defence.**",
+				"prompts": [
+					{
+						"prompt": "",
+						"try_next": [
+							{
+								"Our Opening Leads": "@Our_Opening_Leads"
+							},
+							{
+								"Missed Setting Leads": "@Missed_Setting_Leads"
+							},
+							{
+								"Opponents' Leads": "@Opponents_Leads_SD"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
+						],
+						"sql": "WITH v AS (SELECT Board, Contract, CASE Direction_OnLead WHEN 'N' THEN Player_Name_N WHEN 'E' THEN Player_Name_E WHEN 'S' THEN Player_Name_S WHEN 'W' THEN Player_Name_W END AS Leader, Lead, SD_Lead_Best_Card, ROUND(SD_Lead_Cost, 2) AS SD_Lead_Cost, DD_Lead_Cost, ROUND(SD_Lead_Luck, 2) AS Luck, CASE WHEN ROUND(SD_Lead_Cost, 2) >= 0.25 AND DD_Lead_Cost >= 1 THEN 'Costly choice' WHEN ROUND(SD_Lead_Cost, 2) >= 0.25 THEN 'Poor choice, layout forgave it' WHEN DD_Lead_Cost >= 1 THEN 'Good choice, unlucky layout' ELSE 'Fine' END AS Verdict, Pct_{Pair_Direction} FROM self WHERE Boards_I_Played = True AND Boards_Opponent_Declared = True AND SD_Lead_Cost IS NOT NULL) SELECT * FROM v ORDER BY CASE Verdict WHEN 'Costly choice' THEN 1 WHEN 'Poor choice, layout forgave it' THEN 2 WHEN 'Good choice, unlucky layout' THEN 3 ELSE 4 END, SD_Lead_Cost DESC, Board"
+					}
+				],
+				"i18n": {
+					"fr": {
+						"title": "Mauvaise entame ou malchance ?",
+						"help": "**Verdict sur chaque entame de {player1_name} et {player2_name}. Costly choice : entame faible vue de la main de l'entameur (simple mort (SD), au moins un quart de levée en moyenne) qui a aussi coûté une levée sur la donne réelle (double mort (DD)). Poor choice, layout forgave it : faible en SD mais sans coût ici. Good choice, unlucky layout : la meilleure entame SD, mais elle a coûté une levée sur cette donne. Luck supérieur à 0 : la donne a aidé la défense.**"
+					}
+				}
+			},
+			"Missed_Setting_Leads": {
+				"title": "Leads That Missed a Better Chance to Set",
+				"row_click": "Show every score on board {Board}.",
+				"help": "**Showing our opening leads where another card beat the contract at least 15 points more often over the sampled layouts (single dummy (SD)). Best_Set_Pct is the best chance any lead had; SD_Lead_Best_Card is the lead that takes the most tricks on average, usually the same card.**",
+				"prompts": [
+					{
+						"prompt": "",
+						"try_next": [
+							{
+								"Bad Lead or Bad Luck?": "@Lead_Bad_Or_Unlucky"
+							},
+							{
+								"Leads at Other Tables": "@Field_Leads_On_Our_Boards"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
+						],
+						"sql": "SELECT Board, Contract, CASE Direction_OnLead WHEN 'N' THEN Player_Name_N WHEN 'E' THEN Player_Name_E WHEN 'S' THEN Player_Name_S WHEN 'W' THEN Player_Name_W END AS Leader, Lead, ROUND(SD_Lead_Set_Pct, 2) AS Set_Pct, ROUND(SD_Lead_Best_Set_Pct, 2) AS Best_Set_Pct, ROUND(SD_Lead_Set_Cost, 2) AS Set_Pct_Lost, SD_Lead_Best_Card, ROUND(SD_Lead_Cost, 2) AS SD_Lead_Cost, CASE WHEN Tricks >= BidLvl + 6 THEN 'Made' ELSE 'Set' END AS Result, Pct_{Pair_Direction} FROM self WHERE Boards_I_Played = True AND Boards_Opponent_Declared = True AND ROUND(SD_Lead_Set_Cost, 2) >= 0.15 ORDER BY SD_Lead_Set_Cost DESC, Board"
+					}
+				],
+				"i18n": {
+					"fr": {
+						"title": "Entames qui ont manqué une meilleure chance de chute",
+						"help": "**Nos entames pour lesquelles une autre carte faisait chuter le contrat au moins 15 points plus souvent sur les donnes simulées (simple mort (SD)). Best_Set_Pct : la meilleure chance offerte par une entame ; SD_Lead_Best_Card : l'entame qui fait le plus de levées en moyenne, généralement la même carte.**"
+					}
+				}
+			},
+			"Opponents_Leads_SD": {
+				"title": "Opponents' Leads: Gift or Good Luck?",
+				"row_click": "Show every score on board {Board}.",
+				"help": "**Judging the opponents' opening leads on boards we declared. A lead that was poor from the leader's hand (single dummy (SD)) was a gift; one that was the best SD lead but still cost a trick on the actual layout (double dummy (DD)) was luck for us.**",
+				"prompts": [
+					{
+						"prompt": "",
+						"try_next": [
+							{
+								"Tricks the Opponents' Leads Gave Us": "@Opponents_Lead_Gifts"
+							},
+							{
+								"Our Declarer Play vs SuitC": "@Declarer_Play_SuitC"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
+						],
+						"sql": "WITH v AS (SELECT Board, Contract, Declarer_Name, CASE Direction_OnLead WHEN 'N' THEN Player_Name_N WHEN 'E' THEN Player_Name_E WHEN 'S' THEN Player_Name_S WHEN 'W' THEN Player_Name_W END AS Leader, Lead, SD_Lead_Best_Card, ROUND(SD_Lead_Cost, 2) AS SD_Lead_Cost, DD_Lead_Cost, ROUND(SD_Lead_Luck, 2) AS Luck, CASE WHEN ROUND(SD_Lead_Cost, 2) >= 0.25 AND DD_Lead_Cost >= 1 THEN 'Costly choice' WHEN ROUND(SD_Lead_Cost, 2) >= 0.25 THEN 'Poor choice, layout forgave it' WHEN DD_Lead_Cost >= 1 THEN 'Good choice, unlucky layout' ELSE 'Fine' END AS Verdict, Tricks, DD_Tricks, Pct_{Pair_Direction} FROM self WHERE Boards_We_Declared = True AND SD_Lead_Cost IS NOT NULL) SELECT * FROM v ORDER BY CASE Verdict WHEN 'Costly choice' THEN 1 WHEN 'Poor choice, layout forgave it' THEN 2 WHEN 'Good choice, unlucky layout' THEN 3 ELSE 4 END, SD_Lead_Cost DESC, Board"
+					}
+				],
+				"i18n": {
+					"fr": {
+						"title": "Entames adverses : cadeau ou chance ?",
+						"help": "**Verdict sur les entames adverses quand nous avons déclaré. Une entame faible vue de la main de l'entameur (simple mort (SD)) était un cadeau ; la meilleure entame SD qui a quand même coûté une levée sur la donne réelle (double mort (DD)) était de la chance pour nous.**"
+					}
+				}
+			},
+			"Declarer_Play_SuitC": {
+				"title": "Our Declarer Play vs SuitC",
+				"row_click": "Show every score on board {Board}.",
+				"help": "**Showing boards we declared. Guess_Tricks is the tricks a declarer who cannot see the defenders' cards should expect to lose to guesses (SuitC, each suit on its own); vs_SuitC is tricks taken minus double dummy (DD) tricks plus Guess_Tricks, so 0 or more is par for a real declarer. Misplay means vs_SuitC is -0.5 or worse.**",
+				"prompts": [
+					{
+						"prompt": "",
+						"try_next": [
+							{
+								"Rank Declarers by SuitC": "@Declarer_Rankings_SuitC"
+							},
+							{
+								"Boards We Declared": "@Boards_We_Declared"
+							},
+							{
+								"Every score": "Show every score on board {Board}."
+							}
+						],
+						"sql": "SELECT Board, Contract, Declarer_Name, Lead, Tricks, DD_Tricks, Tricks - DD_Tricks AS vs_DD, ROUND(SC_Guess_Declarer, 2) AS Guess_Tricks, ROUND(DD_Tricks_Diff_SC, 2) AS vs_SuitC, CASE WHEN Tricks > DD_Tricks THEN 'Gift from the defence' WHEN Tricks = DD_Tricks THEN 'Made DD tricks' WHEN DD_Tricks_Diff_SC > -0.5 THEN 'Lost to a guess' ELSE 'Misplay' END AS Verdict, Pct_{Pair_Direction} FROM self WHERE Boards_We_Declared = True AND SC_Guess_Declarer IS NOT NULL ORDER BY DD_Tricks_Diff_SC, Board"
+					}
+				],
+				"i18n": {
+					"fr": {
+						"title": "Notre jeu de la carte face à SuitC",
+						"help": "**Donnes que nous avons déclarées. Guess_Tricks : levées qu'un déclarant qui ne voit pas les cartes adverses doit s'attendre à perdre sur des devinettes (SuitC, couleur par couleur) ; vs_SuitC : levées faites moins levées en double mort (DD) plus Guess_Tricks, donc 0 ou plus est le par pour un vrai déclarant. Misplay : vs_SuitC de -0,5 ou moins.**"
+					}
+				}
+			},
+			"Declarer_Rankings_SuitC": {
+				"title": "Rank Declarers by SuitC",
+				"help": "**Ranking declarers who played 4 or more boards by tricks taken against what a declarer who cannot see the defenders' cards should expect (Avg_vs_SuitC: double dummy (DD) difference plus the SuitC guess allowance).**",
+				"prompts": [
+					{
+						"prompt": "",
+						"try_next": [
+							{
+								"Our Declarer Play vs SuitC": "@Declarer_Play_SuitC"
+							},
+							{
+								"Rank Declarers by Pct": "@Declarer_Rankings"
+							}
+						],
+						"sql": "SELECT Declarer_Name AS Name, COUNT(*) AS Boards, ROUND(AVG(DD_Tricks_Diff_SC), 2) AS Avg_vs_SuitC, ROUND(AVG(Tricks - DD_Tricks), 2) AS Avg_vs_DD, ROUND(AVG(SC_Guess_Declarer), 2) AS Avg_Guess_Tricks, ROUND(AVG(CASE WHEN Declarer_Direction IN ('N', 'S') THEN Pct_NS ELSE Pct_EW END), 2) AS Avg_Pct, Declarer_ID AS Declarer FROM self WHERE SC_Guess_Declarer IS NOT NULL AND Declarer_ID IS NOT NULL GROUP BY Declarer_ID, Declarer_Name HAVING COUNT(*) >= 4 ORDER BY Avg_vs_SuitC DESC"
+					}
+				],
+				"i18n": {
+					"fr": {
+						"title": "Classement des déclarants selon SuitC",
+						"help": "**Classement des déclarants ayant joué au moins 4 donnes, selon les levées faites par rapport à ce qu'un déclarant qui ne voit pas les cartes adverses doit attendre (Avg_vs_SuitC : écart au double mort (DD) plus la marge de devinette SuitC).**"
 					}
 				}
 			},
