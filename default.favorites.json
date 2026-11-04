@@ -1402,7 +1402,7 @@
 								"Every score": "Show every score on board {Board}."
 							}
 						],
-						"sql": "WITH f AS (SELECT *, AVG(SD_Lead_Cost) OVER (PARTITION BY Board) AS Field_Avg_SD_Lead_Cost, AVG(CAST(Lead_Is_DD_Best AS INT)) OVER (PARTITION BY Board) AS Field_DD_Best_Pct FROM self) SELECT Board, Contract, CASE Direction_OnLead WHEN 'N' THEN Player_Name_N WHEN 'E' THEN Player_Name_E WHEN 'S' THEN Player_Name_S WHEN 'W' THEN Player_Name_W END AS Leader, Lead, ROUND(SD_Lead_Cost, 2) AS SD_Lead_Cost, SD_Lead_Best_Card, SD_Lead_Rank, ROUND(SD_Lead_Set_Pct, 2) AS Set_Pct, DD_Lead_Cost, Lead_Is_DD_Best, ROUND(Field_Avg_SD_Lead_Cost, 2) AS Field_Avg_SD_Lead_Cost, ROUND(Field_DD_Best_Pct, 2) AS Field_DD_Best_Pct, Tricks, DD_Tricks, Pct_{Pair_Direction} FROM f WHERE Boards_I_Played = True AND Boards_Opponent_Declared = True ORDER BY SD_Lead_Cost DESC NULLS LAST, DD_Lead_Cost DESC NULLS LAST, Board"
+						"sql": "WITH f AS (SELECT *, AVG(SD_Lead_Cost) OVER (PARTITION BY Board) AS Field_Avg_SD_Lead_Cost, AVG(CAST(Lead_Is_DD_Best AS INT)) OVER (PARTITION BY Board) AS Field_DD_Best_Pct FROM self) SELECT Board, Contract, CASE Direction_OnLead WHEN 'N' THEN Player_Name_N WHEN 'E' THEN Player_Name_E WHEN 'S' THEN Player_Name_S WHEN 'W' THEN Player_Name_W END AS Leader, Lead, ROUND(SD_Lead_Cost::DOUBLE, 2) AS SD_Lead_Cost, SD_Lead_Best_Card, SD_Lead_Rank, ROUND(SD_Lead_Set_Pct::DOUBLE, 2) AS Set_Pct, DD_Lead_Cost, Lead_Is_DD_Best, ROUND(Field_Avg_SD_Lead_Cost, 2) AS Field_Avg_SD_Lead_Cost, ROUND(Field_DD_Best_Pct, 2) AS Field_DD_Best_Pct, Tricks, DD_Tricks, ROUND(Pct_{Pair_Direction}, 4) AS Pct_{Pair_Direction} FROM f WHERE Boards_I_Played = True AND Boards_Opponent_Declared = True ORDER BY SD_Lead_Cost DESC NULLS LAST, DD_Lead_Cost DESC NULLS LAST, Board"
 					}
 				],
 				"i18n": {
@@ -1433,7 +1433,7 @@
 								"Every score": "Show every score on board {Board}."
 							}
 						],
-						"sql": "WITH f AS (SELECT *, AVG(SD_Lead_Cost) OVER (PARTITION BY Board) AS Field_Avg_SD_Lead_Cost, AVG(CAST(Lead_Is_DD_Best AS INT)) OVER (PARTITION BY Board) AS Field_DD_Best_Pct FROM self) SELECT Board, Contract, CASE Direction_OnLead WHEN 'N' THEN Player_Name_N WHEN 'E' THEN Player_Name_E WHEN 'S' THEN Player_Name_S WHEN 'W' THEN Player_Name_W END AS Leader, Lead, ROUND(SD_Lead_Cost, 2) AS SD_Lead_Cost, SD_Lead_Best_Card, SD_Lead_Rank, ROUND(SD_Lead_Set_Pct, 2) AS Set_Pct, DD_Lead_Cost, Lead_Is_DD_Best, ROUND(Field_Avg_SD_Lead_Cost, 2) AS Field_Avg_SD_Lead_Cost, ROUND(Field_DD_Best_Pct, 2) AS Field_DD_Best_Pct, Tricks, DD_Tricks, Pct_{Pair_Direction} FROM f WHERE Boards_I_Played = True AND Boards_Opponent_Declared = True AND ROUND(SD_Lead_Cost, 2) >= 0.25 ORDER BY SD_Lead_Cost DESC, Board"
+						"sql": "WITH f AS (SELECT *, AVG(SD_Lead_Cost) OVER (PARTITION BY Board) AS Field_Avg_SD_Lead_Cost, AVG(CAST(Lead_Is_DD_Best AS INT)) OVER (PARTITION BY Board) AS Field_DD_Best_Pct FROM self) SELECT Board, Contract, CASE Direction_OnLead WHEN 'N' THEN Player_Name_N WHEN 'E' THEN Player_Name_E WHEN 'S' THEN Player_Name_S WHEN 'W' THEN Player_Name_W END AS Leader, Lead, ROUND(SD_Lead_Cost::DOUBLE, 2) AS SD_Lead_Cost, SD_Lead_Best_Card, SD_Lead_Rank, ROUND(SD_Lead_Set_Pct::DOUBLE, 2) AS Set_Pct, DD_Lead_Cost, Lead_Is_DD_Best, ROUND(Field_Avg_SD_Lead_Cost, 2) AS Field_Avg_SD_Lead_Cost, ROUND(Field_DD_Best_Pct, 2) AS Field_DD_Best_Pct, Tricks, DD_Tricks, ROUND(Pct_{Pair_Direction}, 4) AS Pct_{Pair_Direction} FROM f WHERE Boards_I_Played = True AND Boards_Opponent_Declared = True AND ROUND(SD_Lead_Cost::DOUBLE, 2) >= 0.25 ORDER BY SD_Lead_Cost DESC, Board"
 					}
 				],
 				"i18n": {
@@ -1488,7 +1488,7 @@
 								"Every score": "Show every score on board {Board}."
 							}
 						],
-						"sql": "SELECT Board, Contract, Declarer_Name, Lead, DD_Lead_Cost AS Tricks_Gifted, Tricks, DD_Tricks, Score_{Pair_Direction}, Pct_{Pair_Direction} FROM self WHERE Boards_We_Declared = True AND DD_Lead_Cost >= 1 ORDER BY DD_Lead_Cost DESC, Board"
+						"sql": "SELECT Board, Contract, Declarer_Name, Lead, DD_Lead_Cost AS Tricks_Gifted, Tricks, DD_Tricks, Score_{Pair_Direction}, ROUND(Pct_{Pair_Direction}, 4) AS Pct_{Pair_Direction} FROM self WHERE Boards_We_Declared = True AND DD_Lead_Cost >= 1 ORDER BY DD_Lead_Cost DESC, Board"
 					}
 				],
 				"i18n": {
@@ -1568,7 +1568,7 @@
 								"Every score": "Show every score on board {Board}."
 							}
 						],
-						"sql": "WITH v AS (SELECT Board, Contract, CASE Direction_OnLead WHEN 'N' THEN Player_Name_N WHEN 'E' THEN Player_Name_E WHEN 'S' THEN Player_Name_S WHEN 'W' THEN Player_Name_W END AS Leader, Lead, SD_Lead_Best_Card, ROUND(SD_Lead_Cost, 2) AS SD_Lead_Cost, DD_Lead_Cost, ROUND(SD_Lead_Luck, 2) AS Luck, CASE WHEN ROUND(SD_Lead_Cost, 2) >= 0.25 AND DD_Lead_Cost >= 1 THEN 'Costly choice' WHEN ROUND(SD_Lead_Cost, 2) >= 0.25 THEN 'Poor choice, layout forgave it' WHEN DD_Lead_Cost >= 1 THEN 'Good choice, unlucky layout' ELSE 'Fine' END AS Verdict, Pct_{Pair_Direction} FROM self WHERE Boards_I_Played = True AND Boards_Opponent_Declared = True AND SD_Lead_Cost IS NOT NULL) SELECT * FROM v ORDER BY CASE Verdict WHEN 'Costly choice' THEN 1 WHEN 'Poor choice, layout forgave it' THEN 2 WHEN 'Good choice, unlucky layout' THEN 3 ELSE 4 END, SD_Lead_Cost DESC, Board"
+						"sql": "WITH v AS (SELECT Board, Contract, CASE Direction_OnLead WHEN 'N' THEN Player_Name_N WHEN 'E' THEN Player_Name_E WHEN 'S' THEN Player_Name_S WHEN 'W' THEN Player_Name_W END AS Leader, Lead, SD_Lead_Best_Card, ROUND(SD_Lead_Cost::DOUBLE, 2) AS SD_Lead_Cost, DD_Lead_Cost, ROUND(SD_Lead_Luck::DOUBLE, 2) AS Luck, CASE WHEN ROUND(SD_Lead_Cost::DOUBLE, 2) >= 0.25 AND DD_Lead_Cost >= 1 THEN 'Costly choice' WHEN ROUND(SD_Lead_Cost::DOUBLE, 2) >= 0.25 THEN 'Poor choice, layout forgave it' WHEN DD_Lead_Cost >= 1 THEN 'Good choice, unlucky layout' ELSE 'Fine' END AS Verdict, ROUND(Pct_{Pair_Direction}, 4) AS Pct_{Pair_Direction} FROM self WHERE Boards_I_Played = True AND Boards_Opponent_Declared = True AND SD_Lead_Cost IS NOT NULL) SELECT * FROM v ORDER BY CASE Verdict WHEN 'Costly choice' THEN 1 WHEN 'Poor choice, layout forgave it' THEN 2 WHEN 'Good choice, unlucky layout' THEN 3 ELSE 4 END, SD_Lead_Cost DESC, Board"
 					}
 				],
 				"i18n": {
@@ -1596,7 +1596,7 @@
 								"Every score": "Show every score on board {Board}."
 							}
 						],
-						"sql": "SELECT Board, Contract, CASE Direction_OnLead WHEN 'N' THEN Player_Name_N WHEN 'E' THEN Player_Name_E WHEN 'S' THEN Player_Name_S WHEN 'W' THEN Player_Name_W END AS Leader, Lead, ROUND(SD_Lead_Set_Pct, 2) AS Set_Pct, ROUND(SD_Lead_Best_Set_Pct, 2) AS Best_Set_Pct, ROUND(SD_Lead_Set_Cost, 2) AS Set_Pct_Lost, SD_Lead_Best_Card, ROUND(SD_Lead_Cost, 2) AS SD_Lead_Cost, CASE WHEN Tricks >= BidLvl + 6 THEN 'Made' ELSE 'Set' END AS Result, Pct_{Pair_Direction} FROM self WHERE Boards_I_Played = True AND Boards_Opponent_Declared = True AND ROUND(SD_Lead_Set_Cost, 2) >= 0.15 ORDER BY SD_Lead_Set_Cost DESC, Board"
+						"sql": "SELECT Board, Contract, CASE Direction_OnLead WHEN 'N' THEN Player_Name_N WHEN 'E' THEN Player_Name_E WHEN 'S' THEN Player_Name_S WHEN 'W' THEN Player_Name_W END AS Leader, Lead, ROUND(SD_Lead_Set_Pct::DOUBLE, 2) AS Set_Pct, ROUND(SD_Lead_Best_Set_Pct::DOUBLE, 2) AS Best_Set_Pct, ROUND(SD_Lead_Set_Cost::DOUBLE, 2) AS Set_Pct_Lost, SD_Lead_Best_Card, ROUND(SD_Lead_Cost::DOUBLE, 2) AS SD_Lead_Cost, CASE WHEN Tricks >= BidLvl + 6 THEN 'Made' ELSE 'Set' END AS Result, ROUND(Pct_{Pair_Direction}, 4) AS Pct_{Pair_Direction} FROM self WHERE Boards_I_Played = True AND Boards_Opponent_Declared = True AND ROUND(SD_Lead_Set_Cost::DOUBLE, 2) >= 0.15 ORDER BY SD_Lead_Set_Cost DESC, Board"
 					}
 				],
 				"i18n": {
@@ -1624,7 +1624,7 @@
 								"Every score": "Show every score on board {Board}."
 							}
 						],
-						"sql": "WITH v AS (SELECT Board, Contract, Declarer_Name, CASE Direction_OnLead WHEN 'N' THEN Player_Name_N WHEN 'E' THEN Player_Name_E WHEN 'S' THEN Player_Name_S WHEN 'W' THEN Player_Name_W END AS Leader, Lead, SD_Lead_Best_Card, ROUND(SD_Lead_Cost, 2) AS SD_Lead_Cost, DD_Lead_Cost, ROUND(SD_Lead_Luck, 2) AS Luck, CASE WHEN ROUND(SD_Lead_Cost, 2) >= 0.25 AND DD_Lead_Cost >= 1 THEN 'Costly choice' WHEN ROUND(SD_Lead_Cost, 2) >= 0.25 THEN 'Poor choice, layout forgave it' WHEN DD_Lead_Cost >= 1 THEN 'Good choice, unlucky layout' ELSE 'Fine' END AS Verdict, Tricks, DD_Tricks, Pct_{Pair_Direction} FROM self WHERE Boards_We_Declared = True AND SD_Lead_Cost IS NOT NULL) SELECT * FROM v ORDER BY CASE Verdict WHEN 'Costly choice' THEN 1 WHEN 'Poor choice, layout forgave it' THEN 2 WHEN 'Good choice, unlucky layout' THEN 3 ELSE 4 END, SD_Lead_Cost DESC, Board"
+						"sql": "WITH v AS (SELECT Board, Contract, Declarer_Name, CASE Direction_OnLead WHEN 'N' THEN Player_Name_N WHEN 'E' THEN Player_Name_E WHEN 'S' THEN Player_Name_S WHEN 'W' THEN Player_Name_W END AS Leader, Lead, SD_Lead_Best_Card, ROUND(SD_Lead_Cost::DOUBLE, 2) AS SD_Lead_Cost, DD_Lead_Cost, ROUND(SD_Lead_Luck::DOUBLE, 2) AS Luck, CASE WHEN ROUND(SD_Lead_Cost::DOUBLE, 2) >= 0.25 AND DD_Lead_Cost >= 1 THEN 'Costly choice' WHEN ROUND(SD_Lead_Cost::DOUBLE, 2) >= 0.25 THEN 'Poor choice, layout forgave it' WHEN DD_Lead_Cost >= 1 THEN 'Good choice, unlucky layout' ELSE 'Fine' END AS Verdict, Tricks, DD_Tricks, ROUND(Pct_{Pair_Direction}, 4) AS Pct_{Pair_Direction} FROM self WHERE Boards_We_Declared = True AND SD_Lead_Cost IS NOT NULL) SELECT * FROM v ORDER BY CASE Verdict WHEN 'Costly choice' THEN 1 WHEN 'Poor choice, layout forgave it' THEN 2 WHEN 'Good choice, unlucky layout' THEN 3 ELSE 4 END, SD_Lead_Cost DESC, Board"
 					}
 				],
 				"i18n": {
@@ -1652,7 +1652,7 @@
 								"Every score": "Show every score on board {Board}."
 							}
 						],
-						"sql": "SELECT Board, Contract, Declarer_Name, Lead, Tricks, DD_Tricks, Tricks - DD_Tricks AS vs_DD, ROUND(SC_Guess_Declarer, 2) AS Guess_Tricks, ROUND(DD_Tricks_Diff_SC, 2) AS vs_SuitC, CASE WHEN Tricks > DD_Tricks THEN 'Gift from the defence' WHEN Tricks = DD_Tricks THEN 'Made DD tricks' WHEN DD_Tricks_Diff_SC > -0.5 THEN 'Lost to a guess' ELSE 'Misplay' END AS Verdict, Pct_{Pair_Direction} FROM self WHERE Boards_We_Declared = True AND SC_Guess_Declarer IS NOT NULL ORDER BY DD_Tricks_Diff_SC, Board"
+						"sql": "SELECT Board, Contract, Declarer_Name, Lead, Tricks, DD_Tricks, Tricks - DD_Tricks AS vs_DD, ROUND(SC_Guess_Declarer::DOUBLE, 2) AS Guess_Tricks, ROUND(DD_Tricks_Diff_SC::DOUBLE, 2) AS vs_SuitC, CASE WHEN Tricks > DD_Tricks THEN 'Gift from the defence' WHEN Tricks = DD_Tricks THEN 'Made DD tricks' WHEN DD_Tricks_Diff_SC > -0.5 THEN 'Lost to a guess' ELSE 'Misplay' END AS Verdict, ROUND(Pct_{Pair_Direction}, 4) AS Pct_{Pair_Direction} FROM self WHERE Boards_We_Declared = True AND SC_Guess_Declarer IS NOT NULL ORDER BY DD_Tricks_Diff_SC, Board"
 					}
 				],
 				"i18n": {
