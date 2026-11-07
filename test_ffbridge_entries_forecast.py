@@ -124,6 +124,47 @@ class PredictEntriesTests(unittest.TestCase):
             self.predict([["0011"]])
 
 
+class HandicapForecastTests(unittest.TestCase):
+    def predict(self, entries):
+        return ep.forecast_entries(entries, "2026-10-23", results=_results(), sims=4000)
+
+    def test_handicap_is_scratch_plus_bonus_and_reorders_the_field(self):
+        out = self.predict([
+            {"players": ["0011", "0012"], "bonus": 0.0},
+            {"players": ["0021", "0022"], "bonus": 6.0},
+            {"players": ["0031", "0032"], "bonus": 16.0},
+        ])
+        self.assertEqual(out["scoring"], "handicap")
+        self.assertIn("Handicap_Pct_Forecast", out["columns"])
+        by_pair = {row["Pair"].split(" - ")[0]: row for row in out["rows"]}
+        strong, weak = by_pair["SALITA Robert"], by_pair["Name31 First"]
+        for row in out["rows"]:
+            self.assertAlmostEqual(row["Handicap_Pct_Forecast"], row["Pct_Forecast"] + row["Handicap_Bonus"], places=1)
+        # Scratch favours the strong pair; the 16-point bonus lifts the weak pair to the top.
+        self.assertEqual(strong["Rank_Forecast"], 1)
+        self.assertEqual(weak["Rank_Forecast"], 3)
+        self.assertEqual(weak["Handicap_Rank_Forecast"], 1)
+        self.assertGreater(weak["Handicap_P_Win"], weak["P_Win"])
+        self.assertAlmostEqual(sum(row["Handicap_P_Win"] for row in out["rows"]), 100.0, delta=0.5)
+
+    def test_scratch_fields_do_not_change_when_bonuses_are_added(self):
+        plain = self.predict([["0011", "0012"], ["0021", "0022"], ["0031", "0032"]])
+        with_bonus = self.predict([
+            {"players": ["0011", "0012"], "bonus": 3.0},
+            {"players": ["0021", "0022"], "bonus": 6.0},
+            {"players": ["0031", "0032"], "bonus": 9.0},
+        ])
+        self.assertEqual(plain["scoring"], "scratch")
+        self.assertNotIn("Handicap_Pct_Forecast", plain["rows"][0])
+        for a, b in zip(plain["rows"], with_bonus["rows"]):
+            for column in ep.ENTRY_COLUMNS:
+                self.assertEqual(a[column], b[column], column)
+
+    def test_bonus_for_some_pairs_only_fails(self):
+        with self.assertRaises(ValueError):
+            self.predict([{"players": ["0011", "0012"], "bonus": 3.0}, {"players": ["0021", "0022"]}])
+
+
 class SimulationTests(unittest.TestCase):
     def test_equal_pairs_split_wins_evenly(self):
         sim = ep.simulate_ranks(np.array([50.0, 50.0, 50.0, 50.0]), 6.0, 20000, seed=1)

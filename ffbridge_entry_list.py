@@ -15,6 +15,7 @@ from typing import Any, Dict, Iterable, List, Optional
 import requests
 
 import ffbridge_entries_forecast as entries_forecast
+import ffbridge_handicap as handicap
 import ffbridge_postmortem_create as create
 
 LANCELOT_API = "https://api-lancelot.ffbridge.fr"
@@ -53,6 +54,7 @@ def session_meta(group_session_id: str) -> Dict[str, Any]:
         "group_session_id": str(group_session_id),
         "date": raw.get("date"),
         "label": ((raw.get("session") or {}).get("label")) or raw.get("description"),
+        "description": raw.get("description"),
         "expected_boards": raw.get("expectedBoardCount"),
         "club_code": str(organization["ffbCode"]) if organization.get("ffbCode") is not None else None,
         "club_name": organization.get("label") or organization.get("name"),
@@ -223,6 +225,7 @@ def forecast_group_session(
     entrants = session_entrants(str(group_session_id))
     if len(entrants) < 2:
         raise ValueError(f"Group session {group_session_id} has {len(entrants)} registered pairs")
+    day = str(meta["date"] or "")[:10] or None
     entries = [
         {
             "players": [player["lancelot_id"] for player in pair["players"]],
@@ -230,7 +233,23 @@ def forecast_group_session(
         }
         for pair in entrants
     ]
-    result = entries_forecast.forecast_entries(entries, str(meta["date"] or "")[:10] or None, sims=sims)
+    rule = handicap.handicap_rule(f"{meta.get('label') or ''} {meta.get('description') or ''}", day)
+    handicap_note = None
+    if rule is not None:
+        no_iv = [
+            entry["label"]
+            for entry, pair in zip(entries, entrants)
+            if any(player["iv"] is None for player in pair["players"])
+        ]
+        if no_iv:
+            handicap_note = "No handicap forecast: FFBridge shows no IV for " + ", ".join(no_iv)
+        else:
+            for entry, pair in zip(entries, entrants):
+                entry["bonus"] = handicap.pair_bonus(rule, [player["iv"] for player in pair["players"]])
+    result = entries_forecast.forecast_entries(entries, day, sims=sims)
+    result["handicap_rule"] = rule
+    if handicap_note:
+        result["warnings"].append(handicap_note)
     result["session"] = meta
     result["entry_list_read_at"] = read_at
     result["team_iv"] = {
@@ -261,6 +280,9 @@ def entries_with_forecast(
 ) -> List[Dict[str, Any]]:
     """A player's upcoming entries, each with that player's forecast rank and pct.
 
+    Handicap sessions also get ``handicap_forecast_rank`` and
+    ``handicap_forecast_pct`` (``scoring`` is "handicap").
+
     A session with fewer than two registered pairs gets ``forecast_error``.
     When FFBridge keeps the player's entries private, the entry lists of
     ``club_group_ids`` are scanned instead and each row gets
@@ -287,5 +309,8 @@ def entries_with_forecast(
         row["orientation"] = own.get("Orientation") if own else None
         row["forecast_rank"] = own.get("Rank_Forecast") if own else None
         row["forecast_pct"] = own.get("Pct_Forecast") if own else None
+        row["scoring"] = forecast.get("scoring")
+        row["handicap_forecast_rank"] = own.get("Handicap_Rank_Forecast") if own else None
+        row["handicap_forecast_pct"] = own.get("Handicap_Pct_Forecast") if own else None
         row["entry_list_read_at"] = forecast.get("entry_list_read_at")
     return rows

@@ -74,6 +74,60 @@ class EntryListTests(unittest.TestCase):
         self.assertEqual(out["session"]["group_session_id"], "422517")
         self.assertEqual(out["team_iv"]["DAS Ramendra - SALITA Robert"], 106)
 
+    def _forecast_with(self, session, teams):
+        def fake(path, params=None):
+            return session if path.startswith("/competitions/groupSessions/") else teams
+
+        captured = {}
+
+        def fake_predict(entries, on_date, sims):
+            captured.update(entries=entries)
+            return {"rows": [], "warnings": []}
+
+        with patch.object(entry_list, "_api_get", side_effect=fake), \
+                patch.object(entry_list.entries_forecast, "forecast_entries", side_effect=fake_predict):
+            out = entry_list.forecast_group_session("438338", sims=500)
+        return out, captured["entries"]
+
+    def test_roy_rene_first_tuesday_gets_bonuses_from_team_iv(self):
+        session = dict(SESSION, date="2026-11-03T14:00:00+01:00", session={"label": "Roy Rene avec handivap"})
+        teams = {"items": [
+            _team(1, [_person("33351", "JACOUPY", "Christian", "1353276", iv=38), _person("246273", "SALITA", "Robert", "9500754", iv=38)], 76),
+            _team(2, [_person("14948", "BRUN", "Bernard", "663642", iv=76), _person("16915", "MAMOU MANI", "Claude", "757594", iv=84)], 160),
+        ]}
+        out, entries = self._forecast_with(session, teams)
+        self.assertEqual(out["handicap_rule"], "roy_rene")
+        self.assertEqual([entry["bonus"] for entry in entries], [10.5, 0.0])
+
+    def test_octopus_gets_per_player_bonuses(self):
+        session = dict(SESSION, date="2026-10-29T14:00:00+01:00", session={"label": "OCTOPUS"})
+        teams = {"items": [
+            _team(1, [_person("1", "A", "a", "1", iv=64), _person("2", "B", "b", "2", iv=44)], 108),
+            _team(2, [_person("3", "C", "c", "3", iv=26), _person("4", "D", "d", "4", iv=22)], 48),
+        ]}
+        out, entries = self._forecast_with(session, teams)
+        self.assertEqual(out["handicap_rule"], "per_player")
+        self.assertEqual([entry["bonus"] for entry in entries], [4.0, 15.0])
+
+    def test_ordinary_session_gets_no_bonus(self):
+        teams = {"items": [
+            _team(1, [_person("1", "A", "a", "1"), _person("2", "B", "b", "2")], 100),
+            _team(2, [_person("3", "C", "c", "3"), _person("4", "D", "d", "4")], 100),
+        ]}
+        out, entries = self._forecast_with(SESSION, teams)
+        self.assertIsNone(out["handicap_rule"])
+        self.assertTrue(all("bonus" not in entry for entry in entries))
+
+    def test_missing_iv_skips_the_handicap_forecast_with_a_warning(self):
+        session = dict(SESSION, date="2026-10-29T14:00:00+01:00", session={"label": "OCTOPUS"})
+        teams = {"items": [
+            _team(1, [_person("1", "A", "a", "1", iv=None), _person("2", "B", "b", "2")], None),
+            _team(2, [_person("3", "C", "c", "3"), _person("4", "D", "d", "4")], 100),
+        ]}
+        out, entries = self._forecast_with(session, teams)
+        self.assertTrue(all("bonus" not in entry for entry in entries))
+        self.assertIn("A a - B b", out["warnings"][0])
+
     def test_without_a_session_uses_the_next_entry(self):
         upcoming = {"items": [
             {"players": [_person("246273", "SALITA", "Robert", "9500754"), _person("33351", "JACOUPY", "Christian", "1")],

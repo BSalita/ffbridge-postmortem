@@ -26,6 +26,11 @@ the predicted percentage in the field; ``Expected_Rank``, ``Rank_Forecast_Low``
 and ``Rank_Forecast_High`` (the 5th and 95th percentile places), ``P_Win`` and
 ``P_Top3`` come from the simulation. Ties in the predicted percentage share a
 place. With ``orientation`` set on every pair, places are within NS and EW.
+
+Handicap sessions: when every entry carries a ``bonus`` (percentage points,
+from ``ffbridge_handicap``), the handicap percentage is the scratch forecast
+plus the bonus, and the ``Handicap_*`` fields give its places and win
+chances, simulated the same way. Without bonuses the forecast is scratch only.
 """
 
 from __future__ import annotations
@@ -83,6 +88,19 @@ ENTRY_COLUMNS = (
     "Min_Prior_Sessions",
     "Pair_Prior_Sessions",
     "Ratings_Age_Days",
+)
+
+HANDICAP_COLUMNS = (
+    "Handicap_Bonus",
+    "Handicap_Rank_Forecast",
+    "Handicap_Expected_Rank",
+    "Handicap_Rank_Forecast_Low",
+    "Handicap_Rank_Forecast_High",
+    "Handicap_P_Win",
+    "Handicap_P_Top3",
+    "Handicap_Pct_Forecast",
+    "Handicap_Pct_Forecast_Low",
+    "Handicap_Pct_Forecast_High",
 )
 
 calibration_sql = """
@@ -272,6 +290,16 @@ def _parse_day(on_date: Optional[str]) -> str:
     return day or Date.today().isoformat()
 
 
+def _entry_bonus(entry: Any) -> Optional[float]:
+    """The entry's handicap bonus in percentage points, or None."""
+    if not isinstance(entry, dict) or entry.get("bonus") is None:
+        return None
+    bonus = float(entry["bonus"])
+    if not 0.0 <= bonus <= 100.0:
+        raise ValueError(f"bonus must be between 0 and 100, not {bonus}")
+    return bonus
+
+
 def _entry_players(entry: Any) -> Tuple[List[str], Optional[str], Optional[str]]:
     """Two player queries, an orientation, and a label from one entry."""
     orientation = None
@@ -330,6 +358,31 @@ def simulate_ranks(
         "p_win": (ranks == 1).mean(axis=0),
         "p_top3": (ranks <= 3).mean(axis=0),
     }
+
+
+def _places(
+    pct: np.ndarray,
+    groups: Dict[Optional[str], List[int]],
+    sims: int,
+    seed: Optional[int],
+) -> Dict[str, np.ndarray]:
+    """Forecast place, simulated place range and win chances, within each orientation group."""
+    n = len(pct)
+    out = {
+        "rank": np.zeros(n, dtype=int),
+        "expected": np.zeros(n),
+        "low": np.zeros(n, dtype=int),
+        "high": np.zeros(n, dtype=int),
+        "p_win": np.zeros(n),
+        "p_top3": np.zeros(n),
+    }
+    for offset, positions in enumerate(groups.values()):
+        idx = np.array(positions)
+        out["rank"][idx] = _ranks_desc(np.round(pct[idx], 2))
+        sim = simulate_ranks(pct[idx], PCT_RESIDUAL_SD, sims, None if seed is None else seed + offset)
+        for key in ("expected", "low", "high", "p_win", "p_top3"):
+            out[key][idx] = sim[key]
+    return out
 
 
 def _round(value: Optional[float], digits: int) -> Optional[float]:
@@ -409,28 +462,28 @@ def forecast_entries(
         [tuple(record.key if record else "" for record in row) for row in resolved],
     )
 
+    bonuses = [_entry_bonus(entry) for entry in entries]
+    if any(bonus is not None for bonus in bonuses) and not all(bonus is not None for bonus in bonuses):
+        raise ValueError("Give a handicap bonus for every pair or for none")
+    handicap = bonuses[0] is not None
+
     groups: Dict[Optional[str], List[int]] = {}
     for position, orientation in enumerate(orientations):
         groups.setdefault(orientation, []).append(position)
 
     pct = np.zeros(len(resolved))
-    expected = np.zeros(len(resolved))
-    rank_low = np.zeros(len(resolved), dtype=int)
-    rank_high = np.zeros(len(resolved), dtype=int)
-    p_win = np.zeros(len(resolved))
-    p_top3 = np.zeros(len(resolved))
-    rank_pred = np.zeros(len(resolved), dtype=int)
-    for offset, positions in enumerate(groups.values()):
+    for positions in groups.values():
         idx = np.array(positions)
-        group_pct = predicted_pct(pair_elo[idx])
-        pct[idx] = group_pct
-        rank_pred[idx] = _ranks_desc(np.round(group_pct, 2))
-        sim = simulate_ranks(group_pct, PCT_RESIDUAL_SD, sims, None if seed is None else seed + offset)
-        expected[idx] = sim["expected"]
-        rank_low[idx] = sim["low"]
-        rank_high[idx] = sim["high"]
-        p_win[idx] = sim["p_win"]
-        p_top3[idx] = sim["p_top3"]
+        pct[idx] = predicted_pct(pair_elo[idx])
+    scratch = _places(pct, groups, sims, seed)
+    rank_pred, expected, rank_low, rank_high = (
+        scratch["rank"], scratch["expected"], scratch["low"], scratch["high"]
+    )
+    p_win, p_top3 = scratch["p_win"], scratch["p_top3"]
+    if handicap:
+        bonus = np.array(bonuses, dtype=float)
+        hc_pct = pct + bonus
+        hc = _places(hc_pct, groups, sims, None if seed is None else seed + len(groups))
 
     day_date = datetime.strptime(day, "%Y-%m-%d").date()
     rows: List[Dict[str, Any]] = []
@@ -451,6 +504,20 @@ def forecast_entries(
         age = max(ages) if ages else None
         spread = sp._prediction_spread(float(pct[position]), None, min(prior), pair_prior, age)
         low_confidence = bool(spread["Low_Confidence"]) or bool(unrated)
+        handicap_fields: Dict[str, Any] = {}
+        if handicap:
+            handicap_fields = {
+                "Handicap_Bonus": _round(bonus[position], 2),
+                "Handicap_Rank_Forecast": int(hc["rank"][position]),
+                "Handicap_Expected_Rank": _round(hc["expected"][position], 1),
+                "Handicap_Rank_Forecast_Low": int(hc["low"][position]),
+                "Handicap_Rank_Forecast_High": int(hc["high"][position]),
+                "Handicap_P_Win": _round(100.0 * hc["p_win"][position], 1),
+                "Handicap_P_Top3": _round(100.0 * hc["p_top3"][position], 1),
+                "Handicap_Pct_Forecast": _round(hc_pct[position], 2),
+                "Handicap_Pct_Forecast_Low": _round(max(0.0, hc_pct[position] - Z95 * PCT_RESIDUAL_SD), 2),
+                "Handicap_Pct_Forecast_High": _round(hc_pct[position] + Z95 * PCT_RESIDUAL_SD, 2),
+            }
         rows.append(
             {
                 "Pair": label or f"{names[0]} - {names[1]}",
@@ -476,6 +543,7 @@ def forecast_entries(
                 "Min_Prior_Sessions": int(min(prior)),
                 "Pair_Prior_Sessions": int(pair_prior),
                 "Ratings_Age_Days": age,
+                **handicap_fields,
             }
         )
     rows.sort(key=lambda item: (item["Orientation"] or "", item["Rank_Forecast"], -(item["P_Win"] or 0.0), item["Pair"]))
@@ -483,7 +551,8 @@ def forecast_entries(
     return {
         "date": day,
         "pairs": len(rows),
-        "columns": list(ENTRY_COLUMNS),
+        "scoring": "handicap" if handicap else "scratch",
+        "columns": list(ENTRY_COLUMNS) + (list(HANDICAP_COLUMNS) if handicap else []),
         "rows": rows,
         "warnings": warnings,
         "provenance": {
