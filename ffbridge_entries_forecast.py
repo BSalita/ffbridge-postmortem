@@ -31,6 +31,16 @@ Handicap sessions: when every entry carries a ``bonus`` (percentage points,
 from ``ffbridge_handicap``), the handicap percentage is the scratch forecast
 plus the bonus, and the ``Handicap_*`` fields give its places and win
 chances, simulated the same way. Without bonuses the forecast is scratch only.
+
+National (simultaneous) places: FFBridge scores a simultaneous club by club
+(every club's "national" percentages average 50), then ranks all pairs of
+all clubs on those percentages. So the national percentage forecast is the
+club one, and only the place changes. With ``national_series`` set, the
+national field is modelled on the most recent session of that series on the
+same weekday (``historical_field``): every other club's pairs, each with a
+percentage predicted against its own club, plus this session's entries in
+place of this club's pairs then. ``National_*`` fields give the places in
+that field, for handicap too, using the bonuses those pairs were given.
 """
 
 from __future__ import annotations
@@ -40,12 +50,13 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from datetime import date as Date
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import polars as pl
 
+import ffbridge_handicap as handicap_rules
 import ffbridge_session_predictions as sp
 
 # Calibrated on the FFBridge Elo build of 2026-10-23, last 12 months, every
@@ -101,6 +112,36 @@ HANDICAP_COLUMNS = (
     "Handicap_Pct_Forecast",
     "Handicap_Pct_Forecast_Low",
     "Handicap_Pct_Forecast_High",
+)
+
+NATIONAL_COLUMNS = (
+    "National_Rank_Forecast",
+    "National_Expected_Rank",
+    "National_Rank_Forecast_Low",
+    "National_Rank_Forecast_High",
+    "National_P_Top10",
+)
+NATIONAL_HANDICAP_COLUMNS = tuple(column.replace("National_", "National_Handicap_") for column in NATIONAL_COLUMNS)
+
+# How far back a session of the same series and weekday may be to model the national field.
+NATIONAL_LOOKBACK_DAYS = 56
+# The national simulation draws every pair of the field; cap it to bound memory.
+NATIONAL_MAX_SIMS = 4000
+NATIONAL_TOP_N = 10
+ROY_RENE_SERIES_ID = 5
+# Words in a club's session label that name a simultaneous series.
+SERIES_LABEL_TOKENS = (
+    (386, {"octopus"}),
+    (384, {"simultanet"}),
+    (ROY_RENE_SERIES_ID, {"roy", "rene"}),
+    (3, {"rondes"}),
+    (3, {"ronde", "france"}),
+    (4, {"trophees", "voyage"}),
+    (140, {"armour"}),
+    (140, {"amour", "bridge"}),
+    (499, {"val", "seine"}),
+    (604, {"atout"}),
+    (868, {"festival"}),
 )
 
 calibration_sql = """
@@ -385,6 +426,142 @@ def _places(
     return out
 
 
+def series_for_label(label: Optional[str]) -> Optional[int]:
+    """The simultaneous series a club's session label names, or None."""
+    tokens = set(normalize_name(label).split())
+    for series_id, needed in SERIES_LABEL_TOKENS:
+        if needed <= tokens:
+            return series_id
+    return None
+
+
+def historical_field(
+    results: pl.LazyFrame,
+    series_id: int,
+    day: str,
+    club_code: Optional[str],
+    handicap: bool,
+) -> Optional[Dict[str, Any]]:
+    """Other clubs' pairs in the latest session of ``series_id`` on ``day``'s weekday.
+
+    Each pair's percentage is predicted against its own club, as
+    ``predicted_pct`` does for the entered field. Roy René first-Tuesday
+    (handicap) sessions are modelled only on earlier first Tuesdays, and
+    other Roy René days only on other days. For a handicap field, a session
+    is used only when every pair has its bonus. None when no session fits.
+    """
+    target = Date.fromisoformat(day)
+    since = (target - timedelta(days=NATIONAL_LOOKBACK_DAYS)).isoformat()
+    rows = (
+        results.filter(
+            (pl.col("series_id").cast(pl.Int64, strict=False) == int(series_id))
+            & (sp._ELO_DAY < day)
+            & (sp._ELO_DAY >= since)
+        )
+        .select(
+            pl.col("tournament_id").cast(pl.Utf8).alias("session"),
+            sp._ELO_DAY.alias("day"),
+            pl.col("club_code").cast(pl.Utf8).alias("club"),
+            pl.col("player1_scratch_elo_before").cast(pl.Float64).alias("e1"),
+            pl.col("player2_scratch_elo_before").cast(pl.Float64).alias("e2"),
+            pl.col("iv_bonus").cast(pl.Float64).alias("bonus"),
+        )
+        .collect()
+    )
+    if rows.is_empty():
+        return None
+    target_first_tuesday = handicap_rules.is_first_tuesday(day)
+    sessions = (
+        rows.group_by("session")
+        .agg(pl.col("day").first(), pl.col("bonus").null_count().alias("no_bonus"))
+        .sort("day", descending=True)
+    )
+    chosen = None
+    for session in sessions.iter_rows(named=True):
+        when = Date.fromisoformat(session["day"])
+        if when.weekday() != target.weekday():
+            continue
+        if int(series_id) == ROY_RENE_SERIES_ID and handicap_rules.is_first_tuesday(session["day"]) != target_first_tuesday:
+            continue
+        if handicap and session["no_bonus"]:
+            continue
+        chosen = session
+        break
+    if chosen is None:
+        return None
+    field = rows.filter(pl.col("session") == chosen["session"]).with_columns(
+        pl.col("club").map_elements(sp._club_code_text, return_dtype=pl.Utf8)
+    )
+    own_club = sp._club_code_text(club_code)
+    replaced = field.filter(pl.col("club") == own_club).height if own_club else 0
+    if own_club:
+        field = field.filter(pl.col("club") != own_club)
+    if field.is_empty():
+        return None
+    known = np.concatenate([field["e1"].drop_nulls().to_numpy(), field["e2"].drop_nulls().to_numpy()])
+    median = float(np.median(known))
+    pair_elo = (field["e1"].fill_null(median).to_numpy() + field["e2"].fill_null(median).to_numpy()) / 2.0
+    clubs = field["club"].to_list()
+    pct = np.zeros(len(pair_elo))
+    for club in set(clubs):
+        idx = np.array([i for i, value in enumerate(clubs) if value == club])
+        pct[idx] = predicted_pct(pair_elo[idx])
+    return {
+        "series_id": int(series_id),
+        "model_session_id": chosen["session"],
+        "model_date": chosen["day"],
+        "other_club_pairs": int(field.height),
+        "other_clubs": len(set(clubs)),
+        "replaced_own_club_pairs": int(replaced),
+        "pct": pct,
+        "bonus": field["bonus"].to_numpy() if handicap else None,
+    }
+
+
+def national_places(
+    own_pct: np.ndarray,
+    field_pct: np.ndarray,
+    sims: int,
+    seed: Optional[int],
+) -> Dict[str, np.ndarray]:
+    """Places of the entered pairs among themselves plus the other clubs' pairs.
+
+    ``rank`` is the place of the predicted percentage; the rest come from
+    ``sims`` sessions (at most ``NATIONAL_MAX_SIMS``) in which every pair of
+    the national field is drawn around its prediction.
+    """
+    own_r, field_r = np.round(own_pct, 2), np.round(field_pct, 2)
+    rank = np.array([1 + int(np.sum(field_r > v) + np.sum(own_r > v)) for v in own_r], dtype=int)
+    sims = min(int(sims), NATIONAL_MAX_SIMS)
+    rng = np.random.default_rng(seed)
+    n, m = len(own_pct), len(field_pct)
+    own = own_pct[None, :] + rng.standard_normal((sims, n)) * PCT_RESIDUAL_SD
+    field = np.sort(field_pct[None, :] + rng.standard_normal((sims, m)) * PCT_RESIDUAL_SD, axis=1)
+    above_field = np.empty((sims, n), dtype=int)
+    for s in range(sims):
+        above_field[s] = m - np.searchsorted(field[s], own[s], side="right")
+    above_own = (own[:, None, :] > own[:, :, None]).sum(axis=2)
+    ranks = 1 + above_field + above_own
+    return {
+        "rank": rank,
+        "expected": ranks.mean(axis=0),
+        "low": np.quantile(ranks, RANK_LOW_Q, axis=0, method="lower"),
+        "high": np.quantile(ranks, RANK_HIGH_Q, axis=0, method="higher"),
+        "p_top10": (ranks <= NATIONAL_TOP_N).mean(axis=0),
+        "sims": sims,
+    }
+
+
+def _national_fields(prefix: str, places: Dict[str, np.ndarray], position: int) -> Dict[str, Any]:
+    return {
+        f"{prefix}_Rank_Forecast": int(places["rank"][position]),
+        f"{prefix}_Expected_Rank": _round(places["expected"][position], 1),
+        f"{prefix}_Rank_Forecast_Low": int(places["low"][position]),
+        f"{prefix}_Rank_Forecast_High": int(places["high"][position]),
+        f"{prefix}_P_Top10": _round(100.0 * places["p_top10"][position], 1),
+    }
+
+
 def _round(value: Optional[float], digits: int) -> Optional[float]:
     if value is None or (isinstance(value, float) and math.isnan(value)):
         return None
@@ -398,6 +575,8 @@ def forecast_entries(
     sims: int = DEFAULT_SIMS,
     seed: Optional[int] = 0,
     results: Optional[pl.LazyFrame] = None,
+    national_series: Optional[int] = None,
+    club_code: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Predicted percentages, places and win chances for a list of entered pairs.
 
@@ -405,6 +584,9 @@ def forecast_entries(
     ``"JACOUPY Christian / SALITA Robert"``, or ``{"players": [...],
     "orientation": "NS", "label": "..."}``. A player is a licence number,
     Lancelot id, FFBridge person id, or name.
+
+    ``national_series`` (a simultaneous series id) adds national places,
+    with ``club_code`` the club whose pairs the entries replace.
     """
     if not entries:
         raise ValueError("entries is empty: pass the pairs registered for the session")
@@ -485,6 +667,22 @@ def forecast_entries(
         hc_pct = pct + bonus
         hc = _places(hc_pct, groups, sims, None if seed is None else seed + len(groups))
 
+    national = None
+    nat = nat_hc = None
+    if national_series is not None:
+        national = historical_field(results, int(national_series), day, club_code, handicap)
+        if national is None:
+            warnings.append(
+                f"No national forecast: no session of series {national_series} on a "
+                f"{Date.fromisoformat(day).strftime('%A')} in the {NATIONAL_LOOKBACK_DAYS} days before"
+                + (" with every bonus published" if handicap else "")
+            )
+        else:
+            nat_seed = None if seed is None else seed + 1000
+            nat = national_places(pct, national["pct"], sims, nat_seed)
+            if handicap:
+                nat_hc = national_places(hc_pct, national["pct"] + national["bonus"], sims, nat_seed)
+
     day_date = datetime.strptime(day, "%Y-%m-%d").date()
     rows: List[Dict[str, Any]] = []
     for position, ((players, orientation, label), row) in enumerate(zip(parsed, resolved)):
@@ -504,9 +702,9 @@ def forecast_entries(
         age = max(ages) if ages else None
         spread = sp._prediction_spread(float(pct[position]), None, min(prior), pair_prior, age)
         low_confidence = bool(spread["Low_Confidence"]) or bool(unrated)
-        handicap_fields: Dict[str, Any] = {}
+        extra_fields: Dict[str, Any] = {}
         if handicap:
-            handicap_fields = {
+            extra_fields = {
                 "Handicap_Bonus": _round(bonus[position], 2),
                 "Handicap_Rank_Forecast": int(hc["rank"][position]),
                 "Handicap_Expected_Rank": _round(hc["expected"][position], 1),
@@ -518,6 +716,10 @@ def forecast_entries(
                 "Handicap_Pct_Forecast_Low": _round(max(0.0, hc_pct[position] - Z95 * PCT_RESIDUAL_SD), 2),
                 "Handicap_Pct_Forecast_High": _round(hc_pct[position] + Z95 * PCT_RESIDUAL_SD, 2),
             }
+        if nat is not None:
+            extra_fields.update(_national_fields("National", nat, position))
+        if nat_hc is not None:
+            extra_fields.update(_national_fields("National_Handicap", nat_hc, position))
         rows.append(
             {
                 "Pair": label or f"{names[0]} - {names[1]}",
@@ -543,7 +745,7 @@ def forecast_entries(
                 "Min_Prior_Sessions": int(min(prior)),
                 "Pair_Prior_Sessions": int(pair_prior),
                 "Ratings_Age_Days": age,
-                **handicap_fields,
+                **extra_fields,
             }
         )
     rows.sort(key=lambda item: (item["Orientation"] or "", item["Rank_Forecast"], -(item["P_Win"] or 0.0), item["Pair"]))
@@ -552,7 +754,22 @@ def forecast_entries(
         "date": day,
         "pairs": len(rows),
         "scoring": "handicap" if handicap else "scratch",
-        "columns": list(ENTRY_COLUMNS) + (list(HANDICAP_COLUMNS) if handicap else []),
+        "columns": (
+            list(ENTRY_COLUMNS)
+            + (list(HANDICAP_COLUMNS) if handicap else [])
+            + (list(NATIONAL_COLUMNS) if nat is not None else [])
+            + (list(NATIONAL_HANDICAP_COLUMNS) if nat_hc is not None else [])
+        ),
+        "national": None if national is None else {
+            "series_id": national["series_id"],
+            "model_session_id": national["model_session_id"],
+            "model_date": national["model_date"],
+            "pairs": national["other_club_pairs"] + len(rows),
+            "other_club_pairs": national["other_club_pairs"],
+            "other_clubs": national["other_clubs"],
+            "replaced_own_club_pairs": national["replaced_own_club_pairs"],
+            "sims": nat["sims"],
+        },
         "rows": rows,
         "warnings": warnings,
         "provenance": {

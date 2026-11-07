@@ -2286,9 +2286,11 @@ def player_search_input_on_change() -> None:
 
 
 ENTRY_FORECAST_SIMS = 5000
-ENTRY_FORECAST_COLUMNS = ["Rank_Forecast", "Pair", "Pct_Forecast", "P_Win", "P_Top3", "Pair_Elo"]
-ENTRY_HANDICAP_FORECAST_COLUMNS = [
+# Display order; a column shows only when the forecast has it (handicap, national).
+ENTRY_FORECAST_COLUMNS = [
+    "National_Handicap_Rank_Forecast",
     "Handicap_Rank_Forecast",
+    "National_Rank_Forecast",
     "Rank_Forecast",
     "Pair",
     "Handicap_Pct_Forecast",
@@ -2296,7 +2298,9 @@ ENTRY_HANDICAP_FORECAST_COLUMNS = [
     "Pct_Forecast",
     "Handicap_P_Win",
     "P_Win",
-    "Handicap_P_Top3",
+    "P_Top3",
+    "National_Handicap_P_Top10",
+    "National_P_Top10",
     "Pair_Elo",
 ]
 
@@ -2378,18 +2382,24 @@ def _entry_label(row: Mapping[str, Any]) -> str:
         return f"{when} · {name} · {chrome_text('entry_too_few', 'too few pairs entered yet')}"
     if row.get("forecast_rank") is None:
         return f"{when} · {name}"
+    pairs = row.get("pairs") or "?"
+    national = ""
+    if row.get("national_forecast_rank") is not None:
+        rank = row["national_handicap_forecast_rank"] if row.get("handicap_forecast_rank") is not None else row["national_forecast_rank"]
+        national = chrome_text("entry_line_national", " · national {nrank}/{npairs}").format(
+            nrank=rank, npairs=row.get("national_pairs") or "?")
     if row.get("handicap_forecast_rank") is not None:
         return chrome_text(
             "entry_line_handicap",
             "{when} · {name} · handicap rank {hrank}/{pairs} · {hpct:.1f}% · scratch rank {rank}/{pairs} · {pct:.1f}%",
         ).format(
-            when=when, name=name, pairs=row.get("pairs") or "?",
+            when=when, name=name, pairs=pairs,
             hrank=row["handicap_forecast_rank"], hpct=row["handicap_forecast_pct"],
             rank=row["forecast_rank"], pct=row["forecast_pct"],
-        )
+        ) + national
     return chrome_text(
         "entry_line", "{when} · {name} · rank {rank}/{pairs} · {pct:.1f}%"
-    ).format(when=when, name=name, rank=row["forecast_rank"], pairs=row.get("pairs") or "?", pct=row["forecast_pct"])
+    ).format(when=when, name=name, rank=row["forecast_rank"], pairs=pairs, pct=row["forecast_pct"]) + national
 
 
 def _entry_forecast_on_change() -> None:
@@ -2471,26 +2481,48 @@ def _render_entry_forecast(group_session_id: str) -> None:
     import ffbridge_entry_list as entry_list
 
     own = entry_list.player_row(forecast, str(st.session_state.get("lancelot_player_id") or ""))
-    if forecast.get("scoring") == "handicap":
-        df = pl.DataFrame(rows).select(ENTRY_HANDICAP_FORECAST_COLUMNS).sort("Handicap_Rank_Forecast")
+    handicap = forecast.get("scoring") == "handicap"
+    national = forecast.get("national")
+    present = set(forecast.get("columns") or [])
+    columns = [column for column in ENTRY_FORECAST_COLUMNS if column in present]
+    df = pl.DataFrame(rows).select(columns).sort("Handicap_Rank_Forecast" if handicap else "Rank_Forecast")
+    if handicap:
         st.caption(chrome_text(
             "entry_forecast_handicap_note",
             "Handicap game: handicap % = scratch % + the pair's IV bonus.",
         ))
-        if own is not None:
-            st.markdown(chrome_text(
+    if national:
+        st.caption(chrome_text(
+            "entry_forecast_national_note",
+            "National ranks: {pairs} pairs, this club's entries plus {other} pairs from {clubs} other clubs "
+            "as they played on {model_date}. FFBridge scores each club's tables on their own, so club % = national %.",
+        ).format(
+            pairs=national["pairs"], other=national["other_club_pairs"],
+            clubs=national["other_clubs"], model_date=national["model_date"],
+        ))
+    if own is not None:
+        if handicap:
+            line = chrome_text(
                 "entry_forecast_you_handicap",
                 "**Your pair:** {pair} — handicap rank {hrank}, {hpct:.1f}% (bonus {bonus:g}) · scratch rank {rank}, {pct:.1f}%",
             ).format(
                 pair=own["Pair"], hrank=own["Handicap_Rank_Forecast"], hpct=own["Handicap_Pct_Forecast"],
                 bonus=own["Handicap_Bonus"], rank=own["Rank_Forecast"], pct=own["Pct_Forecast"],
-            ))
-    else:
-        df = pl.DataFrame(rows).select(ENTRY_FORECAST_COLUMNS).sort("Rank_Forecast")
-        if own is not None:
-            st.markdown(chrome_text(
+            )
+        else:
+            line = chrome_text(
                 "entry_forecast_you", "**Your pair:** {pair} — rank {rank}, {pct:.1f}%"
-            ).format(pair=own["Pair"], rank=own["Rank_Forecast"], pct=own["Pct_Forecast"]))
+            ).format(pair=own["Pair"], rank=own["Rank_Forecast"], pct=own["Pct_Forecast"])
+        if national:
+            line += chrome_text(
+                "entry_forecast_you_national_handicap" if handicap else "entry_forecast_you_national",
+                " · national handicap rank {nhrank}/{npairs} · national scratch rank {nrank}/{npairs}"
+                if handicap else " · national rank {nrank}/{npairs}",
+            ).format(
+                nhrank=own.get("National_Handicap_Rank_Forecast"),
+                nrank=own.get("National_Rank_Forecast"), npairs=national["pairs"],
+            )
+        st.markdown(line)
     streamlitlib.ShowDataFrameTable(df, key=f"entry_forecast_{group_session_id}", height_rows=min(df.height, 25))
     for warning in forecast.get("warnings") or []:
         st.caption(str(warning))

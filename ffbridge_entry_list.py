@@ -246,7 +246,10 @@ def forecast_group_session(
         else:
             for entry, pair in zip(entries, entrants):
                 entry["bonus"] = handicap.pair_bonus(rule, [player["iv"] for player in pair["players"]])
-    result = entries_forecast.forecast_entries(entries, day, sims=sims)
+    series_id = entries_forecast.series_for_label(f"{meta.get('label') or ''} {meta.get('description') or ''}")
+    result = entries_forecast.forecast_entries(
+        entries, day, sims=sims, national_series=series_id, club_code=meta.get("club_code"),
+    )
     result["handicap_rule"] = rule
     if handicap_note:
         result["warnings"].append(handicap_note)
@@ -312,5 +315,8 @@ def entries_with_forecast(
         row["scoring"] = forecast.get("scoring")
         row["handicap_forecast_rank"] = own.get("Handicap_Rank_Forecast") if own else None
         row["handicap_forecast_pct"] = own.get("Handicap_Pct_Forecast") if own else None
+        row["national_pairs"] = (forecast.get("national") or {}).get("pairs")
+        row["national_forecast_rank"] = own.get("National_Rank_Forecast") if own else None
+        row["national_handicap_forecast_rank"] = own.get("National_Handicap_Rank_Forecast") if own else None
         row["entry_list_read_at"] = forecast.get("entry_list_read_at")
     return rows

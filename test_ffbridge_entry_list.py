@@ -61,7 +61,7 @@ class EntryListTests(unittest.TestCase):
 
         captured = {}
 
-        def fake_predict(entries, on_date, sims):
+        def fake_predict(entries, on_date, sims, **kwargs):
             captured.update(entries=entries, on_date=on_date, sims=sims)
             return {"rows": [], "warnings": []}
 
@@ -80,13 +80,14 @@ class EntryListTests(unittest.TestCase):
 
         captured = {}
 
-        def fake_predict(entries, on_date, sims):
-            captured.update(entries=entries)
+        def fake_predict(entries, on_date, sims, **kwargs):
+            captured.update(entries=entries, **kwargs)
             return {"rows": [], "warnings": []}
 
         with patch.object(entry_list, "_api_get", side_effect=fake), \
                 patch.object(entry_list.entries_forecast, "forecast_entries", side_effect=fake_predict):
             out = entry_list.forecast_group_session("438338", sims=500)
+        self.captured = captured
         return out, captured["entries"]
 
     def test_roy_rene_first_tuesday_gets_bonuses_from_team_iv(self):
@@ -108,6 +109,9 @@ class EntryListTests(unittest.TestCase):
         out, entries = self._forecast_with(session, teams)
         self.assertEqual(out["handicap_rule"], "per_player")
         self.assertEqual([entry["bonus"] for entry in entries], [4.0, 15.0])
+        # National places are modelled on the Octopus series, replacing this club.
+        self.assertEqual(self.captured["national_series"], 386)
+        self.assertEqual(self.captured["club_code"], "5802079")
 
     def test_ordinary_session_gets_no_bonus(self):
         teams = {"items": [

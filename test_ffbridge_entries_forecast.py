@@ -165,6 +165,102 @@ class HandicapForecastTests(unittest.TestCase):
             self.predict([{"players": ["0011", "0012"], "bonus": 3.0}, {"players": ["0021", "0022"]}])
 
 
+def _hist(tid, day, club, e1, e2, bonus=None, series=386):
+    return {
+        "tournament_id": tid, "date": f"{day}T00:00:00+02:00", "series_id": series,
+        "club_code": club, "player1_id": f"h{tid}{club}{e1}", "player2_id": f"g{tid}{club}{e2}",
+        "player1_scratch_elo_before": e1, "player2_scratch_elo_before": e2, "iv_bonus": bonus,
+    }
+
+
+def _national_results(extra):
+    return pl.concat([_results().collect(), pl.DataFrame(extra)], how="diagonal").lazy()
+
+
+class NationalFieldTests(unittest.TestCase):
+    def test_series_from_club_labels(self):
+        self.assertEqual(ep.series_for_label("Simultané Octopus"), 386)
+        self.assertEqual(ep.series_for_label("SIMULTANET"), 384)
+        self.assertEqual(ep.series_for_label("Roy René"), 5)
+        self.assertEqual(ep.series_for_label("Rondes de France"), 3)
+        self.assertEqual(ep.series_for_label("Ronde de France"), 3)
+        self.assertEqual(ep.series_for_label("Simultane Val de Seine"), 499)
+        self.assertEqual(ep.series_for_label("FESTIVAL DES SIMULTANÉS"), 868)
+        self.assertIsNone(ep.series_for_label("Tournoi de régularité"))
+
+    def test_uses_latest_same_weekday_session_and_drops_own_club(self):
+        # 2026-10-29 is a Thursday: 22 Oct (Thu) is used, not 26 Oct (Mon).
+        rows = [
+            _hist("s22", "2026-10-22", "5802079", 1500.0, 1500.0, 6.0),
+            _hist("s22", "2026-10-22", "5500077", 1600.0, 1600.0, 3.0),
+            _hist("s22", "2026-10-22", "5500077", 1400.0, 1400.0, 9.0),
+            _hist("s26", "2026-10-26", "5500077", 1500.0, 1500.0, 6.0),
+        ]
+        field = ep.historical_field(pl.DataFrame(rows).lazy(), 386, "2026-10-29", "5802079", handicap=True)
+        self.assertEqual(field["model_session_id"], "s22")
+        self.assertEqual(field["other_club_pairs"], 2)
+        self.assertEqual(field["replaced_own_club_pairs"], 1)
+        # Predicted against their own club: 100 Elo either side of its mean.
+        self.assertAlmostEqual(field["pct"][0] - 50.0, 100 * ep.PCT_PER_ELO, places=3)
+        self.assertEqual(list(field["bonus"]), [3.0, 9.0])
+
+    def test_handicap_field_skips_sessions_with_missing_bonuses(self):
+        rows = [
+            _hist("s22", "2026-10-22", "5500077", 1600.0, 1600.0, None),
+            _hist("s15", "2026-10-15", "5500077", 1600.0, 1600.0, 3.0),
+        ]
+        results = pl.DataFrame(rows).lazy()
+        self.assertEqual(ep.historical_field(results, 386, "2026-10-29", None, handicap=True)["model_session_id"], "s15")
+        self.assertEqual(ep.historical_field(results, 386, "2026-10-29", None, handicap=False)["model_session_id"], "s22")
+
+    def test_roy_rene_first_tuesday_uses_earlier_first_tuesdays_only(self):
+        rows = [
+            _hist("rr27", "2026-10-27", "5500077", 1500.0, 1500.0, 0.0, series=5),
+            _hist("rr06", "2026-10-06", "5500077", 1500.0, 1500.0, 7.0, series=5),
+        ]
+        results = pl.DataFrame(rows).lazy()
+        self.assertEqual(ep.historical_field(results, 5, "2026-11-03", None, handicap=True)["model_session_id"], "rr06")
+        self.assertEqual(ep.historical_field(results, 5, "2026-11-10", None, handicap=False)["model_session_id"], "rr27")
+
+    def test_national_places_put_a_dominant_pair_first(self):
+        places = ep.national_places(np.array([80.0, 50.0]), np.full(50, 50.0), 2000, seed=3)
+        self.assertEqual(places["rank"][0], 1)
+        self.assertEqual(places["low"][0], 1)
+        self.assertGreater(places["p_top10"][0], 0.99)
+        self.assertTrue(1 <= places["expected"][1] <= 52)
+
+    def test_forecast_adds_national_scratch_and_handicap_places(self):
+        extra = [_hist("o22", "2026-10-16", "5500077", 1500.0 + 10 * i, 1500.0, float(i % 8)) for i in range(30)]
+        out = ep.forecast_entries(
+            [
+                {"players": ["0011", "0012"], "bonus": 0.0},
+                {"players": ["0021", "0022"], "bonus": 6.0},
+                {"players": ["0031", "0032"], "bonus": 16.0},
+            ],
+            "2026-10-23",
+            results=_national_results(extra),
+            sims=1000,
+            national_series=386,
+            club_code="5802079",
+        )
+        self.assertEqual(out["national"]["pairs"], 33)
+        self.assertEqual(out["national"]["model_session_id"], "o22")
+        self.assertIn("National_Handicap_Rank_Forecast", out["columns"])
+        for row in out["rows"]:
+            self.assertTrue(1 <= row["National_Rank_Forecast"] <= 33)
+            self.assertTrue(1 <= row["National_Handicap_Rank_Forecast"] <= 33)
+            self.assertGreaterEqual(row["National_Rank_Forecast"], row["Rank_Forecast"])
+
+    def test_no_session_to_model_on_gives_a_warning(self):
+        out = ep.forecast_entries(
+            [["0011", "0012"], ["0021", "0022"]], "2026-10-23",
+            results=_national_results([_hist("o", "2026-10-15", "5500077", 1500.0, 1500.0)]),
+            sims=500, national_series=386,
+        )
+        self.assertIsNone(out["national"])
+        self.assertTrue(any("No national forecast" in w for w in out["warnings"]))
+
+
 class SimulationTests(unittest.TestCase):
     def test_equal_pairs_split_wins_evenly(self):
         sim = ep.simulate_ranks(np.array([50.0, 50.0, 50.0, 50.0]), 6.0, 20000, seed=1)
