@@ -2540,12 +2540,12 @@ def club_session_id_on_change() -> None:
             st.session_state.sql_query_mode = False
 
 
+ASSISTANT_LOGO_URL = 'https://github.com/BSalita/ffbridge-postmortem/blob/master/assets/logo_assistant.gif?raw=true' # must have raw=true for github url.
+
+
 def render_sidebar_brand(title: str) -> None:
     """Gif and short title at the top of the sidebar, as in MortyBridgeChatbot."""
-    logo_url = st.session_state.get(
-        "assistant_logo",
-        "https://github.com/BSalita/ffbridge-postmortem/blob/master/assets/logo_assistant.gif?raw=true",
-    )
+    logo_url = st.session_state.get("assistant_logo", ASSISTANT_LOGO_URL)
     st.sidebar.markdown(
         (
             '<div style="display:flex;align-items:center;gap:0.6rem;margin:0 0 0.75rem 0;">'
@@ -2791,7 +2791,7 @@ def app_info() -> None:
 
 def main() -> None:
     """Main application entry point"""
-    st.set_page_config(layout="wide", initial_sidebar_state="expanded")
+    st.set_page_config(page_icon=ASSISTANT_LOGO_URL, layout="wide", initial_sidebar_state="expanded")
     if 'app' not in st.session_state:
         st.session_state.app = FFBridgeApp()
     st.session_state.app.main()
@@ -2807,7 +2807,7 @@ class FFBridgeApp(PostmortemBase):
     
     def main(self):
         """Main application entry point - shows Morty messages on first load."""
-        st.set_page_config(layout="wide", initial_sidebar_state="expanded")
+        st.set_page_config(page_icon=ASSISTANT_LOGO_URL, layout="wide", initial_sidebar_state="expanded")
         # Inject CSS for green Go button FIRST, before any content renders.
         # This prevents the red flash when the button first appears.
         self._inject_sidebar_button_css()
@@ -2954,7 +2954,7 @@ class FFBridgeApp(PostmortemBase):
 
     def initialize_website_specific(self):
         """Initialize FFBridge-specific components."""
-        st.session_state.assistant_logo = 'https://github.com/BSalita/ffbridge-postmortem/blob/master/assets/logo_assistant.gif?raw=true'
+        st.session_state.assistant_logo = ASSISTANT_LOGO_URL
         st.session_state.guru_logo = 'https://github.com/BSalita/ffbridge-postmortem/blob/master/assets/logo_guru.png?raw=true'
         st.session_state.game_name = 'ffbridge'
         
