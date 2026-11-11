@@ -3319,7 +3319,6 @@ class FFBridgeApp(PostmortemBase):
                         attach_hand_expectations(
                             get_session_duckdb_connection(),
                             st.session_state.df,
-                            st.session_state.session_id,
                         )
 
         # Other Morty websites
