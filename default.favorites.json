@@ -108,6 +108,21 @@
 					"help": "Afficher les prédictions de l'IA"
 				}
 			}
+		},
+		"Hand_Expectations": {
+			"title": "Hand Expectations",
+			"help": "Show trick taking expectations before bidding begins",
+			"comment": "No chip: this button is only in the Streamlit app, which builds the hand_expectations table when it is clicked.",
+			"prompts": [
+				"@About",
+				"@Hand_Expectations"
+			],
+			"i18n": {
+				"fr": {
+					"title": "Espérances des mains",
+					"help": "Afficher les espérances de levées avant le début des enchères"
+				}
+			}
 		}
 	},
 	"Chrome": {
@@ -136,6 +151,7 @@
 		"no_favorites": "No favorites configuration found. Cannot generate report.",
 		"report_error": "Error generating report from favorites: {error}",
 		"preparing_report": "Preparing Bridge Game Postmortem Report...",
+		"hand_expectations_spinner": "Calculating hand expectations...",
 		"pct_bridgeplus": "Percentages are provisional, from the organizer's Bridge+ results: FFBridge has not published this game yet, and other clubs may still be playing these deals.",
 		"pct_unpublished": "FFBridge has not published percentages for this game yet, so they show as 0. Open the report again once they are published.",
 		"sidebar_title": "FFBridge Postmortem",
@@ -211,6 +227,7 @@
 				"no_favorites": "Configuration des favoris introuvable. Impossible de générer le rapport.",
 				"report_error": "Erreur lors de la génération du rapport à partir des favoris : {error}",
 				"preparing_report": "Préparation du rapport de postmortem...",
+				"hand_expectations_spinner": "Calcul des espérances des mains...",
 				"pct_bridgeplus": "Pourcentages provisoires, issus des résultats Bridge+ de l'organisateur : la FFB n'a pas encore publié cette séance, et d'autres clubs jouent peut-être encore ces donnes.",
 				"pct_unpublished": "La FFB n'a pas encore publié les pourcentages de cette séance : ils valent 0. Rouvrez le rapport une fois qu'ils seront publiés.",
 				"sidebar_title": "Postmortem FFBridge",
@@ -1945,6 +1962,23 @@
 					"fr": {
 						"title": "Statistiques des prédictions de contrat par contrat regroupé",
 						"help": "**Statistiques des prédictions de contrat par numéro de donne, regroupées par contrat. Expérimental. Prédictions faites avant le début de la partie.**"
+					}
+				}
+			},
+			"Hand_Expectations": {
+				"title": "Hand Expectations",
+				"help": "**Showing trick taking expectations before bidding begins. For each board, direction and strain, Prob_Taking_n is how often that hand, as declarer, takes exactly n double dummy (DD) tricks when the other 39 cards are shuffled into the three other hands.**",
+				"comment": "Reads the hand_expectations table, not self: the Streamlit app builds it when the Hand Expectations button is clicked. The / prompt keeps this favorite out of the MCP and chatbot lists, which have no such table.",
+				"prompts": [
+					{
+						"prompt": "/hand_expectations",
+						"sql": "SELECT Board, Direction, Strain, Prob_Taking_0, Prob_Taking_1, Prob_Taking_2, Prob_Taking_3, Prob_Taking_4, Prob_Taking_5, Prob_Taking_6, Prob_Taking_7, Prob_Taking_8, Prob_Taking_9, Prob_Taking_10, Prob_Taking_11, Prob_Taking_12, Prob_Taking_13 FROM hand_expectations ORDER BY Board, instr('NESW', Direction), instr('SHDCN', Strain)"
+					}
+				],
+				"i18n": {
+					"fr": {
+						"title": "Espérances des mains",
+						"help": "**Espérances de levées avant le début des enchères. Pour chaque donne, orientation et dénomination, Prob_Taking_n est la fréquence à laquelle cette main, en déclarant, fait exactement n levées en double mort (DD) lorsque les 39 autres cartes sont réparties au hasard entre les trois autres mains.**"
 					}
 				}
 			}

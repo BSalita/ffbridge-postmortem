@@ -167,6 +167,7 @@ from mlBridge.mlBridgeAugmentLib import (
 )
 from mlBridge.mlBridgePostmortemLib import (
     PostmortemBase,
+    attach_hand_expectations,
     chrome_text,
     language_from_accept_language,
     localized_field,
@@ -3314,6 +3315,12 @@ class FFBridgeApp(PostmortemBase):
                     st.session_state.button_title = key
                     if key == "AI_Predictions":
                         _attach_session_predictions()
+                    elif key == "Hand_Expectations":
+                        attach_hand_expectations(
+                            get_session_duckdb_connection(),
+                            st.session_state.df,
+                            st.session_state.session_id,
+                        )
 
         # Other Morty websites
         st.sidebar.markdown("---")
