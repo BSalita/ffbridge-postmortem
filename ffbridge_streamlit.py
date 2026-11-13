@@ -171,6 +171,7 @@ from mlBridge.mlBridgePostmortemLib import (
     chrome_text,
     language_from_accept_language,
     localized_field,
+    when_connection_free,
 )
 #import mlBridgeEndplayLib
 import ffbridge_postmortem_create as pm_create
@@ -511,7 +512,7 @@ def ShowDataFrameTable(df: pl.DataFrame, key: str, query: str = 'SELECT * FROM s
         
         try:
             con = get_session_duckdb_connection()
-            result_df = con.sql(query).pl()
+            result_df = when_connection_free(lambda: con.sql(query).pl())
             st.text(f"Result is a dataframe of {len(result_df)} rows.")
             streamlitlib.ShowDataFrameTable(result_df, key, height_rows=height_rows)
         except Exception as e:
@@ -2738,13 +2739,13 @@ def set_session_self_table(df: pl.DataFrame) -> None:
     load, and a report runs ~40 queries.
     """
     con = get_session_duckdb_connection()
-    con.unregister("self")
-    con.execute('DROP TABLE IF EXISTS "self"')
-    con.register("_self_frame", df)
+    when_connection_free(lambda: con.unregister("self"))
+    when_connection_free(lambda: con.execute('DROP TABLE IF EXISTS "self"'))
+    when_connection_free(lambda: con.register("_self_frame", df))
     try:
-        con.execute('CREATE TABLE "self" AS SELECT * FROM _self_frame')
+        when_connection_free(lambda: con.execute('CREATE TABLE "self" AS SELECT * FROM _self_frame'))
     finally:
-        con.unregister("_self_frame")
+        when_connection_free(lambda: con.unregister("_self_frame"))
 
 
 # Legacy function - now handled by the base class
