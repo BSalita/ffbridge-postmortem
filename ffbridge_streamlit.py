@@ -171,6 +171,7 @@ from mlBridge.mlBridgePostmortemLib import (
     chrome_text,
     language_from_accept_language,
     localized_field,
+    sidebar_ai_auctions_link,
     when_connection_free,
 )
 #import mlBridgeEndplayLib
@@ -3321,6 +3322,7 @@ class FFBridgeApp(PostmortemBase):
                             get_session_duckdb_connection(),
                             st.session_state.df,
                         )
+            sidebar_ai_auctions_link("ffbridge")
 
         # Other Morty websites
         st.sidebar.markdown("---")
